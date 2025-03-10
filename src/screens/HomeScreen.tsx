@@ -156,7 +156,17 @@ const HomeScreen: React.FC = () => {
 
   // Navigate to map view
   const navigateToMapView = () => {
-    navigation.navigate('Map');
+    try {
+      // Navigate to the Map screen that's directly in your stack
+      navigation.navigate('Map');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      Alert.alert(
+        "Navegación no disponible",
+        "No se pudo navegar a la vista de mapa. Por favor, inténtelo de nuevo más tarde.",
+        [{ text: "OK" }]
+      );
+    }
   };
 
   // Navigate to business detail

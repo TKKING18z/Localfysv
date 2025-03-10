@@ -9,6 +9,7 @@ import RegisterScreen from '../screens/RegisterScreen';
 import BusinessDetailScreen from '../screens/BusinessDetailScreen';
 import FavoritesScreen from '../screens/FavoritesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import MapScreen from '../screens/MapScreen'; // Adjust path if needed
 import { AuthProvider } from '../context/AuthContext'; // Asegúrate de que la ruta es correcta
 import { ThemeProvider } from '../context/ThemeContext'; // Asegúrate de que la ruta es correcta
 
@@ -21,7 +22,7 @@ export type RootStackParamList = {
   BusinessDetail: { businessId: string }; 
   Favorites: undefined;
   Profile: undefined;
-  // Add other screens as needed
+  Map: undefined; // Make sure this line exists
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -35,6 +36,14 @@ const StackNavigator = () => (
     <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} options={{headerShown:false}}/>
     <Stack.Screen name="Favorites" component={FavoritesScreen} />
     <Stack.Screen name="Profile" component={ProfileScreen} />
+    <Stack.Screen 
+      name="Map" 
+      component={MapScreen} 
+      options={{ 
+        title: 'Mapa',
+        // ...any other options
+      }} 
+    />
   </Stack.Navigator>
 );
 

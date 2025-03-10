@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
-import { BusinessProvider } from './src/context/BusinessContext';
+import { BusinessProvider } from './src/context/BusinessContext'; // Asegúrate de que esta importación es correcta
 import { LocationProvider } from './src/context/LocationContext';
 import firebase from 'firebase/compat/app';
 import { firebaseConfig } from './src/config/firebase';

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, StatusBar } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, StatusBar, Platform } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MapView, { Marker, PROVIDER_GOOGLE, Region, Callout } from 'react-native-maps';
@@ -30,6 +30,7 @@ const MapScreen: React.FC = () => {
   const mapRef = useRef<MapView>(null);
   
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+  const [mapReady, setMapReady] = useState<boolean>(false);
   const [region, setRegion] = useState<Region>({
     latitude: 13.6929, // Default to El Salvador
     longitude: -89.2182,
@@ -116,6 +117,20 @@ const MapScreen: React.FC = () => {
     return '#007AFF'; // Default blue
   };
 
+  // Add a handler for when the map is ready
+  const handleMapReady = () => {
+    setMapReady(true);
+    // Focus on user location if available
+    if (userLocation) {
+      setTimeout(() => {
+        focusOnUserLocation();
+      }, 500);
+    }
+  };
+
+  // Determine if we should show the map
+  const shouldShowMap = !isLoading || Platform.OS === 'ios';
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
@@ -129,48 +144,52 @@ const MapScreen: React.FC = () => {
       )}
 
       {/* Map */}
-      <MapView
-        ref={mapRef}
-        provider={PROVIDER_GOOGLE}
-        style={styles.map}
-        region={region}
-        onRegionChangeComplete={setRegion}
-        showsUserLocation
-        showsMyLocationButton={false}
-        showsCompass={true}
-        showsScale={true}
-      >
-        {/* Business markers */}
-        {filteredBusinesses.map((business) => {
-          if (!business.location) return null;
-          
-          // Handle location whether it's an object or needs to be parsed
-          const businessLocation = typeof business.location === 'string' 
-            ? JSON.parse(business.location) as Location
-            : business.location as Location;
+      {shouldShowMap && (
+        <MapView
+          ref={mapRef}
+          provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
+          style={styles.map}
+          region={region}
+          onRegionChangeComplete={setRegion}
+          showsUserLocation
+          showsMyLocationButton={false}
+          showsCompass={true}
+          showsScale={true}
+          onMapReady={handleMapReady}
+          toolbarEnabled={false}
+        >
+          {/* Only show markers after map is ready */}
+          {mapReady && filteredBusinesses.map((business) => {
+            if (!business.location) return null;
             
-          if (!businessLocation.latitude || !businessLocation.longitude) return null;
-          
-          return (
-            <Marker
-              key={business.id}
-              coordinate={{
-                latitude: businessLocation.latitude,
-                longitude: businessLocation.longitude,
-              }}
-              onPress={() => handleMarkerPress(business)}
-              pinColor={getMarkerColor(business.category || '')}
-            >
-              <Callout tooltip>
-                <View style={styles.calloutContainer}>
-                  <Text style={styles.calloutTitle}>{business.name}</Text>
-                  <Text style={styles.calloutCategory}>{business.category}</Text>
-                </View>
-              </Callout>
-            </Marker>
-          );
-        })}
-      </MapView>
+            // Handle location whether it's an object or needs to be parsed
+            const businessLocation = typeof business.location === 'string' 
+              ? JSON.parse(business.location) as Location
+              : business.location as Location;
+              
+            if (!businessLocation.latitude || !businessLocation.longitude) return null;
+            
+            return (
+              <Marker
+                key={business.id}
+                coordinate={{
+                  latitude: businessLocation.latitude,
+                  longitude: businessLocation.longitude,
+                }}
+                onPress={() => handleMarkerPress(business)}
+                pinColor={getMarkerColor(business.category || '')}
+              >
+                <Callout tooltip>
+                  <View style={styles.calloutContainer}>
+                    <Text style={styles.calloutTitle}>{business.name}</Text>
+                    <Text style={styles.calloutCategory}>{business.category}</Text>
+                  </View>
+                </Callout>
+              </Marker>
+            );
+          })}
+        </MapView>
+      )}
 
       {/* Back button */}
       <TouchableOpacity style={styles.backButton} onPress={goBack}>
@@ -178,8 +197,12 @@ const MapScreen: React.FC = () => {
       </TouchableOpacity>
       
       {/* My location button */}
-      <TouchableOpacity style={styles.myLocationButton} onPress={focusOnUserLocation}>
-        <MaterialIcons name="my-location" size={24} color="#007AFF" />
+      <TouchableOpacity 
+        style={styles.myLocationButton} 
+        onPress={focusOnUserLocation}
+        disabled={!mapReady}
+      >
+        <MaterialIcons name="my-location" size={24} color={mapReady ? "#007AFF" : "#AAAAAA"} />
       </TouchableOpacity>
 
       {/* Business info panel */}

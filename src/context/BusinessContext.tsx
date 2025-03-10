@@ -1,8 +1,16 @@
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import { collection, getDocs, doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 
 // Types
+export interface BusinessLocation {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  accuracy?: number;
+}
+
 export interface BusinessImage {
   id: string;
   url: string;
@@ -15,10 +23,10 @@ export interface Business {
   description: string;
   category: string;
   rating: number;
-  images: BusinessImage[]; // Ahora siempre será un array, incluso vacío
+  images: BusinessImage[]; // Siempre será un array, incluso vacío
   isOpen: boolean;
   isNew: boolean;
-  location: string;
+  location: string | BusinessLocation; // Puede ser string o objeto de ubicación
   phone?: string;
   email?: string;
   address?: string;
@@ -67,13 +75,18 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         }));
     }
     
-    // Si no hay imágenes válidas, crear una imagen predeterminada basada en el ID del negocio
-    if (normalizedImages.length === 0) {
-      normalizedImages = [{
-        id: `default-${id}`,
-        url: `business_${id}.jpg`,
-        isMain: true
-      }];
+    // Manejo mejorado de location
+    let normalizedLocation = data.location || '';
+    
+    // Verifica que location sea una cadena antes de intentar analizarla
+    if (typeof normalizedLocation === 'string' && normalizedLocation.trim().startsWith('{')) {
+      try {
+        // Intenta analizar si es una cadena JSON
+        normalizedLocation = JSON.parse(normalizedLocation);
+      } catch (error) {
+        // Si hay un error al analizar, mantén la cadena original
+        console.warn(`Error parsing location string for business ${id}:`, error);
+      }
     }
     
     // Crear objeto de negocio normalizado
@@ -86,7 +99,7 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       images: normalizedImages,
       isOpen: !!data.isOpen,
       isNew: !!data.isNew,
-      location: data.location || '',
+      location: normalizedLocation,
       phone: data.phone || '',
       email: data.email || '',
       address: data.address || '',
@@ -99,8 +112,10 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   const fetchBusinesses = async () => {
     setLoading(true);
     try {
-      const businessesCollection = collection(db, 'businesses');
-      const businessesSnapshot = await getDocs(businessesCollection);
+      const businessesSnapshot = await firebase.firestore()
+        .collection('businesses')
+        .get();
+        
       const businessesList: Business[] = [];
       const categoriesSet = new Set<string>();
 
@@ -125,12 +140,14 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   // Add getBusinessById function
   const getBusinessById = async (id: string): Promise<Business | null> => {
     try {
-      const businessDoc = doc(db, 'businesses', id);
-      const businessSnapshot = await getDoc(businessDoc);
+      const businessDoc = await firebase.firestore()
+        .collection('businesses')
+        .doc(id)
+        .get();
       
-      if (businessSnapshot.exists()) {
-        const data = businessSnapshot.data();
-        return normalizeBusinessData(businessSnapshot.id, data);
+      if (businessDoc.exists) {
+        const data = businessDoc.data();
+        return normalizeBusinessData(businessDoc.id, data);
       }
       return null;
     } catch (error) {
@@ -143,33 +160,30 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   useEffect(() => {
     setLoading(true);
     
-    const businessesRef = collection(db, 'businesses');
-    const unsubscribe = onSnapshot(
-      businessesRef,
-      (snapshot) => {
-        const businessList: Business[] = [];
-        const categoriesSet = new Set<string>();
-        
-        snapshot.forEach((doc) => {
-          const data = doc.data();
-          const business = normalizeBusinessData(doc.id, data);
+    const unsubscribe = firebase.firestore()
+      .collection('businesses')
+      .onSnapshot(
+        (snapshot) => {
+          const businessList: Business[] = [];
+          const categoriesSet = new Set<string>();
           
-          businessList.push(business);
-          if (data.category) categoriesSet.add(data.category);
-        });
-        
-        setBusinesses(businessList);
-        setCategories(Array.from(categoriesSet));
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error in business listener:", error);
-        setLoading(false);
-      }
-    );
-    
-    // Load favorites from async storage or similar
-    // For now just initialize as empty array
+          snapshot.forEach((doc) => {
+            const data = doc.data();
+            const business = normalizeBusinessData(doc.id, data);
+            
+            businessList.push(business);
+            if (data.category) categoriesSet.add(data.category);
+          });
+          
+          setBusinesses(businessList);
+          setCategories(Array.from(categoriesSet));
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Error in business listener:", error);
+          setLoading(false);
+        }
+      );
     
     return () => unsubscribe();
   }, []);
@@ -234,3 +248,5 @@ export const useBusinesses = () => {
   }
   return context;
 };
+
+export default BusinessContext;
