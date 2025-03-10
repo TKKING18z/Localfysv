@@ -94,6 +94,14 @@ const LoginScreen: React.FC = () => {
         ]).start();
     };
 
+    const navigateToRegister = () => {
+        navigation.navigate('Register');  // This is OK since Register is in the same Auth stack
+    };
+    
+    const navigateToForgotPassword = () => {
+        navigation.navigate('ForgotPassword');  // This is OK since ForgotPassword is in the same Auth stack
+    };
+
     const handleLogin = async () => {
         handleButtonPress();
         
@@ -108,7 +116,6 @@ const LoginScreen: React.FC = () => {
         try {
             const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
             console.log("Login exitoso:", userCredential.user);
-            navigation.navigate('Home');
         } catch (error: any) {
             console.log("Error durante el login:", error);
             Alert.alert('Error', error.message);
@@ -197,7 +204,7 @@ const LoginScreen: React.FC = () => {
                     
                     <TouchableOpacity
                         style={styles.forgotPassword}
-                        onPress={() => navigation.navigate('ForgotPassword')}
+                        onPress={navigateToForgotPassword}
                     >
                         <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
                     </TouchableOpacity>
@@ -241,7 +248,7 @@ const LoginScreen: React.FC = () => {
                 >
                     <Text style={styles.footerText}>¿No tienes una cuenta?</Text>
                     <TouchableOpacity 
-                        onPress={() => navigation.navigate('Register')}
+                        onPress={navigateToRegister}
                         activeOpacity={0.7}
                     >
                         <Text style={styles.registerText}>Regístrate</Text>

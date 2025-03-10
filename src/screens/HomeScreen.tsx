@@ -169,7 +169,7 @@ const HomeScreen: React.FC = () => {
   const handleLogout = async () => {
     try {
       await firebase.auth().signOut();
-      navigation.navigate('Login');
+      // No need to navigate to Login, Auth Navigator will handle this automatically
     } catch (error) {
       console.error('Error logging out:', error);
       Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
@@ -380,7 +380,7 @@ const HomeScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItem} 
-          onPress={navigateToMapView}
+          onPress={() => navigation.navigate('Map')}
         >
           <MaterialIcons name="explore" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Explorar</Text>

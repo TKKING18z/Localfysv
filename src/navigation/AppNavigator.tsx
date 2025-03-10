@@ -177,14 +177,13 @@ const AppNavigator = () => {
         {user ? (
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
-            <Stack.Screen 
-              name="BusinessDetail" 
-              component={BusinessDetailScreen}
-              options={{ 
-                headerShown: false,
-                presentation: 'card',
-              }}
-            />
+            <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
+            
+            {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
+            <Stack.Screen name="Map" component={MapScreen} />
+            <Stack.Screen name="Favorites" component={FavoritesScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthStack} />
