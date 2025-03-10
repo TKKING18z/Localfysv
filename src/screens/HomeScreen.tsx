@@ -10,7 +10,8 @@ import {
   TextInput,
   RefreshControl,
   StatusBar,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';

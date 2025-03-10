@@ -1,237 +1,125 @@
-import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
+import React, { createContext, useState, useContext, useEffect, useCallback, ReactNode } from 'react';
+import { useLocationContext } from './LocationContext';
+import { firebaseService } from '../services/firebaseService';
+import { useBusinesses as useBusinessesHook } from '../hooks/useBusinesses';
 
-// Types
-export interface BusinessLocation {
-  latitude: number;
-  longitude: number;
-  address?: string;
-  accuracy?: number;
-}
-
-export interface BusinessImage {
-  id: string;
-  url: string;
-  isMain: boolean;
-}
-
+// Business interface (update as needed)
 export interface Business {
   id: string;
   name: string;
   description: string;
   category: string;
-  rating: number;
-  images: BusinessImage[]; // Siempre será un array, incluso vacío
-  isOpen: boolean;
-  isNew: boolean;
-  location: string | BusinessLocation; // Puede ser string o objeto de ubicación
-  phone?: string;
-  email?: string;
-  address?: string;
-  createdAt: Date;
-  updatedAt: Date;
+  address: string;
+  phone: string;
+  website?: string;
+  hours?: string;
+  location: any; // Can be string (JSON) or object with lat/lng
+  images?: Array<{ url: string, isMain?: boolean }>;
+  ownerId?: string;
+  rating?: number;
+  reviews?: number;
+  createdAt?: any;
+  updatedAt?: any;
 }
 
+// Business Context interface
 interface BusinessContextType {
   businesses: Business[];
   filteredBusinesses: Business[];
   categories: string[];
   selectedCategory: string | null;
-  loading: boolean;
-  favorites: string[];
-  
   setSelectedCategory: (category: string | null) => void;
+  loading: boolean;
+  error: string | null;
+  hasMore: boolean;
   refreshBusinesses: () => Promise<void>;
+  loadMoreBusinesses: () => Promise<void>;
   toggleFavorite: (businessId: string) => void;
   isFavorite: (businessId: string) => boolean;
+  favoriteBusinesses: Business[];
+  loadingFavorites: boolean;
   getBusinessById: (id: string) => Promise<Business | null>;
+  favorites: string[]; // Add this property to fix the error
 }
 
-const BusinessContext = createContext<BusinessContextType | undefined>(undefined);
+// Create context with a default empty value
+const BusinessContext = createContext<BusinessContextType>({} as BusinessContextType);
 
-export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [businesses, setBusinesses] = useState<Business[]>([]);
-  const [filteredBusinesses, setFilteredBusinesses] = useState<Business[]>([]);
+// The provider component
+export const BusinessProvider: React.FC<{children: ReactNode}> = ({ children }) => {
+  // Use our custom hook
+  const {
+    businesses,
+    loading,
+    error,
+    hasMore,
+    refresh: refreshBusinesses,
+    loadMore: loadMoreBusinesses,
+    changeCategory,
+    currentCategory: selectedCategory,
+    isFavorite,
+    toggleFavorite,
+    favoriteBusinesses,
+    loadingFavorites
+  } = useBusinessesHook();
+  
+  // Location context for filtering by distance
+  const { userLocation } = useLocationContext();
+  
+  // Extract unique categories from businesses
   const [categories, setCategories] = useState<string[]>([]);
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
   const [favorites, setFavorites] = useState<string[]>([]);
+
+  // Update categories when businesses change
+  useEffect(() => {
+    if (businesses && businesses.length > 0) {
+      const uniqueCategories = Array.from(
+        new Set(businesses.map(business => business.category))
+      ).filter(Boolean);
+      
+      setCategories(uniqueCategories);
+    }
+  }, [businesses]);
   
-  // Función para normalizar datos de negocios
-  const normalizeBusinessData = (id: string, data: any): Business => {
-    // Verificar si images existe y es un array; si no, inicializar como array vacío
-    let normalizedImages: BusinessImage[] = [];
-    
-    if (data.images && Array.isArray(data.images)) {
-      // Filtrar solo imágenes válidas con URL
-      normalizedImages = data.images
-        .filter((img: any) => img && typeof img === 'object' && img.url && typeof img.url === 'string')
-        .map((img: any) => ({
-          id: img.id || `img-${Math.random().toString(36).substr(2, 9)}`,
-          url: img.url,
-          isMain: !!img.isMain
-        }));
-    }
-    
-    // Manejo mejorado de location
-    let normalizedLocation = data.location || '';
-    
-    // Verifica que location sea una cadena antes de intentar analizarla
-    if (typeof normalizedLocation === 'string' && normalizedLocation.trim().startsWith('{')) {
-      try {
-        // Intenta analizar si es una cadena JSON
-        normalizedLocation = JSON.parse(normalizedLocation);
-      } catch (error) {
-        // Si hay un error al analizar, mantén la cadena original
-        console.warn(`Error parsing location string for business ${id}:`, error);
-      }
-    }
-    
-    // Crear objeto de negocio normalizado
-    return {
-      id,
-      name: data.name || '',
-      description: data.description || '',
-      category: data.category || '',
-      rating: typeof data.rating === 'number' ? data.rating : 0,
-      images: normalizedImages,
-      isOpen: !!data.isOpen,
-      isNew: !!data.isNew,
-      location: normalizedLocation,
-      phone: data.phone || '',
-      email: data.email || '',
-      address: data.address || '',
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
-    };
-  };
+  // Get filtered businesses based on selected category
+  const filteredBusinesses = selectedCategory
+    ? businesses.filter(business => business.category === selectedCategory)
+    : businesses;
   
-  // Fetch businesses from Firestore
-  const fetchBusinesses = async () => {
-    setLoading(true);
-    try {
-      const businessesSnapshot = await firebase.firestore()
-        .collection('businesses')
-        .get();
-        
-      const businessesList: Business[] = [];
-      const categoriesSet = new Set<string>();
-
-      businessesSnapshot.forEach(doc => {
-        const data = doc.data();
-        const business = normalizeBusinessData(doc.id, data);
-        
-        businessesList.push(business);
-        if (data.category) categoriesSet.add(data.category);
-      });
-
-      setBusinesses(businessesList);
-      setFilteredBusinesses(businessesList);
-      setCategories(Array.from(categoriesSet));
-    } catch (error) {
-      console.error('Error fetching businesses:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // Add getBusinessById function
+  // Get a single business by ID
   const getBusinessById = async (id: string): Promise<Business | null> => {
     try {
-      const businessDoc = await firebase.firestore()
-        .collection('businesses')
-        .doc(id)
-        .get();
+      const response = await firebaseService.businesses.getById(id);
       
-      if (businessDoc.exists) {
-        const data = businessDoc.data();
-        return normalizeBusinessData(businessDoc.id, data);
+      if (response.success && response.data) {
+        return response.data;
       }
+      
       return null;
     } catch (error) {
-      console.error('Error fetching business:', error);
+      console.error('Error getting business by ID:', error);
       return null;
     }
   };
-
-  // Set up real-time listener for businesses
-  useEffect(() => {
-    setLoading(true);
-    
-    const unsubscribe = firebase.firestore()
-      .collection('businesses')
-      .onSnapshot(
-        (snapshot) => {
-          const businessList: Business[] = [];
-          const categoriesSet = new Set<string>();
-          
-          snapshot.forEach((doc) => {
-            const data = doc.data();
-            const business = normalizeBusinessData(doc.id, data);
-            
-            businessList.push(business);
-            if (data.category) categoriesSet.add(data.category);
-          });
-          
-          setBusinesses(businessList);
-          setCategories(Array.from(categoriesSet));
-          setLoading(false);
-        },
-        (error) => {
-          console.error("Error in business listener:", error);
-          setLoading(false);
-        }
-      );
-    
-    return () => unsubscribe();
-  }, []);
   
-  // Filter businesses when category changes
-  useEffect(() => {
-    if (selectedCategory) {
-      setFilteredBusinesses(
-        businesses.filter(business => business.category === selectedCategory)
-      );
-    } else {
-      setFilteredBusinesses(businesses);
-    }
-  }, [selectedCategory, businesses]);
-  
-  // Refresh businesses manually
-  const refreshBusinesses = async () => {
-    return fetchBusinesses();
-  };
-  
-  // Toggle favorite status
-  const toggleFavorite = (businessId: string) => {
-    setFavorites(prevFavorites => {
-      if (prevFavorites.includes(businessId)) {
-        return prevFavorites.filter(id => id !== businessId);
-      } else {
-        return [...prevFavorites, businessId];
-      }
-    });
-  };
-  
-  // Check if a business is favorited
-  const isFavorite = (businessId: string) => {
-    return favorites.includes(businessId);
-  };
-  
+  // The context value
   const value = {
     businesses,
     filteredBusinesses,
     categories,
     selectedCategory,
+    setSelectedCategory: changeCategory,
     loading,
-    favorites,
-    setSelectedCategory,
+    error,
+    hasMore,
     refreshBusinesses,
+    loadMoreBusinesses,
     toggleFavorite,
     isFavorite,
-    getBusinessById
+    favoriteBusinesses,
+    loadingFavorites,
+    getBusinessById,
+    favorites
   };
   
   return (
@@ -241,12 +129,11 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   );
 };
 
+// Custom hook to use the business context
 export const useBusinesses = () => {
   const context = useContext(BusinessContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useBusinesses must be used within a BusinessProvider');
   }
   return context;
 };
-
-export default BusinessContext;

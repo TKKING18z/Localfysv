@@ -16,14 +16,15 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import { RootStackParamList, MainTabParamList } from '../navigation/AppNavigator';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import { useBusinesses } from '../context/BusinessContext';
 import { TextInput } from 'react-native-gesture-handler';
 
-type NavigationProps = StackNavigationProp<RootStackParamList>;
+// Create a combined type for navigation which includes both stacks
+type NavigationProps = StackNavigationProp<RootStackParamList & MainTabParamList>;
 
 interface UserProfile {
   uid: string;
@@ -38,7 +39,9 @@ interface UserProfile {
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
-  const { favorites } = useBusinesses(); // Changed from favoriteBusinessIds to favorites
+  const businessContext = useBusinesses();
+  // Fix: Use businesses instead of businessList and add proper typing
+  const favoriteBusinesses = businessContext.businesses?.filter((b: any) => b.isFavorite) || [];
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -127,7 +130,7 @@ const ProfileScreen: React.FC = () => {
           
           // Set user stats
           setUserStats({
-            favorites: favorites.length, // Changed from favoriteBusinessIds to favorites
+            favorites: favoriteBusinesses.length, // Changed to use favoriteBusinesses
             reviews: Math.floor(Math.random() * 10),
             businessesOwned: profile?.userType === 'Propietario' ? Math.floor(Math.random() * 5) + 1 : 0,
             totalViews: Math.floor(Math.random() * 200) + 50
@@ -142,7 +145,7 @@ const ProfileScreen: React.FC = () => {
     };
     
     fetchUserProfile();
-  }, [favorites]); // Changed from favoriteBusinessIds to favorites
+  }, [favoriteBusinesses]); // Changed dependency to favoriteBusinesses
 
   // Mock function to fetch recent activity
   const fetchRecentActivity = async (userId: string) => {
@@ -208,7 +211,8 @@ const ProfileScreen: React.FC = () => {
     setLoading(true);
     try {
       await firebase.auth().signOut();
-      navigation.navigate('Login');
+      // Navigate to Auth instead of Login
+      navigation.navigate('Auth');
     } catch (error) {
       console.error('Error logging out:', error);
       Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
@@ -463,18 +467,24 @@ const ProfileScreen: React.FC = () => {
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.navigate('MainApp')}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Inicio</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.navItem} onPress={() => {}}>
+        <TouchableOpacity 
+          style={styles.navItem} 
+          onPress={() => navigation.navigate('Map')}
+        >
           <MaterialIcons name="explore" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Explorar</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.navItemCenter}>
+        <TouchableOpacity 
+          style={styles.navItemCenter}
+          onPress={() => navigation.navigate('Add')}
+        >
           <View style={styles.navItemCenterButton}>
             <MaterialIcons name="add" size={28} color="white" />
           </View>

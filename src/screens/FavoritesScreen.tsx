@@ -25,7 +25,7 @@ const FavoritesScreen: React.FC = () => {
   const { 
     businesses, 
     loading, 
-    favorites, // Changed from favoriteBusinessIds to favorites
+    favorites, 
     toggleFavorite,
     isFavorite,
     refreshBusinesses
@@ -38,9 +38,9 @@ const FavoritesScreen: React.FC = () => {
   
   // Get favorite businesses
   useEffect(() => {
-    if (businesses.length > 0 && favorites.length > 0) { // Changed from favoriteBusinessIds to favorites
+    if (businesses.length > 0 && favorites && favorites.length > 0) {
       const favs = businesses.filter(business => 
-        favorites.includes(business.id) // Changed from favoriteBusinessIds to favorites
+        favorites.includes(business.id)
       );
       
       // Sort favorites based on selected order
@@ -63,7 +63,7 @@ const FavoritesScreen: React.FC = () => {
     } else {
       setFavoriteBusinesses([]);
     }
-  }, [businesses, favorites, sortOrder]); // Changed from favoriteBusinessIds to favorites
+  }, [businesses, favorites, sortOrder]); 
 
   // Handle refresh
   const onRefresh = useCallback(async () => {
