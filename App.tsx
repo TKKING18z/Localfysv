@@ -1,20 +1,54 @@
+import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import { View, Text, ActivityIndicator, LogBox } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import AppNavigator from './src/navigation/AppNavigator';
+import { BusinessProvider } from './src/context/BusinessContext';
+import { LocationProvider } from './src/context/LocationContext';
+import firebase from 'firebase/compat/app';
+import { firebaseConfig } from './src/config/firebase';
 
-export default function App() {
-  return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
-  );
+// Ignore specific warnings
+LogBox.ignoreLogs([
+  'Setting a timer',
+  'AsyncStorage has been extracted',
+  'Deprecation warning: value provided is not in a recognized RFC2822',
+]);
+
+// Initialize Firebase if not already initialized
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Simulate loading resources
+    const timer = setTimeout(() => {
+      setIsLoading(false);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FF' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={{ marginTop: 16, fontSize: 16, color: '#333333' }}>Cargando Localfy...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <SafeAreaProvider>
+      <LocationProvider>
+        <BusinessProvider>
+          <StatusBar style="dark" />
+          <AppNavigator />
+        </BusinessProvider>
+      </LocationProvider>
+    </SafeAreaProvider>
+  );
+}
