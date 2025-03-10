@@ -3,49 +3,100 @@ import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, LogBox } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
-import { BusinessProvider } from './src/context/BusinessContext'; // Asegúrate de que esta importación es correcta
+import { BusinessProvider } from './src/context/BusinessContext';
 import { LocationProvider } from './src/context/LocationContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from 'firebase/compat/app';
-import { firebaseConfig } from './src/config/firebase';
+import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 
-// Ignore specific warnings
+// Configuración de Firebase
+const firebaseConfig = {
+  apiKey: "AIzaSyC2S36sPSd2XEJmxxkqJ-lQUJc7ySL5Uvw",
+  authDomain: "testlocalfysv25.firebaseapp.com",
+  projectId: "testlocalfysv25",
+  storageBucket: "testlocalfysv25.firebasestorage.app",
+  messagingSenderId: "281205862532",
+  appId: "1:281205862532:web:aa25ca39606dda5db6d2d1",
+  measurementId: "G-Z7V3LK64ZL"
+};
+
+// Ignorar advertencias específicas que no podemos controlar
 LogBox.ignoreLogs([
   'Setting a timer',
   'AsyncStorage has been extracted',
   'Deprecation warning: value provided is not in a recognized RFC2822',
+  'NativeEventEmitter',
+  'ViewPropTypes will be removed'
 ]);
 
-// Initialize Firebase if not already initialized
+// Inicializar Firebase si no está ya inicializado
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
+  const [hasHydrated, setHasHydrated] = useState(false);
+
+  // Restaurar estado desde almacenamiento local
+  const hydrateState = async () => {
+    try {
+      // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
+      await AsyncStorage.getItem('favorites'); // Solo verificamos que podemos acceder
+      
+      // Comprobar si la base de datos de Firebase está accesible
+      await firebase.firestore().collection('test').doc('test').get();
+    } catch (error) {
+      console.error('Error durante la hidratación del estado:', error);
+    } finally {
+      setHasHydrated(true);
+    }
+  };
 
   useEffect(() => {
-    // Simulate loading resources
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 2000);
+    // Simular carga y restauración de estado
+    const prepareApp = async () => {
+      await hydrateState();
+      
+      // Mantener pantalla de carga por al menos 1.5 segundos para mejor UX
+      const timer = setTimeout(() => {
+        setIsLoading(false);
+      }, 1500);
+      
+      return () => clearTimeout(timer);
+    };
 
-    return () => clearTimeout(timer);
+    prepareApp();
   }, []);
 
-  if (isLoading) {
+  if (isLoading || !hasHydrated) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F5F7FF' }}>
+      <View style={{ 
+        flex: 1, 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        backgroundColor: '#F5F7FF' 
+      }}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={{ marginTop: 16, fontSize: 16, color: '#333333' }}>Cargando Localfy...</Text>
+        <Text style={{ 
+          marginTop: 16, 
+          fontSize: 16, 
+          color: '#333333',
+          fontWeight: '500' 
+        }}>
+          Cargando Localfy...
+        </Text>
       </View>
     );
   }
 
   return (
     <SafeAreaProvider>
+      <StatusBar style="dark" />
       <LocationProvider>
         <BusinessProvider>
-          <StatusBar style="dark" />
           <AppNavigator />
         </BusinessProvider>
       </LocationProvider>

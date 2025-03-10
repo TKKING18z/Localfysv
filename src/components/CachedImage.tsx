@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Image, ImageProps, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, ImageProps, ActivityIndicator, ViewStyle } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
 import * as Crypto from 'expo-crypto';
@@ -95,10 +95,23 @@ const CachedImage: React.FC<CachedImageProps> = ({
     loadAndCacheImage();
   }, [uri, cacheKey, resizeWidth]);
 
+  // Create a safe style object for View components
+  const safeViewStyle = StyleSheet.flatten([
+    styles.imageContainer,
+    style
+  ]) as ViewStyle;
+
+  // Create a safe fallback style
+  const safeFallbackStyle = StyleSheet.flatten([
+    styles.fallbackContainer, 
+    { backgroundColor: placeholderColor }, 
+    style
+  ]) as ViewStyle;
+
   // Show fallback view when there's an error or no URI
   if (!uri || error) {
     return (
-      <View style={[styles.fallbackContainer, { backgroundColor: placeholderColor }, style]}>
+      <View style={safeFallbackStyle}>
         <Text style={styles.fallbackText}>
           {fallbackText ? fallbackText.charAt(0).toUpperCase() : 'L'}
         </Text>
@@ -107,7 +120,7 @@ const CachedImage: React.FC<CachedImageProps> = ({
   }
 
   return (
-    <View style={[styles.imageContainer, style]}>
+    <View style={safeViewStyle}>
       {loading && showLoading && (
         <ActivityIndicator style={styles.loader} color="#007AFF" size="small" />
       )}

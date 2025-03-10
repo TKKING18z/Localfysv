@@ -1,12 +1,11 @@
 import React, { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import CachedImage from './CachedImage';
+import { Image } from 'expo-image';
 import { Business } from '../context/BusinessContext';
 
 interface BusinessCardProps {
   business: Business;
-  businessImage: string | null;
   isFavorite: boolean;
   distance?: string;
   onPress: () => void;
@@ -18,12 +17,46 @@ const cardWidth = (width - 48) / 2; // 2 columns with padding
 
 const BusinessCard: React.FC<BusinessCardProps> = ({
   business,
-  businessImage,
   isFavorite,
   distance,
   onPress,
   onFavoritePress
 }) => {
+  // Determinar la imagen a mostrar
+  const getBusinessImage = () => {
+    if (business.images && business.images.length > 0) {
+      // Primero busca la imagen marcada como principal
+      const mainImage = business.images.find(img => img.isMain);
+      if (mainImage && mainImage.url) {
+        return mainImage.url;
+      }
+      // Si no hay imagen principal, usa la primera
+      if (business.images[0].url) {
+        return business.images[0].url;
+      }
+    }
+    return null;
+  };
+  
+  // Obtener imagen o null si no hay
+  const businessImage = getBusinessImage();
+  
+  // Generar un color basado en el nombre del negocio para el placeholder
+  const getPlaceholderColor = () => {
+    const colors = [
+      '#007AFF', '#34C759', '#FF9500', '#FF2D55', '#AF52DE', 
+      '#5856D6', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
+    ];
+    const sum = business.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[sum % colors.length];
+  };
+  
+  // Obtener la primera letra del nombre del negocio
+  const getFirstLetter = () => {
+    return business.name.charAt(0).toUpperCase();
+  };
+
+  // Truncar nombre si es muy largo
   const truncateName = (name: string, maxLength: number = 20) => {
     if (name.length <= maxLength) return name;
     return name.substring(0, maxLength) + '...';
@@ -35,15 +68,22 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
       onPress={onPress}
       activeOpacity={0.9}
     >
-      {/* Background image */}
+      {/* Background image or placeholder */}
       <View style={styles.imageContainer}>
-        <CachedImage
-          uri={businessImage}
-          fallbackText={business.name}
-          resizeWidth={400}
-          style={styles.image}
-          cacheKey={`business-${business.id}`}
-        />
+        {businessImage ? (
+          <Image
+            source={{ uri: businessImage }}
+            style={styles.image}
+            contentFit="cover"
+            cachePolicy="memory-disk"
+            placeholder={{ color: getPlaceholderColor() }}
+            transition={200}
+          />
+        ) : (
+          <View style={[styles.placeholderContainer, { backgroundColor: getPlaceholderColor() }]}>
+            <Text style={styles.placeholderText}>{getFirstLetter()}</Text>
+          </View>
+        )}
         
         {/* Favorite button */}
         <TouchableOpacity
@@ -65,7 +105,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
           {truncateName(business.name)}
         </Text>
         <Text style={styles.category} numberOfLines={1}>
-          {business.category}
+          {business.category || "Sin categoría"}
         </Text>
         
         {/* Distance (if available) */}
@@ -101,6 +141,20 @@ const styles = StyleSheet.create({
     height: '100%',
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
+    backgroundColor: '#E1E1E1',
+  },
+  placeholderContainer: {
+    width: '100%',
+    height: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+  },
+  placeholderText: {
+    fontSize: 36,
+    fontWeight: 'bold',
+    color: 'white',
   },
   favoriteButton: {
     position: 'absolute',
@@ -136,9 +190,4 @@ const styles = StyleSheet.create({
 });
 
 // Using memo to prevent unnecessary re-renders
-export default memo(BusinessCard, (prevProps, nextProps) => {
-  return prevProps.business.id === nextProps.business.id &&
-         prevProps.isFavorite === nextProps.isFavorite &&
-         prevProps.businessImage === nextProps.businessImage &&
-         prevProps.distance === nextProps.distance;
-});
+export default memo(BusinessCard);

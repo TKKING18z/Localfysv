@@ -1,10 +1,10 @@
-// src/navigation/AppNavigator.tsx
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-import { View, TouchableOpacity } from 'react-native';
+import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import firebase from 'firebase/compat/app';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -17,38 +17,36 @@ import ProfileScreen from '../screens/ProfileScreen';
 import MapScreen from '../screens/MapScreen';
 import AddBusinessScreen from '../screens/AddBusinessScreen';
 
-// Contexts
-import { AuthProvider, useAuth } from '../context/AuthContext';
-import { ThemeProvider } from '../context/ThemeContext';
-
-// Define the root stack parameter list
+// Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
-  MainApp: undefined;
-  BusinessDetail: { businessId: string }; 
-  Map: undefined;
-  MainTab: undefined;
+  MainTabs: undefined;  // No params needed for tab navigator
+  BusinessDetail: { businessId: string };
+  // Individual screens that can be accessed directly
   Home: undefined;
+  Map: undefined;
+  Favorites: undefined;
   Profile: undefined;
+  AddBusiness: undefined;
 };
 
 // Define tab navigator parameter list
 export type MainTabParamList = {
   Home: undefined;
-  Explore: undefined;
-  Add: undefined;
+  Map: undefined;
+  AddBusiness: undefined;
   Favorites: undefined;
   Profile: undefined;
-}
+};
 
 const Stack = createStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 // Custom center button for adding a business
-const CustomAddButton = ({onPress}: {onPress: (e: any) => void}) => (
+const CustomAddButton = ({onPress}: {onPress: () => void}) => (
   <TouchableOpacity
     style={{
       top: -20,
@@ -81,21 +79,21 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         tabBarIcon: ({ focused, color, size }) => {
-          let iconName: string = '';
-          
+          // Use explicit type assertion to fix the error
           if (route.name === 'Home') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'Explore') {
-            iconName = focused ? 'explore' : 'explore-outline';
-          } else if (route.name === 'Add') {
+            return <MaterialIcons name={'home' as any} size={size} color={color} />;
+          } else if (route.name === 'Map') {
+            return <MaterialIcons name={'explore' as any} size={size} color={color} />;
+          } else if (route.name === 'AddBusiness') {
             return null; // Custom button will handle this
           } else if (route.name === 'Favorites') {
-            iconName = focused ? 'favorite' : 'favorite-outline';
+            // Use proper icon names
+            return <MaterialIcons name={focused ? 'favorite' as any : 'favorite-border' as any} size={size} color={color} />;
           } else if (route.name === 'Profile') {
-            iconName = focused ? 'person' : 'person-outline';
+            return <MaterialIcons name={focused ? 'person' as any : 'person-outline' as any} size={size} color={color} />;
           }
-          
-          return <MaterialIcons name={iconName as any} size={size} color={color} />;
+          // Default fallback
+          return <MaterialIcons name={'circle' as any} size={size} color={color} />;
         },
         tabBarActiveTintColor: '#007AFF',
         tabBarInactiveTintColor: '#8E8E93',
@@ -116,14 +114,21 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Explore" component={MapScreen} />
+      <Tab.Screen name="Map" component={MapScreen} />
       <Tab.Screen 
-        name="Add" 
+        name="AddBusiness" 
         component={AddBusinessScreen} 
         options={{
           tabBarButton: (props) => (
-            <CustomAddButton onPress={(e) => props.onPress?.(e)} />
-          )
+            <CustomAddButton 
+              onPress={() => {
+                if (props.onPress) {
+                  // Pass the event parameter even if we don't use it
+                  props.onPress({} as any);
+                }
+              }} 
+            />
+          ),
         }}
       />
       <Tab.Screen name="Favorites" component={FavoritesScreen} />
@@ -141,53 +146,62 @@ const AuthStack = () => (
   </Stack.Navigator>
 );
 
-// Main Navigator with Authentication Check
-const RootNavigator = () => {
-  const { user } = useAuth(); // Use useAuth hook instead of AuthContext
-  const isAuthenticated = !!user; // Derive isAuthenticated from user
-
-  return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      {!isAuthenticated ? (
-        <Stack.Screen name="Auth" component={AuthStack} />
-      ) : (
-        <>
-          <Stack.Screen name="MainApp" component={MainTabs} />
-          <Stack.Screen 
-            name="BusinessDetail" 
-            component={BusinessDetailScreen} 
-            options={{ 
-              headerShown: false,
-              presentation: 'card',
-              // Remove animationEnabled as it's not supported
-            }}
-          />
-          <Stack.Screen 
-            name="Map" 
-            component={MapScreen} 
-            options={{ 
-              headerShown: true,
-              title: 'Mapa',
-              headerBackTitle: 'Atrás'
-            }}
-          />
-        </>
-      )}
-    </Stack.Navigator>
-  );
-}
-
 // Main App Navigator
 const AppNavigator = () => {
+  const [initializing, setInitializing] = useState(true);
+  const [user, setUser] = useState<firebase.User | null>(null);
+
+  // Handle auth state changes
+  const onAuthStateChanged = (firebaseUser: firebase.User | null) => {
+    setUser(firebaseUser);
+    if (initializing) setInitializing(false);
+  };
+
+  useEffect(() => {
+    const subscriber = firebase.auth().onAuthStateChanged(onAuthStateChanged);
+    return subscriber; // unsubscribe on unmount
+  }, []);
+
+  if (initializing) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando Localfy...</Text>
+      </View>
+    );
+  }
+
   return (
-    <AuthProvider>
-      <ThemeProvider>
-        <NavigationContainer>
-          <RootNavigator />
-        </NavigationContainer>
-      </ThemeProvider>
-    </AuthProvider>
+    <NavigationContainer>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {user ? (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen 
+              name="BusinessDetail" 
+              component={BusinessDetailScreen}
+              options={{ 
+                headerShown: false,
+                presentation: 'card',
+              }}
+            />
+          </>
+        ) : (
+          <Stack.Screen name="Auth" component={AuthStack} />
+        )}
+      </Stack.Navigator>
+    </NavigationContainer>
   );
 };
 
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F7FF',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,    color: '#333333',  },});
 export default AppNavigator;

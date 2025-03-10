@@ -4,17 +4,21 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
-  Image,
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  ActivityIndicator
+  ActivityIndicator,
+  Alert,
+  Linking,
+  Platform
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
+import { useLocation } from '../hooks/useLocation';
 
 type BusinessDetailRouteProp = RouteProp<RootStackParamList, 'BusinessDetail'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
@@ -24,17 +28,30 @@ const BusinessDetailScreen: React.FC = () => {
   const route = useRoute<BusinessDetailRouteProp>();
   const { businessId } = route.params;
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
+  const { getFormattedDistance } = useLocation();
   
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
+  const [isFav, setIsFav] = useState(false);
 
   useEffect(() => {
     const fetchBusiness = async () => {
       try {
+        setLoading(true);
+        setLoadingError(null);
+        
         const fetchedBusiness = await getBusinessById(businessId);
-        setBusiness(fetchedBusiness);
+        if (fetchedBusiness) {
+          setBusiness(fetchedBusiness);
+          // Initialize favorite state
+          setIsFav(isFavorite(businessId));
+        } else {
+          setLoadingError('No se pudo encontrar el negocio');
+        }
       } catch (error) {
         console.error('Error fetching business details:', error);
+        setLoadingError('Error al cargar los detalles del negocio');
       } finally {
         setLoading(false);
       }
@@ -43,18 +60,95 @@ const BusinessDetailScreen: React.FC = () => {
     fetchBusiness();
   }, [businessId]);
 
+  // Handle toggling favorite
+  const handleFavoriteToggle = () => {
+    toggleFavorite(businessId);
+    setIsFav(!isFav);
+  };
+
+  // Call business phone number
+  const handleCallBusiness = () => {
+    if (!business?.phone) return;
+    
+    const phoneNumber = Platform.OS === 'android' 
+      ? `tel:${business.phone}` 
+      : `telprompt:${business.phone}`;
+      
+    Linking.canOpenURL(phoneNumber)
+      .then(supported => {
+        if (supported) {
+          Linking.openURL(phoneNumber);
+        } else {
+          Alert.alert('Error', 'No se puede realizar la llamada en este dispositivo');
+        }
+      })
+      .catch(error => {
+        console.error('Error al intentar llamar:', error);
+        Alert.alert('Error', 'No se pudo iniciar la llamada');
+      });
+  };
+
+  // Send email to business
+  const handleEmailBusiness = () => {
+    if (!business?.email) return;
+    
+    const emailUrl = `mailto:${business.email}`;
+    
+    Linking.canOpenURL(emailUrl)
+      .then(supported => {
+        if (supported) {
+          Linking.openURL(emailUrl);
+        } else {
+          Alert.alert('Error', 'No se puede enviar correo desde este dispositivo');
+        }
+      })
+      .catch(error => {
+        console.error('Error al intentar enviar correo:', error);
+        Alert.alert('Error', 'No se pudo abrir el cliente de correo');
+      });
+  };
+
+  // Get business image or fallback
+  const getBusinessImage = () => {
+    if (business?.images && business.images.length > 0) {
+      const mainImage = business.images.find(img => img.isMain);
+      if (mainImage && mainImage.url) {
+        return mainImage.url;
+      }
+      return business.images[0].url;
+    }
+    return null;
+  };
+
+  // Generate color from business name for placeholder
+  const getPlaceholderColor = () => {
+    if (!business) return '#E1E1E1';
+    
+    const colors = [
+      '#007AFF', '#34C759', '#FF9500', '#FF2D55', '#AF52DE', 
+      '#5856D6', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
+    ];
+    
+    const sum = business.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[sum % colors.length];
+  };
+
+  // Loading state
   if (loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando negocio...</Text>
       </SafeAreaView>
     );
   }
 
-  if (!business) {
+  // Error state
+  if (loadingError || !business) {
     return (
       <SafeAreaView style={styles.errorContainer}>
-        <Text style={styles.errorText}>No se pudo cargar el negocio</Text>
+        <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+        <Text style={styles.errorText}>{loadingError || 'No se pudo cargar el negocio'}</Text>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -65,23 +159,30 @@ const BusinessDetailScreen: React.FC = () => {
     );
   }
 
-  // Get the main image or first available image
-  const mainImage = business.images && business.images.length > 0 
-    ? business.images.find(img => img.isMain)?.url || business.images[0].url
-    : null;
+  // Get business image or use placeholder
+  const businessImage = getBusinessImage();
+  
+  // Get formatted distance
+  const distance = getFormattedDistance(business);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       
-      <ScrollView>
+      <ScrollView showsVerticalScrollIndicator={false}>
         {/* Business Image Header */}
         <View style={styles.imageContainer}>
-          {mainImage ? (
-            <Image source={{ uri: mainImage }} style={styles.businessImage} />
+          {businessImage ? (
+            <Image 
+              source={{ uri: businessImage }} 
+              style={styles.businessImage}
+              contentFit="cover"
+              transition={300}
+              cachePolicy="memory-disk"
+            />
           ) : (
-            <View style={styles.placeholderImage}>
-              <MaterialIcons name="store" size={48} color="#CCCCCC" />
+            <View style={[styles.placeholderImage, { backgroundColor: getPlaceholderColor() }]}>
+              <Text style={styles.placeholderText}>{business.name.charAt(0).toUpperCase()}</Text>
             </View>
           )}
           
@@ -96,10 +197,10 @@ const BusinessDetailScreen: React.FC = () => {
             
             <TouchableOpacity 
               style={styles.iconButton}
-              onPress={() => toggleFavorite(business.id)}
+              onPress={handleFavoriteToggle}
             >
               <MaterialIcons 
-                name={isFavorite(business.id) ? "favorite" : "favorite-border"} 
+                name={isFav ? "favorite" : "favorite-border"} 
                 size={24} 
                 color="white" 
               />
@@ -110,8 +211,18 @@ const BusinessDetailScreen: React.FC = () => {
         {/* Business Details */}
         <View style={styles.detailsContainer}>
           <Text style={styles.businessName}>{business.name}</Text>
-          <View style={styles.tagContainer}>
-            <Text style={styles.categoryTag}>{business.category}</Text>
+          
+          <View style={styles.infoRow}>
+            <View style={styles.tagContainer}>
+              <Text style={styles.categoryTag}>{business.category}</Text>
+            </View>
+            
+            {distance && (
+              <View style={styles.distanceContainer}>
+                <MaterialIcons name="location-on" size={16} color="#8E8E93" />
+                <Text style={styles.distanceText}>{distance}</Text>
+              </View>
+            )}
           </View>
           
           <View style={styles.section}>
@@ -139,25 +250,36 @@ const BusinessDetailScreen: React.FC = () => {
                 <Text style={styles.contactText}>{business.address}</Text>
               </View>
             )}
+            {!business.phone && !business.email && !business.address && (
+              <Text style={styles.noInfoText}>No hay información de contacto disponible</Text>
+            )}
           </View>
         </View>
       </ScrollView>
       
       {/* Contact Buttons */}
-      <View style={styles.actionButtonsContainer}>
-        {business.phone && (
-          <TouchableOpacity style={styles.actionButton}>
-            <MaterialIcons name="phone" size={24} color="white" />
-            <Text style={styles.actionButtonText}>Llamar</Text>
-          </TouchableOpacity>
-        )}
-        {business.email && (
-          <TouchableOpacity style={styles.actionButton}>
-            <MaterialIcons name="email" size={24} color="white" />
-            <Text style={styles.actionButtonText}>Correo</Text>
-          </TouchableOpacity>
-        )}
-      </View>
+      {(business.phone || business.email) && (
+        <View style={styles.actionButtonsContainer}>
+          {business.phone && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleCallBusiness}
+            >
+              <MaterialIcons name="phone" size={24} color="white" />
+              <Text style={styles.actionButtonText}>Llamar</Text>
+            </TouchableOpacity>
+          )}
+          {business.email && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleEmailBusiness}
+            >
+              <MaterialIcons name="email" size={24} color="white" />
+              <Text style={styles.actionButtonText}>Correo</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -173,6 +295,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
   },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666666',
+  },
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -183,7 +310,9 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 16,
     color: '#666666',
-    marginBottom: 20,
+    marginTop: 16,
+    marginBottom: 24,
+    textAlign: 'center',
   },
   backButton: {
     backgroundColor: '#007AFF',
@@ -202,14 +331,17 @@ const styles = StyleSheet.create({
   businessImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
   },
   placeholderImage: {
     width: '100%',
     height: '100%',
-    backgroundColor: '#F0F0F5',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  placeholderText: {
+    fontSize: 72,
+    fontWeight: 'bold',
+    color: 'white',
   },
   headerButtons: {
     position: 'absolute',
@@ -237,9 +369,14 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginBottom: 10,
   },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
   tagContainer: {
     flexDirection: 'row',
-    marginBottom: 20,
   },
   categoryTag: {
     backgroundColor: '#007AFF20',
@@ -249,6 +386,15 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  distanceContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  distanceText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginLeft: 4,
   },
   section: {
     marginBottom: 24,
@@ -273,6 +419,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333333',
     marginLeft: 12,
+  },
+  noInfoText: {
+    fontSize: 16,
+    color: '#8E8E93',
+    fontStyle: 'italic',
   },
   actionButtonsContainer: {
     flexDirection: 'row',

@@ -10,8 +10,7 @@ import {
   TextInput,
   RefreshControl,
   StatusBar,
-  Alert,
-  Dimensions
+  Alert
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -20,16 +19,9 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import BusinessCard from '../components/BusinessCard';
 import SkeletonBusinessCard from '../components/SkeletonBusinessCard';
-import { useLocationContext } from '../context/LocationContext';
-import { calculateDistance, formatDistance } from '../services/LocationService';
+import { useLocation } from '../hooks/useLocation';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
-
-// Define location interface
-interface Location {
-  latitude: number;
-  longitude: number;
-}
 
 // Extended navigation params type to include all screens used in this component
 type ExtendedStackParamList = RootStackParamList & {
@@ -44,6 +36,7 @@ type NavigationProps = StackNavigationProp<ExtendedStackParamList>;
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
   const {
+    businesses,
     filteredBusinesses,
     categories,
     loading,
@@ -53,7 +46,8 @@ const HomeScreen: React.FC = () => {
     toggleFavorite,
     isFavorite
   } = useBusinesses();
-  const { userLocation, refreshLocation } = useLocationContext();
+  
+  const { userLocation, refreshLocation, getFormattedDistance } = useLocation();
 
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -64,13 +58,13 @@ const HomeScreen: React.FC = () => {
 
   // Update displayed businesses whenever filtered businesses or search results change
   useEffect(() => {
-    let businesses = showSearch ? searchResults : filteredBusinesses;
+    let currentBusinesses = showSearch ? searchResults : filteredBusinesses;
 
     // Sort by distance if option is enabled and user location is available
     if (sortByDistance && userLocation) {
-      businesses = [...businesses].sort((a, b) => {
-        const distanceA = getDistanceToBusiness(a);
-        const distanceB = getDistanceToBusiness(b);
+      currentBusinesses = [...currentBusinesses].sort((a, b) => {
+        const distanceA = getDistanceToBusinessInKm(a);
+        const distanceB = getDistanceToBusinessInKm(b);
         
         if (distanceA === undefined) return 1;
         if (distanceB === undefined) return -1;
@@ -79,39 +73,45 @@ const HomeScreen: React.FC = () => {
       });
     }
 
-    setDisplayedBusinesses(businesses);
+    setDisplayedBusinesses(currentBusinesses);
   }, [showSearch, searchResults, filteredBusinesses, sortByDistance, userLocation]);
 
-  // Calculate distance between user and business
-  const getDistanceToBusiness = useCallback((business: Business): number | undefined => {
+  // Calculate distance between user and business in km (for sorting)
+  const getDistanceToBusinessInKm = useCallback((business: Business): number | undefined => {
     if (!userLocation || !business.location) {
       return undefined;
     }
     
     // Handle location whether it's an object or needs to be parsed
-    const businessLocation = typeof business.location === 'string' 
-      ? JSON.parse(business.location) as Location
-      : business.location as Location;
+    let businessLocation;
+    try {
+      businessLocation = typeof business.location === 'string' 
+        ? JSON.parse(business.location)
+        : business.location;
+        
+      if (!businessLocation.latitude || !businessLocation.longitude) {
+        return undefined;
+      }
       
-    if (!businessLocation.latitude || !businessLocation.longitude) {
+      // Calculate distance using the Haversine formula (rough approximation)
+      const R = 6371; // Radius of the earth in km
+      const dLat = deg2rad(businessLocation.latitude - userLocation.latitude);
+      const dLon = deg2rad(businessLocation.longitude - userLocation.longitude);
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(deg2rad(userLocation.latitude)) * Math.cos(deg2rad(businessLocation.latitude)) * 
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    } catch (error) {
       return undefined;
     }
-    
-    return calculateDistance(
-      userLocation.latitude,
-      userLocation.longitude,
-      businessLocation.latitude,
-      businessLocation.longitude
-    );
   }, [userLocation]);
   
-  // Format distance for display
-  const getFormattedDistance = useCallback((business: Business): string | undefined => {
-    const distance = getDistanceToBusiness(business);
-    if (distance === undefined) return undefined;
-    
-    return formatDistance(distance);
-  }, [getDistanceToBusiness]);
+  // Helper function to convert degrees to radians
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI/180);
+  };
 
   // Handle search
   const handleSearch = (query: string) => {
@@ -123,7 +123,7 @@ const HomeScreen: React.FC = () => {
     }
 
     setShowSearch(true);
-    const filtered = filteredBusinesses.filter(
+    const filtered = businesses.filter(
       business => business.name.toLowerCase().includes(query.toLowerCase()) ||
                  business.category.toLowerCase().includes(query.toLowerCase())
     );
@@ -157,17 +157,7 @@ const HomeScreen: React.FC = () => {
 
   // Navigate to map view
   const navigateToMapView = () => {
-    try {
-      // Navigate to the Map screen that's directly in your stack
-      navigation.navigate('Map');
-    } catch (error) {
-      console.error('Navigation error:', error);
-      Alert.alert(
-        "Navegación no disponible",
-        "No se pudo navegar a la vista de mapa. Por favor, inténtelo de nuevo más tarde.",
-        [{ text: "OK" }]
-      );
-    }
+    navigation.navigate('Map');
   };
 
   // Navigate to business detail
@@ -182,6 +172,7 @@ const HomeScreen: React.FC = () => {
       navigation.navigate('Login');
     } catch (error) {
       console.error('Error logging out:', error);
+      Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
     }
   };
 
@@ -205,24 +196,14 @@ const HomeScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // Updated renderBusinessItem to pass distance data
+  // Render business item
   const renderBusinessItem = useCallback(({ item }: { item: Business }) => {
-    // Safely extract the main image URL or first available image
-    let businessImage = null;
-    if (item.images && item.images.length > 0) {
-      // Try to find main image first
-      const mainImage = item.images.find(img => img.isMain);
-      // If main image exists, use it; otherwise use the first image
-      businessImage = mainImage ? mainImage.url : item.images[0].url;
-    }
-    
     // Get distance if available
     const distance = getFormattedDistance(item);
     
     return (
       <BusinessCard
         business={item}
-        businessImage={businessImage}
         isFavorite={isFavorite(item.id)}
         onPress={() => navigateToBusinessDetail(item)}
         onFavoritePress={() => toggleFavorite(item.id)}
@@ -319,7 +300,10 @@ const HomeScreen: React.FC = () => {
           renderItem={renderBusinessItem}
           numColumns={2}
           columnWrapperStyle={styles.businessRow}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            displayedBusinesses.length === 0 ? { flex: 1 } : {}
+          ]}
           ListHeaderComponent={
             <>
               {/* Welcome Message */}

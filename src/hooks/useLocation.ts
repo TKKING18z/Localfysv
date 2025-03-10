@@ -18,56 +18,84 @@ export const useLocation = () => {
       return undefined;
     }
     
-    // Handle location whether it's an object or needs to be parsed
-    const businessLocation = typeof business.location === 'string' 
-      ? JSON.parse(business.location) as Location
-      : business.location as Location;
+    try {
+      // Handle location whether it's an object or needs to be parsed
+      let businessLocation;
+      if (typeof business.location === 'string') {
+        try {
+          businessLocation = JSON.parse(business.location) as Location;
+        } catch (error) {
+          console.warn('Error parsing business location:', error);
+          return undefined;
+        }
+      } else {
+        businessLocation = business.location as Location;
+      }
       
-    if (!businessLocation.latitude || !businessLocation.longitude) {
+      if (!businessLocation.latitude || !businessLocation.longitude) {
+        return undefined;
+      }
+
+      return calculateDistance(
+        userLocation.latitude,
+        userLocation.longitude,
+        businessLocation.latitude,
+        businessLocation.longitude
+      );
+    } catch (error) {
+      console.warn('Error calculating distance:', error);
       return undefined;
     }
-
-    return calculateDistance(
-      userLocation.latitude,
-      userLocation.longitude,
-      businessLocation.latitude,
-      businessLocation.longitude
-    );
   };
 
   // Get formatted distance string
   const getFormattedDistance = (business: Business): string | undefined => {
-    const distance = getDistanceToBusiness(business);
-    if (distance === undefined) return undefined;
-    
-    return formatDistance(distance);
+    try {
+      const distance = getDistanceToBusiness(business);
+      if (distance === undefined) return undefined;
+      
+      return formatDistance(distance);
+    } catch (error) {
+      console.warn('Error formatting distance:', error);
+      return undefined;
+    }
   };
 
   // Sort businesses by distance
   const sortBusinessesByDistance = (businesses: Business[]): Business[] => {
     if (!userLocation) return businesses;
 
-    return [...businesses].sort((a, b) => {
-      const distanceA = getDistanceToBusiness(a);
-      const distanceB = getDistanceToBusiness(b);
-      
-      if (distanceA === undefined) return 1;
-      if (distanceB === undefined) return -1;
-      
-      return distanceA - distanceB;
-    });
+    try {
+      return [...businesses].sort((a, b) => {
+        const distanceA = getDistanceToBusiness(a);
+        const distanceB = getDistanceToBusiness(b);
+        
+        if (distanceA === undefined) return 1;
+        if (distanceB === undefined) return -1;
+        
+        return distanceA - distanceB;
+      });
+    } catch (error) {
+      console.warn('Error sorting businesses by distance:', error);
+      return businesses;
+    }
   };
 
   // Filter businesses by maximum distance
   const filterBusinessesByDistance = (businesses: Business[], maxDistance: number): Business[] => {
     if (!userLocation) return businesses;
 
-    return businesses.filter(business => {
-      const distance = getDistanceToBusiness(business);
-      if (distance === undefined) return false;
-      
-      return distance <= maxDistance;
-    });
+    try {
+      return businesses.filter(business => {
+        const distance = getDistanceToBusiness(business);
+        if (distance === undefined) return false;
+        
+        return distance <= maxDistance;
+      });
+    } catch (error) {
+      console.warn('Error filtering businesses by distance:', error);
+      return businesses;
+    }
   };
 
   return {

@@ -9,7 +9,6 @@ import {
   StatusBar,
   ActivityIndicator,
   RefreshControl,
-  Animated
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -17,58 +16,50 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import BusinessCard from '../components/BusinessCard';
+import { useLocation } from '../hooks/useLocation';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
 const FavoritesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
   const { 
-    businesses, 
-    loading, 
-    favorites, 
-    toggleFavorite,
+    refreshBusinesses, 
+    toggleFavorite, 
     isFavorite,
-    refreshBusinesses
+    getFavoriteBusinesses,
+    loading 
   } = useBusinesses();
+  
+  const { getFormattedDistance } = useLocation();
   
   const [refreshing, setRefreshing] = useState(false);
   const [favoriteBusinesses, setFavoriteBusinesses] = useState<Business[]>([]);
-  const [fadeAnims] = useState<{[key: string]: Animated.Value}>({});
   const [sortOrder, setSortOrder] = useState<'default' | 'nameAsc' | 'rating'>('default');
   
-  // Get favorite businesses
+  // Update favorite businesses when the list changes
   useEffect(() => {
-    if (businesses.length > 0 && favorites && favorites.length > 0) {
-      const favs = businesses.filter(business => 
-        favorites.includes(business.id)
-      );
-      
-      // Sort favorites based on selected order
-      let sortedFavs = [...favs];
-      
-      if (sortOrder === 'nameAsc') {
-        sortedFavs.sort((a, b) => a.name.localeCompare(b.name));
-      } else if (sortOrder === 'rating') {
-        sortedFavs.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-      }
-      
-      setFavoriteBusinesses(sortedFavs);
-      
-      // Initialize animations for new items
-      sortedFavs.forEach(business => {
-        if (!fadeAnims[business.id]) {
-          fadeAnims[business.id] = new Animated.Value(1);
-        }
-      });
-    } else {
-      setFavoriteBusinesses([]);
+    updateFavoriteBusinesses();
+  }, [sortOrder]);
+  
+  // Function to update favorite businesses with sorting
+  const updateFavoriteBusinesses = () => {
+    let favorites = getFavoriteBusinesses();
+    
+    // Apply sorting
+    if (sortOrder === 'nameAsc') {
+      favorites = [...favorites].sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortOrder === 'rating') {
+      favorites = [...favorites].sort((a, b) => (b.rating || 0) - (a.rating || 0));
     }
-  }, [businesses, favorites, sortOrder]); 
+    
+    setFavoriteBusinesses(favorites);
+  };
 
   // Handle refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refreshBusinesses();
+    updateFavoriteBusinesses();
     setRefreshing(false);
   }, [refreshBusinesses]);
 
@@ -77,34 +68,28 @@ const FavoritesScreen: React.FC = () => {
     navigation.navigate('BusinessDetail', { businessId: business.id });
   };
   
-  // Handle removing from favorites with animation
+  // Handle removing from favorites
   const handleRemoveFavorite = (businessId: string) => {
-    // Start fade out animation
-    Animated.timing(fadeAnims[businessId], {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true
-    }).start(() => {
-      // After animation completes, remove from favorites
-      toggleFavorite(businessId);
-    });
+    toggleFavorite(businessId);
+    // Update the list immediately after toggling favorite
+    setTimeout(() => {
+      updateFavoriteBusinesses();
+    }, 0);
   };
   
-  // Render business item with animation - no image extraction
+  // Render business item
   const renderBusinessItem = ({ item }: { item: Business }) => {
-    // Don't try to access item.images
-    const opacity = fadeAnims[item.id] || new Animated.Value(1);
+    // Get distance to business if location is available
+    const distance = getFormattedDistance(item);
     
     return (
-      <Animated.View style={{ opacity }}>
-        <BusinessCard
-          business={item}
-          businessImage={null} // Pass null instead of trying to extract the URL
-          isFavorite={isFavorite(item.id)}
-          onPress={() => navigateToBusinessDetail(item)}
-          onFavoritePress={() => handleRemoveFavorite(item.id)}
-        />
-      </Animated.View>
+      <BusinessCard
+        business={item}
+        isFavorite={true} // In favorites screen, all items are favorites
+        onPress={() => navigateToBusinessDetail(item)}
+        onFavoritePress={() => handleRemoveFavorite(item.id)}
+        distance={distance}
+      />
     );
   };
   
@@ -118,7 +103,8 @@ const FavoritesScreen: React.FC = () => {
       </Text>
       <TouchableOpacity 
         style={styles.exploreButton}
-        onPress={() => navigation.navigate('Home')}
+        // Fix: Navigate to MainTabs without extra params
+        onPress={() => navigation.navigate('MainTabs')}
       >
         <Text style={styles.exploreButtonText}>Explorar negocios</Text>
       </TouchableOpacity>
@@ -204,7 +190,10 @@ const FavoritesScreen: React.FC = () => {
           renderItem={renderBusinessItem}
           numColumns={2}
           columnWrapperStyle={styles.businessRow}
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            favoriteBusinesses.length === 0 ? { flex: 1 } : {}
+          ]}
           ListEmptyComponent={renderEmptyState}
           refreshControl={
             <RefreshControl
@@ -217,22 +206,29 @@ const FavoritesScreen: React.FC = () => {
         />
       )}
       
-      {/* Bottom Navigation - same as in HomeScreen */}
+      {/* Bottom Navigation */}
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          onPress={() => navigation.navigate('Home')}
+          // Fix: Navigate to MainTabs and not try to use nested navigation directly
+          onPress={() => navigation.navigate('MainTabs')}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Inicio</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.navItem} onPress={() => {}}>
+        <TouchableOpacity 
+          style={styles.navItem} 
+          onPress={() => navigation.navigate('Map')}
+        >
           <MaterialIcons name="explore" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Explorar</Text>
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.navItemCenter}>
+        <TouchableOpacity 
+          style={styles.navItemCenter}
+          onPress={() => navigation.navigate('AddBusiness')}
+        >
           <View style={styles.navItemCenterButton}>
             <MaterialIcons name="add" size={28} color="white" />
           </View>

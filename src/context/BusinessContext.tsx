@@ -1,28 +1,26 @@
-import React, { createContext, useState, useContext, useEffect, useCallback, ReactNode } from 'react';
-import { useLocationContext } from './LocationContext';
-import { firebaseService } from '../services/firebaseService';
-import { useBusinesses as useBusinessesHook } from '../hooks/useBusinesses';
+import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Business interface (update as needed)
+// Define Business interface
 export interface Business {
   id: string;
   name: string;
   description: string;
   category: string;
-  address: string;
-  phone: string;
+  address?: string;
+  phone?: string;
+  email?: string;
   website?: string;
-  hours?: string;
-  location: any; // Can be string (JSON) or object with lat/lng
-  images?: Array<{ url: string, isMain?: boolean }>;
-  ownerId?: string;
+  location?: any; // Puede ser objeto {latitude, longitude} o string JSON
+  images?: Array<{id?: string, url: string, isMain?: boolean}>;
   rating?: number;
-  reviews?: number;
   createdAt?: any;
   updatedAt?: any;
 }
 
-// Business Context interface
+// Define Business Context interface
 interface BusinessContextType {
   businesses: Business[];
   filteredBusinesses: Business[];
@@ -31,95 +29,194 @@ interface BusinessContextType {
   setSelectedCategory: (category: string | null) => void;
   loading: boolean;
   error: string | null;
-  hasMore: boolean;
   refreshBusinesses: () => Promise<void>;
-  loadMoreBusinesses: () => Promise<void>;
   toggleFavorite: (businessId: string) => void;
   isFavorite: (businessId: string) => boolean;
-  favoriteBusinesses: Business[];
-  loadingFavorites: boolean;
+  favorites: string[];
+  getFavoriteBusinesses: () => Business[];
   getBusinessById: (id: string) => Promise<Business | null>;
-  favorites: string[]; // Add this property to fix the error
 }
 
-// Create context with a default empty value
-const BusinessContext = createContext<BusinessContextType>({} as BusinessContextType);
+// Create context
+const BusinessContext = createContext<BusinessContextType | undefined>(undefined);
 
-// The provider component
-export const BusinessProvider: React.FC<{children: ReactNode}> = ({ children }) => {
-  // Use our custom hook
-  const {
-    businesses,
-    loading,
-    error,
-    hasMore,
-    refresh: refreshBusinesses,
-    loadMore: loadMoreBusinesses,
-    changeCategory,
-    currentCategory: selectedCategory,
-    isFavorite,
-    toggleFavorite,
-    favoriteBusinesses,
-    loadingFavorites
-  } = useBusinessesHook();
-  
-  // Location context for filtering by distance
-  const { userLocation } = useLocationContext();
-  
-  // Extract unique categories from businesses
+// Create provider component
+export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [filteredBusinesses, setFilteredBusinesses] = useState<Business[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
-
-  // Update categories when businesses change
+  
+  // Load favorites from AsyncStorage
   useEffect(() => {
-    if (businesses && businesses.length > 0) {
-      const uniqueCategories = Array.from(
-        new Set(businesses.map(business => business.category))
-      ).filter(Boolean);
-      
-      setCategories(uniqueCategories);
+    const loadFavorites = async () => {
+      try {
+        const savedFavorites = await AsyncStorage.getItem('favorites');
+        if (savedFavorites) {
+          setFavorites(JSON.parse(savedFavorites));
+        }
+      } catch (err) {
+        console.error('Error loading favorites:', err);
+      }
+    };
+    
+    loadFavorites();
+  }, []);
+  
+  // Save favorites to AsyncStorage whenever they change
+  useEffect(() => {
+    const saveFavorites = async () => {
+      try {
+        await AsyncStorage.setItem('favorites', JSON.stringify(favorites));
+      } catch (err) {
+        console.error('Error saving favorites:', err);
+      }
+    };
+    
+    if (favorites.length > 0) {
+      saveFavorites();
     }
-  }, [businesses]);
+  }, [favorites]);
   
-  // Get filtered businesses based on selected category
-  const filteredBusinesses = selectedCategory
-    ? businesses.filter(business => business.category === selectedCategory)
-    : businesses;
+  // Función para normalizar datos de negocios
+  const normalizeBusinessData = (id: string, data: any): Business => {
+    // Verificar si images existe y es un array; si no, inicializar como array vacío
+    let normalizedImages: {id?: string, url: string, isMain?: boolean}[] = [];
+    
+    if (data.images && Array.isArray(data.images)) {
+      // Filtrar solo imágenes válidas con URL
+      normalizedImages = data.images
+        .filter((img: any) => img && typeof img === 'object' && img.url && typeof img.url === 'string')
+        .map((img: any) => ({
+          id: img.id || `img-${Math.random().toString(36).substr(2, 9)}`,
+          url: img.url,
+          isMain: !!img.isMain
+        }));
+    }
+    
+    // Crear objeto de negocio normalizado
+    return {
+      id,
+      name: data.name || '',
+      description: data.description || '',
+      category: data.category || '',
+      rating: typeof data.rating === 'number' ? data.rating : 0,
+      address: data.address || '',
+      phone: data.phone || '',
+      email: data.email || '',
+      website: data.website || '',
+      images: normalizedImages,
+      location: data.location || null,
+      createdAt: data.createdAt?.toDate() || new Date(),
+      updatedAt: data.updatedAt?.toDate() || new Date(),
+    };
+  };
   
-  // Get a single business by ID
+  // Function to fetch businesses from Firestore
+  const fetchBusinesses = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const businessesCollection = firebase.firestore().collection('businesses');
+      const snapshot = await businessesCollection.get();
+      
+      const businessesList: Business[] = [];
+      const categoriesSet = new Set<string>();
+      
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const business = normalizeBusinessData(doc.id, data);
+        
+        businessesList.push(business);
+        if (data.category) categoriesSet.add(data.category);
+      });
+      
+      setBusinesses(businessesList);
+      setFilteredBusinesses(selectedCategory 
+        ? businessesList.filter(b => b.category === selectedCategory)
+        : businessesList
+      );
+      setCategories(Array.from(categoriesSet));
+      setLoading(false);
+    } catch (err) {
+      console.error('Error fetching businesses:', err);
+      setError('Error al cargar los negocios. Por favor, intenta más tarde.');
+      setLoading(false);
+    }
+  };
+  
+  // Function to get a single business by ID
   const getBusinessById = async (id: string): Promise<Business | null> => {
     try {
-      const response = await firebaseService.businesses.getById(id);
+      // First check if we already have it in state
+      const cachedBusiness = businesses.find(b => b.id === id);
+      if (cachedBusiness) return cachedBusiness;
       
-      if (response.success && response.data) {
-        return response.data;
-      }
+      // Otherwise fetch from Firestore
+      const doc = await firebase.firestore().collection('businesses').doc(id).get();
+      if (!doc.exists) return null;
       
-      return null;
-    } catch (error) {
-      console.error('Error getting business by ID:', error);
+      return normalizeBusinessData(doc.id, doc.data());
+    } catch (err) {
+      console.error('Error fetching business by ID:', err);
       return null;
     }
   };
   
-  // The context value
-  const value = {
+  // Initial data load
+  useEffect(() => {
+    fetchBusinesses();
+  }, []);
+  
+  // Filter businesses when category changes
+  useEffect(() => {
+    setFilteredBusinesses(
+      selectedCategory
+        ? businesses.filter(business => business.category === selectedCategory)
+        : businesses
+    );
+  }, [selectedCategory, businesses]);
+  
+  // Toggle favorite status for a business
+  const toggleFavorite = (businessId: string) => {
+    setFavorites(prevFavorites => {
+      if (prevFavorites.includes(businessId)) {
+        return prevFavorites.filter(id => id !== businessId);
+      } else {
+        return [...prevFavorites, businessId];
+      }
+    });
+  };
+  
+  // Check if a business is in favorites
+  const isFavorite = (businessId: string): boolean => {
+    return favorites.includes(businessId);
+  };
+  
+  // Get all favorite businesses
+  const getFavoriteBusinesses = (): Business[] => {
+    return businesses.filter(business => favorites.includes(business.id));
+  };
+  
+  // Context value
+  const value: BusinessContextType = {
     businesses,
     filteredBusinesses,
     categories,
     selectedCategory,
-    setSelectedCategory: changeCategory,
+    setSelectedCategory,
     loading,
     error,
-    hasMore,
-    refreshBusinesses,
-    loadMoreBusinesses,
+    refreshBusinesses: fetchBusinesses,
     toggleFavorite,
     isFavorite,
-    favoriteBusinesses,
-    loadingFavorites,
-    getBusinessById,
-    favorites
+    favorites,
+    getFavoriteBusinesses,
+    getBusinessById
   };
   
   return (
@@ -129,10 +226,10 @@ export const BusinessProvider: React.FC<{children: ReactNode}> = ({ children }) 
   );
 };
 
-// Custom hook to use the business context
+// Custom hook to use business context
 export const useBusinesses = () => {
   const context = useContext(BusinessContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useBusinesses must be used within a BusinessProvider');
   }
   return context;

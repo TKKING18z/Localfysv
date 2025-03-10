@@ -16,15 +16,14 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { RootStackParamList, MainTabParamList } from '../navigation/AppNavigator';
+import { RootStackParamList } from '../navigation/AppNavigator';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import { useBusinesses } from '../context/BusinessContext';
 import { TextInput } from 'react-native-gesture-handler';
 
-// Create a combined type for navigation which includes both stacks
-type NavigationProps = StackNavigationProp<RootStackParamList & MainTabParamList>;
+type NavigationProps = StackNavigationProp<RootStackParamList>;
 
 interface UserProfile {
   uid: string;
@@ -39,10 +38,8 @@ interface UserProfile {
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
-  const businessContext = useBusinesses();
-  // Fix: Use businesses instead of businessList and add proper typing
-  const favoriteBusinesses = businessContext.businesses?.filter((b: any) => b.isFavorite) || [];
-
+  const { getFavoriteBusinesses } = useBusinesses();
+  
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [editMode, setEditMode] = useState(false);
@@ -59,7 +56,7 @@ const ProfileScreen: React.FC = () => {
     businessName?: string;
   }[]>([]);
 
-  // Mock user stats based on user type
+  // User stats
   const [userStats, setUserStats] = useState({
     favorites: 0,
     reviews: 0,
@@ -128,9 +125,12 @@ const ProfileScreen: React.FC = () => {
           // Fetch mock recent activity
           await fetchRecentActivity(user.uid);
           
+          // Get favorites count
+          const favoriteCount = getFavoriteBusinesses().length;
+          
           // Set user stats
           setUserStats({
-            favorites: favoriteBusinesses.length, // Changed to use favoriteBusinesses
+            favorites: favoriteCount,
             reviews: Math.floor(Math.random() * 10),
             businessesOwned: profile?.userType === 'Propietario' ? Math.floor(Math.random() * 5) + 1 : 0,
             totalViews: Math.floor(Math.random() * 200) + 50
@@ -145,7 +145,7 @@ const ProfileScreen: React.FC = () => {
     };
     
     fetchUserProfile();
-  }, [favoriteBusinesses]); // Changed dependency to favoriteBusinesses
+  }, []);
 
   // Mock function to fetch recent activity
   const fetchRecentActivity = async (userId: string) => {
@@ -185,6 +185,7 @@ const ProfileScreen: React.FC = () => {
             displayName: tempProfile.displayName,
             phoneNumber: tempProfile.phoneNumber,
             address: tempProfile.address,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
           });
         
         setProfile(prev => prev ? {
@@ -211,8 +212,7 @@ const ProfileScreen: React.FC = () => {
     setLoading(true);
     try {
       await firebase.auth().signOut();
-      // Navigate to Auth instead of Login
-      navigation.navigate('Auth');
+      navigation.navigate('Login');
     } catch (error) {
       console.error('Error logging out:', error);
       Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
@@ -467,7 +467,7 @@ const ProfileScreen: React.FC = () => {
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          onPress={() => navigation.navigate('MainApp')}
+          onPress={() => navigation.navigate('Home')}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Inicio</Text>
@@ -483,7 +483,7 @@ const ProfileScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItemCenter}
-          onPress={() => navigation.navigate('Add')}
+          onPress={() => navigation.navigate('AddBusiness')}
         >
           <View style={styles.navItemCenterButton}>
             <MaterialIcons name="add" size={28} color="white" />
