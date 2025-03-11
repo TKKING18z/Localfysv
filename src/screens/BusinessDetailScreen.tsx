@@ -20,6 +20,14 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import { useLocation } from '../hooks/useLocation';
 
+// Importamos los nuevos componentes
+import BusinessHours from '../components/BusinessHours';
+import PaymentMethods from '../components/PaymentMethods';
+import EnhancedGallery from '../components/EnhancedGallery';
+import VideoPlayer from '../components/VideoPlayer';
+import SocialLinks from '../components/SocialLinks';
+import MenuViewer from '../components/MenuViewer';
+
 type BusinessDetailRouteProp = RouteProp<RootStackParamList, 'BusinessDetail'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -165,6 +173,16 @@ const BusinessDetailScreen: React.FC = () => {
   // Get formatted distance
   const distance = getFormattedDistance(business);
 
+  // Función para determinar si es un restaurante basado en la categoría
+  const isRestaurant = () => {
+    const category = business.category.toLowerCase();
+    return category.includes('restaurante') || 
+           category.includes('café') || 
+           category.includes('cafetería') || 
+           category.includes('comida') ||
+           category.includes('bar');
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
@@ -230,6 +248,14 @@ const BusinessDetailScreen: React.FC = () => {
             <Text style={styles.description}>{business.description || "No hay descripción disponible."}</Text>
           </View>
           
+          {/* Nuevo: Horarios de apertura/cierre */}
+          {business.businessHours && (
+            <View style={styles.section}>
+              <BusinessHours hours={business.businessHours} />
+            </View>
+          )}
+          
+          {/* Nuevo: Información de contacto mejorada */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Información de contacto</Text>
             {business.phone && (
@@ -250,10 +276,60 @@ const BusinessDetailScreen: React.FC = () => {
                 <Text style={styles.contactText}>{business.address}</Text>
               </View>
             )}
-            {!business.phone && !business.email && !business.address && (
+            {business.website && (
+              <TouchableOpacity 
+                style={styles.contactItem}
+                onPress={() => {
+                  let url = business.website || '';
+                  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                    url = 'https://' + url;
+                  }
+                  Linking.openURL(url);
+                }}
+              >
+                <MaterialIcons name="public" size={20} color="#007AFF" />
+                <Text style={[styles.contactText, styles.websiteText]}>{business.website}</Text>
+              </TouchableOpacity>
+            )}
+            {!business.phone && !business.email && !business.address && !business.website && (
               <Text style={styles.noInfoText}>No hay información de contacto disponible</Text>
             )}
           </View>
+          
+          {/* Nuevo: Métodos de pago */}
+          {business.paymentMethods && business.paymentMethods.length > 0 && (
+            <View style={styles.section}>
+              <PaymentMethods methods={business.paymentMethods} />
+            </View>
+          )}
+          
+          {/* Nuevo: Enlaces a redes sociales */}
+          {business.socialLinks && Object.keys(business.socialLinks).length > 0 && (
+            <View style={styles.section}>
+              <SocialLinks links={business.socialLinks} />
+            </View>
+          )}
+          
+          {/* Nuevo: Galería de imágenes mejorada */}
+          {business.images && business.images.length > 0 && (
+            <View style={styles.section}>
+              <EnhancedGallery images={business.images} />
+            </View>
+          )}
+          
+          {/* Nuevo: Videos */}
+          {business.videos && business.videos.length > 0 && (
+            <View style={styles.section}>
+              <VideoPlayer videos={business.videos} />
+            </View>
+          )}
+          
+          {/* Nuevo: Menú para restaurantes */}
+          {isRestaurant() && (business.menu || business.menuUrl) && (
+            <View style={styles.section}>
+              <MenuViewer menu={business.menu} menuUrl={business.menuUrl} />
+            </View>
+          )}
         </View>
       </ScrollView>
       
@@ -419,6 +495,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333333',
     marginLeft: 12,
+  },
+  websiteText: {
+    color: '#007AFF',
+    textDecorationLine: 'underline',
   },
   noInfoText: {
     fontSize: 16,

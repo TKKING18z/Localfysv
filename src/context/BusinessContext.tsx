@@ -3,6 +3,38 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+export interface BusinessHours {
+  monday?: DayHours;
+  tuesday?: DayHours;
+  wednesday?: DayHours;
+  thursday?: DayHours;
+  friday?: DayHours;
+  saturday?: DayHours;
+  sunday?: DayHours;
+}
+
+export interface DayHours {
+  open: string;   // Formato: "09:00"
+  close: string;  // Formato: "18:00"
+  closed?: boolean; // Indica si está cerrado ese día
+}
+
+export interface SocialLinks {
+  facebook?: string;
+  instagram?: string;
+  twitter?: string;
+  tiktok?: string;
+  website?: string;
+}
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  imageUrl?: string;
+  category?: string;
+}
 // Define Business interface
 export interface Business {
   id: string;
@@ -18,6 +50,12 @@ export interface Business {
   rating?: number;
   createdAt?: any;
   updatedAt?: any;
+  businessHours?: BusinessHours;
+  paymentMethods?: string[];
+  socialLinks?: SocialLinks;
+  videos?: Array<{id?: string, url: string, thumbnail?: string}>;
+  menu?: MenuItem[];
+  menuUrl?: string;  // Enlace a un menú PDF o imagen
 }
 
 // Define Business Context interface
