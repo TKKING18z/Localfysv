@@ -237,3 +237,39 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F5',
     borderRadius: 8,
     padding: 12,
+    fontSize: 14,
+    color: '#333333',
+  },
+  testButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  emptyButton: {
+    width: 44,
+    height: 44,
+    marginLeft: 8,
+  },
+  tipsContainer: {
+    backgroundColor: '#FFF9E6',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 16,
+  },
+  tipsTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#F5A623',
+    marginBottom: 8,
+  },
+  tipText: {
+    fontSize: 14,
+    color: '#8B7E69',
+    marginBottom: 4,
+    lineHeight: 20,
+  },
+});
+
+export default SocialLinksScreen;

@@ -7,7 +7,9 @@ import {
   TouchableOpacity,
   Switch,
   ScrollView,
-  Alert
+  Alert,
+  ViewStyle,
+  TextStyle
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -39,6 +41,30 @@ const daysOfWeek = [
   { key: 'sunday', label: 'Domingo' },
 ];
 
+// Definición de la interfaz para los estilos usando los tipos específicos de React Native
+interface BusinessHoursStyles {
+  container: ViewStyle;
+  header: ViewStyle;
+  backButton: ViewStyle;
+  headerTitle: TextStyle;
+  saveButton: ViewStyle;
+  saveButtonText: TextStyle;
+  scrollContent: ViewStyle;
+  infoBox: ViewStyle;
+  infoText: TextStyle;
+  dayContainer: ViewStyle;
+  dayHeader: ViewStyle;
+  dayLabel: TextStyle;
+  closedContainer: ViewStyle;
+  closedLabel: TextStyle;
+  hoursContainer: ViewStyle;
+  timeButton: ViewStyle;
+  timeLabel: TextStyle;
+  timeValue: TextStyle;
+  copyButton: ViewStyle;
+  copyButtonText: TextStyle;
+}
+
 const BusinessHoursScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<BusinessHoursRouteProp>();
@@ -55,7 +81,7 @@ const BusinessHoursScreen: React.FC = () => {
     return initialHours || defaultBusinessHours;
   });
   
-  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [showTimePickerState, setShowTimePickerState] = useState(false);
   const [timePickerConfig, setTimePickerConfig] = useState<{
     day: keyof BusinessHours;
     type: 'open' | 'close';
@@ -77,7 +103,7 @@ const BusinessHoursScreen: React.FC = () => {
   
   // Manejar cambio de horario
   const handleTimeChange = (event: any, selectedTime?: Date) => {
-    setShowTimePicker(false);
+    setShowTimePickerState(false);
     
     if (!timePickerConfig || !selectedTime) return;
     
@@ -94,8 +120,8 @@ const BusinessHoursScreen: React.FC = () => {
     });
   };
   
-  // Mostrar selector de hora
-  const showTimePicker = (day: keyof BusinessHours, type: 'open' | 'close') => {
+  // Mostrar selector de hora - FUNCIÓN RENOMBRADA para evitar conflicto
+  const openTimePicker = (day: keyof BusinessHours, type: 'open' | 'close') => {
     const dayHours = hours[day] || defaultHours;
     const timeString = dayHours[type];
     
@@ -105,7 +131,7 @@ const BusinessHoursScreen: React.FC = () => {
       currentTime: timeStringToDate(timeString)
     });
     
-    setShowTimePicker(true);
+    setShowTimePickerState(true);
   };
   
   // Cambiar estado de abierto/cerrado para un día
@@ -213,7 +239,7 @@ const BusinessHoursScreen: React.FC = () => {
                 <View style={styles.hoursContainer}>
                   <TouchableOpacity 
                     style={styles.timeButton}
-                    onPress={() => showTimePicker(dayKey, 'open')}
+                    onPress={() => openTimePicker(dayKey, 'open')}
                   >
                     <Text style={styles.timeLabel}>Abrir:</Text>
                     <Text style={styles.timeValue}>{dayHours.open}</Text>
@@ -222,7 +248,7 @@ const BusinessHoursScreen: React.FC = () => {
                   
                   <TouchableOpacity 
                     style={styles.timeButton}
-                    onPress={() => showTimePicker(dayKey, 'close')}
+                    onPress={() => openTimePicker(dayKey, 'close')}
                   >
                     <Text style={styles.timeLabel}>Cerrar:</Text>
                     <Text style={styles.timeValue}>{dayHours.close}</Text>
@@ -243,7 +269,7 @@ const BusinessHoursScreen: React.FC = () => {
         })}
       </ScrollView>
       
-      {showTimePicker && timePickerConfig && (
+      {showTimePickerState && timePickerConfig && (
         <DateTimePicker
           value={timePickerConfig.currentTime}
           mode="time"
@@ -256,7 +282,7 @@ const BusinessHoursScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+const styles = StyleSheet.create<BusinessHoursStyles>({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',

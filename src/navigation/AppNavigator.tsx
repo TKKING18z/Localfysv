@@ -17,6 +17,13 @@ import ProfileScreen from '../screens/ProfileScreen';
 import MapScreen from '../screens/MapScreen';
 import AddBusinessScreen from '../screens/AddBusinessScreen';
 
+// New Screens for Business Detail Enhancements
+import BusinessHoursScreen from '../screens/business/BusinessHoursScreen';
+import PaymentMethodsScreen from '../screens/business/PaymentMethodsScreen';
+import SocialLinksScreen from '../screens/business/SocialLinkScreen';
+import MenuEditorScreen from '../screens/business/MenuEditorScreen';
+import VideoManagerScreen from '../screens/business/VideoManagerScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -25,6 +32,12 @@ export type RootStackParamList = {
   ForgotPassword: undefined;
   MainTabs: undefined;  // No params needed for tab navigator
   BusinessDetail: { businessId: string };
+  // Business enhancement screens
+  BusinessHours: { initialHours?: any; onSave: (hours: any) => void };
+  PaymentMethods: { initialMethods?: string[]; onSave: (methods: string[]) => void };
+  SocialLinks: { initialLinks?: any; onSave: (links: any) => void };
+  MenuEditor: { businessId: string; initialMenu?: any[]; menuUrl?: string; onSave: (menu: any[], menuUrl: string) => void };
+  VideoManager: { businessId: string; initialVideos?: any[]; onSave: (videos: any[]) => void };
   // Individual screens that can be accessed directly
   Home: undefined;
   Map: undefined;
@@ -179,6 +192,58 @@ const AppNavigator = () => {
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
             
+            {/* New Business Detail Enhancement Screens */}
+            <Stack.Screen 
+              name="BusinessHours" 
+              component={BusinessHoursScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Horarios de Atención',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="PaymentMethods" 
+              component={PaymentMethodsScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Métodos de Pago',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="SocialLinks" 
+              component={SocialLinksScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Redes Sociales',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="MenuEditor" 
+              component={MenuEditorScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Editor de Menú',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="VideoManager" 
+              component={VideoManagerScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Gestionar Videos',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            
             {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
             <Stack.Screen name="Map" component={MapScreen} />
             <Stack.Screen name="Favorites" component={FavoritesScreen} />
@@ -202,5 +267,9 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 16,
-    fontSize: 16,    color: '#333333',  },});
+    fontSize: 16,
+    color: '#333333',
+  },
+});
+
 export default AppNavigator;

@@ -3,6 +3,7 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+// Interfaces para los nuevos tipos de datos
 export interface BusinessHours {
   monday?: DayHours;
   tuesday?: DayHours;
@@ -35,6 +36,7 @@ export interface MenuItem {
   imageUrl?: string;
   category?: string;
 }
+
 // Define Business interface
 export interface Business {
   id: string;
@@ -50,6 +52,7 @@ export interface Business {
   rating?: number;
   createdAt?: any;
   updatedAt?: any;
+  createdBy?: string; // ID del usuario que creó el negocio
   businessHours?: BusinessHours;
   paymentMethods?: string[];
   socialLinks?: SocialLinks;
@@ -73,6 +76,7 @@ interface BusinessContextType {
   favorites: string[];
   getFavoriteBusinesses: () => Business[];
   getBusinessById: (id: string) => Promise<Business | null>;
+  updateBusiness: (id: string, data: Partial<Business>) => Promise<boolean>;
 }
 
 // Create context
@@ -135,6 +139,35 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         }));
     }
     
+    // Normalizar videos si existen
+    let normalizedVideos: {id?: string, url: string, thumbnail?: string}[] = [];
+    
+    if (data.videos && Array.isArray(data.videos)) {
+      normalizedVideos = data.videos
+        .filter((video: any) => video && typeof video === 'object' && video.url && typeof video.url === 'string')
+        .map((video: any) => ({
+          id: video.id || `video-${Math.random().toString(36).substr(2, 9)}`,
+          url: video.url,
+          thumbnail: video.thumbnail || undefined
+        }));
+    }
+    
+    // Normalizar menú si existe
+    let normalizedMenu: MenuItem[] = [];
+    
+    if (data.menu && Array.isArray(data.menu)) {
+      normalizedMenu = data.menu
+        .filter((item: any) => item && typeof item === 'object' && item.name && typeof item.price === 'number')
+        .map((item: any) => ({
+          id: item.id || `menu-${Math.random().toString(36).substr(2, 9)}`,
+          name: item.name,
+          description: item.description || undefined,
+          price: item.price,
+          imageUrl: item.imageUrl || undefined,
+          category: item.category || undefined
+        }));
+    }
+    
     // Crear objeto de negocio normalizado
     return {
       id,
@@ -148,8 +181,15 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       website: data.website || '',
       images: normalizedImages,
       location: data.location || null,
-      createdAt: data.createdAt?.toDate() || new Date(),
-      updatedAt: data.updatedAt?.toDate() || new Date(),
+      createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+      updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+      createdBy: data.createdBy || null,
+      businessHours: data.businessHours || undefined,
+      paymentMethods: data.paymentMethods || undefined,
+      socialLinks: data.socialLinks || undefined,
+      videos: normalizedVideos,
+      menu: normalizedMenu,
+      menuUrl: data.menuUrl || undefined
     };
   };
   
@@ -205,6 +245,52 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
   
+  // Function to update business data
+  const updateBusiness = async (id: string, data: Partial<Business>): Promise<boolean> => {
+    try {
+      // Update in Firestore
+      await firebase.firestore().collection('businesses').doc(id).update({
+        ...data,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+      
+      // Update in local state
+      setBusinesses(prevBusinesses => {
+        return prevBusinesses.map(business => {
+          if (business.id === id) {
+            return {
+              ...business,
+              ...data,
+              updatedAt: new Date()
+            };
+          }
+          return business;
+        });
+      });
+      
+      // Update filtered businesses if needed
+      if (selectedCategory) {
+        setFilteredBusinesses(prevFiltered => {
+          return prevFiltered.map(business => {
+            if (business.id === id) {
+              return {
+                ...business,
+                ...data,
+                updatedAt: new Date()
+              };
+            }
+            return business;
+          });
+        });
+      }
+      
+      return true;
+    } catch (err) {
+      console.error('Error updating business:', err);
+      return false;
+    }
+  };
+  
   // Initial data load
   useEffect(() => {
     fetchBusinesses();
@@ -254,7 +340,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     isFavorite,
     favorites,
     getFavoriteBusinesses,
-    getBusinessById
+    getBusinessById,
+    updateBusiness
   };
   
   return (
