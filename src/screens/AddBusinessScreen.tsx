@@ -16,12 +16,11 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { RootStackParamList } from '../navigation/AppNavigator';
+import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
+import { RootStackParamList } from '../navigation/AppNavigator';
+import { firebaseService } from '../services/firebaseService';
+import { BusinessHours, SocialLinks } from '../context/BusinessContext';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -32,11 +31,58 @@ const AddBusinessScreen: React.FC = () => {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('');
+  const [address, setAddress] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [website, setWebsite] = useState('');
   const [image, setImage] = useState<string | null>(null);
+  
+  // Advanced business details
+  const [location, setLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [businessHours, setBusinessHours] = useState<BusinessHours | undefined>(undefined);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
+  const [socialLinks, setSocialLinks] = useState<SocialLinks | undefined>(undefined);
+  const [videos, setVideos] = useState<Array<{ url: string; thumbnail?: string }>>([]);
+  const [menu, setMenu] = useState<any[]>([]);
+  const [menuUrl, setMenuUrl] = useState('');
   
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Get current location
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Location permission is required');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      setLocation({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      });
+      
+      // Optionally get address
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude
+      });
+      
+      if (addresses.length > 0) {
+        const firstAddress = addresses[0];
+        setAddress(
+          `${firstAddress.streetNumber || ''} ${firstAddress.street || ''}, 
+          ${firstAddress.city || ''}, ${firstAddress.region || ''}`
+        );
+      }
+    } catch (error) {
+      console.error('Location error:', error);
+      Alert.alert('Error', 'Could not get current location');
+    }
+  };
 
   // Pick an image from the gallery
   const pickImage = async () => {
@@ -52,7 +98,7 @@ const AddBusinessScreen: React.FC = () => {
       
       // Launch image library
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: "images",
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -67,11 +113,53 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
+  // Navigate to various detail screens
+  const navigateToBusinessHours = () => {
+    navigation.navigate('BusinessHours', {
+      initialHours: businessHours,
+      onSave: (hours: BusinessHours) => setBusinessHours(hours)
+    });
+  };
+
+  const navigateToPaymentMethods = () => {
+    navigation.navigate('PaymentMethods', {
+      initialMethods: paymentMethods,
+      onSave: (methods: string[]) => setPaymentMethods(methods)
+    });
+  };
+
+  const navigateToSocialLinks = () => {
+    navigation.navigate('SocialLinks', {
+      initialLinks: socialLinks,
+      onSave: (links: SocialLinks) => setSocialLinks(links)
+    });
+  };
+
+  const navigateToVideoManager = () => {
+    navigation.navigate('VideoManager', {
+      businessId: 'new_business', // You'll update this with actual ID later
+      initialVideos: videos,
+      onSave: (newVideos: any[]) => setVideos(newVideos)
+    });
+  };
+
+  const navigateToMenuEditor = () => {
+    navigation.navigate('MenuEditor', {
+      businessId: 'new_business', // You'll update this with actual ID later
+      initialMenu: menu,
+      menuUrl,
+      onSave: (newMenu: any[], newMenuUrl: string) => {
+        setMenu(newMenu);
+        setMenuUrl(newMenuUrl);
+      }
+    });
+  };
+
   // Submit the form
   const handleSubmit = async () => {
     // Validate form
     if (!name.trim() || !description.trim() || !category.trim() || !image) {
-      Alert.alert('Información incompleta', 'Por favor completa todos los campos y selecciona una imagen.');
+      Alert.alert('Información incompleta', 'Por favor completa los campos obligatorios');
       return;
     }
     
@@ -79,123 +167,59 @@ const AddBusinessScreen: React.FC = () => {
     setUploadProgress(0);
     
     try {
-      // Get current user
-      const currentUser = firebase.auth().currentUser;
-      if (!currentUser) {
-        Alert.alert('Error', 'Debes iniciar sesión para agregar un negocio.');
-        setIsLoading(false);
-        return;
+      // Prepare business data
+      const businessData = {
+        name,
+        description,
+        category,
+        address,
+        phone,
+        email,
+        website,
+        location: location ? JSON.stringify(location) : undefined,
+        businessHours,
+        paymentMethods,
+        socialLinks,
+        videos,
+        menu,
+        menuUrl,
+        images: []  // Will be populated in the upload process
+      };
+      
+      // Create business in Firestore
+      const result = await firebaseService.businesses.create(businessData);
+      
+      if (!result.success || !result.data) {
+        throw new Error(result.error?.message || 'Failed to create business');
       }
       
-      console.log("Current user:", currentUser.uid, currentUser.email);
+      const businessId = result.data.id;
       
-      // Generate a unique ID for the business
-      const businessRef = firebase.firestore().collection('businesses').doc();
-      const businessId = businessRef.id;
-      
-      console.log("Created business ID:", businessId);
-      
-      try {
-        // First create the business document without images
-        const initialBusinessData = {
-          name,
-          description,
-          category,
-          images: [],
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          createdBy: currentUser.uid,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        };
-        
-        // Save initial business data to Firestore
-        await businessRef.set(initialBusinessData);
-        console.log("Business document created successfully");
-        
-        // Then try to upload the image
-        const imageId = `${businessId}_main_${Date.now()}`;
-        const storageRef = firebase.storage().ref();
-        const imageRef = storageRef.child(`businesses/${businessId}/images/${imageId}`);
-        
-        console.log("Attempting to upload image to:", `businesses/${businessId}/images/${imageId}`);
-        
-        // Convert image URI to blob
-        const response = await fetch(image);
-        const blob = await response.blob();
-        
-        // Upload blob to firebase storage with progress tracking
-        const uploadTask = imageRef.put(blob);
-        
-        uploadTask.on(
-          'state_changed',
-          (snapshot) => {
-            // Track upload progress
-            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            setUploadProgress(progress);
-            console.log(`Upload progress: ${progress.toFixed(0)}%`);
-          },
-          (error) => {
-            console.error('Upload error details:', error);
-            
-            // Handle specific error codes
-            if (error.code === 'storage/unauthorized') {
-              Alert.alert(
-                'Error de Permisos', 
-                'No tienes permisos para subir imágenes. Contacta al administrador para actualizar las reglas de Firebase Storage.'
-              );
-            } else {
-              Alert.alert('Error', `Error al subir la imagen: ${error.message}`);
-            }
-            
-            // Even if image upload fails, we already created the business
-            Alert.alert(
-              'Negocio Creado Parcialmente', 
-              'El negocio fue creado pero hubo un problema al subir la imagen. Puedes intentar agregar la imagen más tarde.'
-            );
-            setIsLoading(false);
-            navigation.goBack();
-          },
-          async () => {
-            // Upload completed successfully
-            try {
-              // Get the download URL
-              const downloadURL = await imageRef.getDownloadURL();
-              console.log("Image uploaded successfully, URL:", downloadURL);
-              
-              // Update business with image information
-              await businessRef.update({
-                images: firebase.firestore.FieldValue.arrayUnion({
-                  id: imageId,
-                  url: downloadURL,
-                  isMain: true
-                })
-              });
-              
-              console.log("Business document updated with image");
-              
-              Alert.alert('Éxito', 'Negocio agregado correctamente');
-              setIsLoading(false);
-              
-              // Navigate back
-              navigation.goBack();
-            } catch (error) {
-              console.error('Error getting download URL:', error);
-              Alert.alert(
-                'Negocio Creado Parcialmente', 
-                'El negocio fue creado pero hubo un problema al procesar la imagen. Puedes intentar agregar la imagen más tarde.'
-              );
-              setIsLoading(false);
-              navigation.goBack();
-            }
-          }
+      // Upload main image
+      if (image) {
+        const uploadResult = await firebaseService.storage.uploadImage(
+          image, 
+          `businesses/${businessId}/images/main_${Date.now()}.jpg`
         );
-      } catch (error) {
-        console.error('Error in image upload or business creation:', error);
-        Alert.alert('Error', 'No se pudo completar el proceso.');
-        setIsLoading(false);
+        
+        if (uploadResult.success && uploadResult.data) {
+          // Update business with image
+          await firebaseService.businesses.update(businessId, {
+            images: [{
+              id: `img-${Date.now()}`,
+              url: uploadResult.data,
+              isMain: true
+            }]
+          });
+        }
       }
+      
+      Alert.alert('Éxito', 'Negocio agregado correctamente');
+      navigation.goBack();
     } catch (error) {
       console.error('Error adding business:', error);
       Alert.alert('Error', 'No se pudo agregar el negocio. Intenta nuevamente.');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -221,54 +245,172 @@ const AddBusinessScreen: React.FC = () => {
           
           {/* Form */}
           <View style={styles.form}>
-            {/* Name field */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Nombre del Negocio</Text>
-              <TextInput
-                style={styles.input}
-                value={name}
-                onChangeText={setName}
-                placeholder="Nombre del negocio"
-                placeholderTextColor="#8E8E93"
-              />
+            {/* Basic Info Section */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Información Básica</Text>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Nombre del Negocio *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Nombre del negocio"
+                  placeholderTextColor="#8E8E93"
+                />
+              </View>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Descripción *</Text>
+                <TextInput
+                  style={[styles.input, styles.textArea]}
+                  value={description}
+                  onChangeText={setDescription}
+                  placeholder="Describe tu negocio..."
+                  placeholderTextColor="#8E8E93"
+                  multiline={true}
+                  numberOfLines={4}
+                  textAlignVertical="top"
+                />
+              </View>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Categoría *</Text>
+                <TextInput
+                  style={styles.input}
+                  value={category}
+                  onChangeText={setCategory}
+                  placeholder="Categoría (ej. Restaurante, Tienda)"
+                  placeholderTextColor="#8E8E93"
+                />
+              </View>
             </View>
             
-            {/* Description field */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Descripción</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                value={description}
-                onChangeText={setDescription}
-                placeholder="Describe tu negocio..."
-                placeholderTextColor="#8E8E93"
-                multiline={true}
-                numberOfLines={4}
-                textAlignVertical="top"
-              />
+            {/* Contact Info Section */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Información de Contacto</Text>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Dirección</Text>
+                <View style={styles.locationInputContainer}>
+                  <TextInput
+                    style={[styles.input, { flex: 1 }]}
+                    value={address}
+                    onChangeText={setAddress}
+                    placeholder="Dirección del negocio"
+                    placeholderTextColor="#8E8E93"
+                  />
+                  <TouchableOpacity 
+                    style={styles.locationButton}
+                    onPress={getCurrentLocation}
+                  >
+                    <MaterialIcons name="my-location" size={24} color="#007AFF" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Teléfono</Text>
+                <TextInput
+                  style={styles.input}
+                  value={phone}
+                  onChangeText={setPhone}
+                  placeholder="Número de contacto"
+                  placeholderTextColor="#8E8E93"
+                  keyboardType="phone-pad"
+                />
+              </View>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Correo Electrónico</Text>
+                <TextInput
+                  style={styles.input}
+                  value={email}
+                  onChangeText={setEmail}
+                  placeholder="Correo de contacto"
+                  placeholderTextColor="#8E8E93"
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+              </View>
+              
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Sitio Web</Text>
+                <TextInput
+                  style={styles.input}
+                  value={website}
+                  onChangeText={setWebsite}
+                  placeholder="URL del sitio web"
+                  placeholderTextColor="#8E8E93"
+                  autoCapitalize="none"
+                  keyboardType="url"
+                />
+              </View>
             </View>
             
-            {/* Category field */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Categoría</Text>
-              <TextInput
-                style={styles.input}
-                value={category}
-                onChangeText={setCategory}
-                placeholder="Categoría (ej. Restaurante, Tienda)"
-                placeholderTextColor="#8E8E93"
-              />
+            {/* Advanced Details Section */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Detalles Adicionales</Text>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToBusinessHours}
+              >
+                <MaterialIcons name="access-time" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Horarios de Atención</Text>
+                {businessHours && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToPaymentMethods}
+              >
+                <MaterialIcons name="payment" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Métodos de Pago</Text>
+                {paymentMethods.length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToSocialLinks}
+              >
+                <MaterialIcons name="link" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Redes Sociales</Text>
+                {socialLinks && Object.keys(socialLinks).length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToVideoManager}
+              >
+                <MaterialIcons name="videocam" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Videos</Text>
+                {videos.length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToMenuEditor}
+              >
+                <MaterialIcons name="restaurant-menu" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Menú</Text>
+                {(menu.length > 0 || menuUrl) && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+              </TouchableOpacity>
             </View>
             
-            {/* Image picker */}
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Imagen Principal</Text>
+            {/* Image Picker */}
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Imagen Principal *</Text>
               <TouchableOpacity 
                 style={styles.imagePicker} 
                 onPress={pickImage}
               >
                 {image ? (
-                  <Image source={{ uri: image }} style={styles.selectedImage} />
+                  <Image 
+                    source={{ uri: image }} 
+                    style={styles.selectedImage} 
+                    resizeMode="cover" 
+                  />
                 ) : (
                   <View style={styles.placeholderContainer}>
                     <MaterialIcons name="add-photo-alternate" size={40} color="#8E8E93" />
@@ -278,10 +420,11 @@ const AddBusinessScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
+            {/* Progress Indicator */}
             {isLoading && (
               <View style={styles.progressContainer}>
                 <Text style={styles.progressText}>
-                  Subiendo imagen: {uploadProgress.toFixed(0)}%
+                  Subiendo información: {uploadProgress.toFixed(0)}%
                 </Text>
                 <View style={styles.progressBarContainer}>
                   <View 
@@ -307,7 +450,10 @@ const AddBusinessScreen: React.FC = () => {
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={styles.submitButtonText}>Agregar Negocio</Text>
+              <>
+                <MaterialIcons name="save" size={24} color="#FFFFFF" />
+                <Text style={styles.submitButtonText}>Guardar Negocio</Text>
+              </>
             )}
           </TouchableOpacity>
         </ScrollView>
@@ -350,8 +496,25 @@ const styles = StyleSheet.create({
   form: {
     padding: 16,
   },
+  sectionContainer: {
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginBottom: 16,
+  },
   formGroup: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   label: {
     fontSize: 16,
@@ -360,49 +523,68 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    backgroundColor: 'white',
+    backgroundColor: '#F0F0F5',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
     color: '#333333',
   },
   textArea: {
     height: 120,
-    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
+  locationInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  locationButton: {
+    marginLeft: 8,
+    padding: 8,
+    backgroundColor: '#F0F0F5',
+    borderRadius: 8,
   },
   imagePicker: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
     height: 200,
+    backgroundColor: '#F0F0F5',
+    borderRadius: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
     overflow: 'hidden',
   },
   selectedImage: {
     width: '100%',
     height: '100%',
-    resizeMode: 'cover',
   },
   placeholderContainer: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
     alignItems: 'center',
   },
   placeholderText: {
+    marginTop: 8,
     fontSize: 16,
     color: '#8E8E93',
-    marginTop: 8,
+  },
+  advancedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F0F0F5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  advancedButtonText: {
+    fontSize: 16,
+    color: '#333333',
+    marginLeft: 12,
+    flex: 1,
   },
   progressContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   progressText: {
     fontSize: 14,
     color: '#333333',
     marginBottom: 8,
+    textAlign: 'center',
   },
   progressBarContainer: {
     height: 6,
@@ -415,21 +597,22 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
   },
   submitButton: {
+    flexDirection: 'row',
     backgroundColor: '#007AFF',
-    borderRadius: 8,
+    borderRadius: 12,
     padding: 16,
     margin: 16,
-    alignItems: 'center',
     justifyContent: 'center',
-    height: 56,
+    alignItems: 'center',
   },
   submitButtonDisabled: {
     backgroundColor: '#7FB5FF',
   },
   submitButtonText: {
     color: 'white',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
+    marginLeft: 8,
   },
 });
 
