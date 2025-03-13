@@ -77,14 +77,19 @@ const ProfileScreen: React.FC = () => {
             .get();
 
           if (userDoc.exists) {
-            const userData = userDoc.data() as Omit<UserProfile, 'uid'>;
+            const userData = userDoc.data() || {};
+            
+            // Asegúrate de que la propiedad role se lea correctamente
+            // Y se mapee al formato que espera la UI (Cliente/Propietario)
+            const userRole = userData.role === 'business_owner' ? 'Propietario' : 'Cliente';
+            
             setProfile({
               uid: user.uid,
               displayName: userData.displayName || user.displayName || 'Usuario',
               email: userData.email || user.email || '',
               phoneNumber: userData.phoneNumber || user.phoneNumber || null,
               address: userData.address || null,
-              userType: userData.userType || 'Cliente',
+              userType: userRole, // Usa el rol mapeado correctamente
               photoURL: userData.photoURL || user.photoURL || null,
               createdAt: userData.createdAt || new Date().toISOString(),
             });

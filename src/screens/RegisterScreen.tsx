@@ -18,7 +18,7 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useAuth } from '../context/AuthContext'; // Fix path: contexts -> context
+import { useAuth } from '../context/AuthContext'; // Usa el contexto de autenticación real
 import { RootStackParamList } from '../types';
 import { LinearGradient } from 'expo-linear-gradient';
 
@@ -32,16 +32,8 @@ const { width } = Dimensions.get('window');
 const RegisterScreen: React.FC = () => {
   const navigation = useNavigation<RegisterScreenNavigationProp>();
   
-  // If useAuth is not ready yet, provide fallbacks
-  const auth = {
-    signUp: async (email: string, password: string, name: string, role: UserRole) => {
-      // Temporary implementation that simulates success
-      console.log('Creating account:', { email, name, role });
-      Alert.alert('Development Mode', 'Sign up functionality not implemented yet');
-      return true;
-    },
-    loading: false
-  };
+  // Usar el hook useAuth real en lugar del objeto placeholder
+  const { signUp, loading } = useAuth();
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -120,11 +112,24 @@ const RegisterScreen: React.FC = () => {
       return;
     }
     
-    const success = await auth.signUp(email, password, name, role);
-    if (success) {
+    try {
+      // Llamar a signUp con los datos del formulario
+      await signUp(email, password, name, role);
       Alert.alert('Éxito', 'Cuenta creada correctamente', [
         { text: 'OK', onPress: () => navigation.navigate('Login') }
       ]);
+    } catch (error: any) {
+      // Manejar errores específicos
+      let errorMessage = 'Error al crear la cuenta';
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = 'Este correo electrónico ya está en uso';
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = 'Correo electrónico inválido';
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = 'La contraseña es demasiado débil';
+      }
+      Alert.alert('Error', errorMessage);
+      console.error('Error creating account:', error);
     }
   };
   
@@ -276,7 +281,7 @@ const RegisterScreen: React.FC = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={handleRegister}
-              disabled={auth.loading}
+              disabled={loading}
             >
               <LinearGradient
                 colors={['#007AFF', '#47A9FF']}
@@ -285,7 +290,7 @@ const RegisterScreen: React.FC = () => {
                 style={styles.registerButton}
               >
                 <Text style={styles.registerButtonText}>
-                  {auth.loading ? 'Creando cuenta...' : 'Crear Cuenta'}
+                  {loading ? 'Creando cuenta...' : 'Crear Cuenta'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -309,6 +314,7 @@ const RegisterScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  // ... Mantener los estilos existentes
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',

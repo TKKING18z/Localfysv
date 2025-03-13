@@ -18,29 +18,65 @@ import { Business } from '../../context/BusinessContext';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { useAuth } from '../../context/AuthContext';
+import { userService } from '../../services/authService'; // Import from authService
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
 const MyBusinessesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
+  const { user } = useAuth(); // Usa el contexto de autenticación
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Verificar que el usuario tenga el rol correcto
+  useEffect(() => {
+    const checkUserRole = async () => {
+      if (!user) {
+        // Si no hay usuario, redirigir al login
+        navigation.navigate('Login');
+        return;
+      }
+      
+      // Verificar que el usuario sea de tipo business_owner
+      if (user.role !== 'business_owner') {
+        Alert.alert(
+          'Acceso restringido',
+          'Esta sección solo está disponible para propietarios de negocios.',
+          [
+            { 
+              text: 'OK', 
+              onPress: () => navigation.navigate('Home') 
+            }
+          ]
+        );
+        return;
+      }
+      
+      // Verificar y corregir la integridad de los datos
+      await userService.verifyUserDataIntegrity(user.uid);
+      
+      // Cargar los negocios
+      loadUserBusinesses();
+    };
+    
+    checkUserRole();
+  }, [user]);
   
   // Cargar negocios del usuario actual
   const loadUserBusinesses = async () => {
     try {
       setLoading(true);
-      const currentUser = firebase.auth().currentUser;
       
-      if (!currentUser) {
+      if (!user) {
         setLoading(false);
         return;
       }
       
       const snapshot = await firebase.firestore()
         .collection('businesses')
-        .where('createdBy', '==', currentUser.uid)
+        .where('createdBy', '==', user.uid)
         .get();
       
       const userBusinesses: Business[] = [];
@@ -59,11 +95,6 @@ const MyBusinessesScreen: React.FC = () => {
       Alert.alert('Error', 'No se pudieron cargar tus negocios');
     }
   };
-  
-  // Cargar negocios al montar el componente
-  useEffect(() => {
-    loadUserBusinesses();
-  }, []);
   
   // Refrescar la lista
   const handleRefresh = async () => {
