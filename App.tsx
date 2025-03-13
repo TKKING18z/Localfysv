@@ -5,13 +5,15 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { BusinessProvider } from './src/context/BusinessContext';
 import { LocationProvider } from './src/context/LocationContext';
+import { AuthProvider } from './src/context/AuthContext'; 
+import { ThemeProvider } from './src/context/ThemeContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
 import 'react-native-gesture-handler';
-// El resto de tus importaciones van después
+import * as SplashScreen from 'expo-splash-screen';
 
 // Configuración de Firebase
 const firebaseConfig = {
@@ -37,6 +39,11 @@ LogBox.ignoreLogs([
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
 }
+
+// Prevenir que la pantalla de splash se oculte automáticamente
+SplashScreen.preventAutoHideAsync().catch(() => {
+  /* revert to default behavior if something goes wrong */
+});
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
@@ -65,6 +72,9 @@ export default function App() {
       // Mantener pantalla de carga por al menos 1.5 segundos para mejor UX
       const timer = setTimeout(() => {
         setIsLoading(false);
+        SplashScreen.hideAsync().catch(() => {
+          /* ignore if something goes wrong */
+        });
       }, 1500);
       
       return () => clearTimeout(timer);
@@ -97,11 +107,15 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <LocationProvider>
-        <BusinessProvider>
-          <AppNavigator />
-        </BusinessProvider>
-      </LocationProvider>
+      <AuthProvider>
+        <ThemeProvider>
+          <LocationProvider>
+            <BusinessProvider>
+              <AppNavigator />
+            </BusinessProvider>
+          </LocationProvider>
+        </ThemeProvider>
+      </AuthProvider>
     </SafeAreaProvider>
   );
 }

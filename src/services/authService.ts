@@ -1,153 +1,273 @@
-// src/context/AuthContext.tsx
-import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+// src/services/authService.ts
 import firebase from 'firebase/compat/app';
-import { authService, UserData, UserRole } from '../services/authService';
+import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
+import { Alert } from 'react-native';
 
-interface AuthContextType {
-  user: UserData | null;
-  loading: boolean;
-  signIn: (email: string, password: string) => Promise<boolean>;
-  signUp: (email: string, password: string, name: string, role: UserRole) => Promise<boolean>;
-  signOut: () => Promise<void>;
-  forgotPassword: (email: string) => Promise<boolean>;
+// Definir tipos
+export type UserRole = 'customer' | 'business_owner';
+
+export interface UserData {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  role: UserRole;
+  phoneNumber?: string | null;
+  address?: string | null;
+  photoURL?: string | null;
+  createdAt?: Date;
 }
 
-// Crear el contexto
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+interface AuthResponse {
+  success: boolean;
+  user?: UserData | null;
+  error?: string;
+}
 
-// Proveedor del contexto
-export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<UserData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-
-  // Observar cambios en el estado de autenticación
-  useEffect(() => {
-    const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
-      setLoading(true);
-      try {
-        if (firebaseUser) {
-          // Verificar integridad de datos del usuario
-          const response = await authService.verifyUserDataIntegrity(firebaseUser.uid);
-          if (response.success && response.user) {
-            setUser(response.user);
-          } else {
-            // Si hay problemas con los datos del usuario, obtener información básica
-            const userData = await authService.getCurrentUser();
-            setUser(userData);
-          }
-        } else {
-          setUser(null);
-        }
-      } catch (error) {
-        console.error("Error en observador de autenticación:", error);
-        setUser(null);
-      } finally {
-        setLoading(false);
-      }
-    });
-
-    return () => unsubscribe();
-  }, []);
-
+// Funciones del servicio de autenticación
+export const authService = {
   // Iniciar sesión
-  const signIn = async (email: string, password: string): Promise<boolean> => {
-    setLoading(true);
+  signIn: async (email: string, password: string): Promise<AuthResponse> => {
     try {
-      const response = await authService.signIn(email, password);
-      if (response.success && response.user) {
-        setUser(response.user);
-        return true;
-      } else if (response.error) {
-        Alert.alert("Error de acceso", response.error);
+      const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
+      
+      if (!userCredential.user) {
+        return { success: false, error: 'No se pudo autenticar el usuario' };
       }
-      return false;
-    } catch (error) {
-      console.error("Error en inicio de sesión:", error);
-      Alert.alert("Error", "No se pudo iniciar sesión");
-      return false;
-    } finally {
-      setLoading(false);
+      
+      // Obtener datos del usuario de Firestore
+      const userData = await getUserData(userCredential.user.uid);
+      
+      return { 
+        success: true, 
+        user: userData 
+      };
+    } catch (error: any) {
+      // Mensajes de error específicos
+      let errorMessage = "Error al iniciar sesión";
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = "No existe una cuenta con este correo electrónico";
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = "Contraseña incorrecta";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Correo electrónico no válido";
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = "Demasiados intentos fallidos. Intenta más tarde";
+      }
+      
+      return { success: false, error: errorMessage };
     }
-  };
-
+  },
+  
   // Registrar usuario
-  const signUp = async (
+  signUp: async (
     email: string,
     password: string,
     name: string,
     role: UserRole
-  ): Promise<boolean> => {
-    setLoading(true);
+  ): Promise<AuthResponse> => {
     try {
-      const response = await authService.signUp(email, password, name, role);
-      if (response.success && response.user) {
-        setUser(response.user);
-        return true;
-      } else if (response.error) {
-        Alert.alert("Error de registro", response.error);
+      // Crear usuario en Firebase Auth
+      const credentials = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      
+      if (!credentials.user) {
+        return { success: false, error: 'No se pudo crear el usuario' };
       }
-      return false;
-    } catch (error) {
-      console.error("Error en registro:", error);
-      Alert.alert("Error", "No se pudo crear la cuenta");
-      return false;
-    } finally {
-      setLoading(false);
+      
+      // Actualizar displayName
+      await credentials.user.updateProfile({
+        displayName: name
+      });
+      
+      // Crear documento en Firestore
+      const userData: UserData = {
+        uid: credentials.user.uid,
+        displayName: name,
+        email: email,
+        role: role,
+        createdAt: new Date()
+      };
+      
+      await firebase.firestore()
+        .collection('users')
+        .doc(credentials.user.uid)
+        .set(userData);
+      
+      return { success: true, user: userData };
+    } catch (error: any) {
+      // Mensajes de error específicos
+      let errorMessage = "Error al crear cuenta";
+      if (error.code === 'auth/email-already-in-use') {
+        errorMessage = "Este correo electrónico ya está en uso";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Correo electrónico no válido";
+      } else if (error.code === 'auth/weak-password') {
+        errorMessage = "La contraseña es demasiado débil";
+      }
+      
+      return { success: false, error: errorMessage };
     }
-  };
-
+  },
+  
   // Cerrar sesión
-  const signOut = async (): Promise<void> => {
+  signOut: async (): Promise<AuthResponse> => {
     try {
-      await authService.signOut();
-      setUser(null);
+      await firebase.auth().signOut();
+      return { success: true };
     } catch (error) {
-      console.error("Error al cerrar sesión:", error);
-      Alert.alert("Error", "No se pudo cerrar sesión");
+      return { success: false, error: 'Error al cerrar sesión' };
     }
-  };
-
+  },
+  
   // Recuperar contraseña
-  const forgotPassword = async (email: string): Promise<boolean> => {
+  forgotPassword: async (email: string): Promise<AuthResponse> => {
     try {
-      const response = await authService.forgotPassword(email);
-      if (!response.success && response.error) {
-        Alert.alert("Error", response.error);
+      await firebase.auth().sendPasswordResetEmail(email);
+      return { success: true };
+    } catch (error: any) {
+      let errorMessage = "Error al enviar el correo de recuperación";
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = "No existe una cuenta con este correo electrónico";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Correo electrónico no válido";
       }
-      return response.success;
-    } catch (error) {
-      console.error("Error en recuperación de contraseña:", error);
-      Alert.alert("Error", "No se pudo enviar el correo de recuperación");
-      return false;
+      
+      return { success: false, error: errorMessage };
     }
-  };
-
-  // Valores del contexto
-  const value = {
-    user,
-    loading,
-    signIn,
-    signUp,
-    signOut,
-    forgotPassword,
-  };
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
-};
-
-// Hook personalizado para usar el contexto
-export const useAuth = () => {
-  const context = useContext(AuthContext);
-  if (context === undefined) {
-    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
+  },
+  
+  // Obtener usuario actual
+  getCurrentUser: async (): Promise<UserData | null> => {
+    const firebaseUser = firebase.auth().currentUser;
+    if (!firebaseUser) return null;
+    
+    return await getUserData(firebaseUser.uid);
+  },
+  
+  // Verificar y actualizar integridad de datos del usuario
+  verifyUserDataIntegrity: async (userId: string): Promise<AuthResponse> => {
+    try {
+      // Verificar si existe el documento del usuario
+      const userDoc = await firebase.firestore()
+        .collection('users')
+        .doc(userId)
+        .get();
+        
+      if (!userDoc.exists) {
+        // El usuario no tiene documento en Firestore
+        const firebaseUser = firebase.auth().currentUser;
+        if (!firebaseUser) {
+          return { success: false, error: 'Usuario no autenticado' };
+        }
+        
+        // Crear documento básico
+        const basicUserData: UserData = {
+          uid: userId,
+          displayName: firebaseUser.displayName || 'Usuario',
+          email: firebaseUser.email,
+          role: 'customer', // Rol por defecto
+          createdAt: new Date()
+        };
+        
+        await firebase.firestore()
+          .collection('users')
+          .doc(userId)
+          .set(basicUserData);
+          
+        return { success: true, user: basicUserData };
+      }
+      
+      // Verificar que el rol es válido
+      const userData = userDoc.data();
+      if (!userData?.role || (userData.role !== 'customer' && userData.role !== 'business_owner')) {
+        // Corregir el rol
+        await firebase.firestore()
+          .collection('users')
+          .doc(userId)
+          .update({ role: 'customer' });
+      }
+      
+      // Obtener y retornar los datos actualizados
+      const updatedUser = await getUserData(userId);
+      return { success: true, user: updatedUser };
+    } catch (error) {
+      return { success: false, error: 'Error al verificar la integridad de los datos' };
+    }
   }
-  return context;
 };
 
-// Exportar los tipos
-export { UserRole };
-export default AuthContext;
+// Función auxiliar para obtener datos del usuario
+async function getUserData(userId: string): Promise<UserData | null> {
+  try {
+    const doc = await firebase.firestore()
+      .collection('users')
+      .doc(userId)
+      .get();
+      
+    if (!doc.exists) return null;
+    
+    const data = doc.data();
+    // Asegurarse de que el rol es uno de los valores permitidos
+    const role: UserRole = data?.role === 'business_owner' ? 'business_owner' : 'customer';
+    
+    return {
+      uid: userId,
+      displayName: data?.displayName || null,
+      email: data?.email || null,
+      role: role,
+      phoneNumber: data?.phoneNumber || null,
+      address: data?.address || null,
+      photoURL: data?.photoURL || null,
+      createdAt: data?.createdAt?.toDate() || new Date()
+    };
+  } catch (error) {
+    console.error('Error al obtener datos del usuario:', error);
+    return null;
+  }
+}
+
+// Servicio para gestionar datos de usuarios
+export const userService = {
+  // Actualizar perfil de usuario
+  updateProfile: async (
+    userId: string, 
+    profileData: Partial<UserData>
+  ): Promise<AuthResponse> => {
+    try {
+      // Actualizar en Firestore
+      await firebase.firestore()
+        .collection('users')
+        .doc(userId)
+        .update({
+          ...profileData,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      
+      // Si hay displayName, actualizar también en Auth
+      if (profileData.displayName) {
+        const user = firebase.auth().currentUser;
+        if (user) {
+          await user.updateProfile({
+            displayName: profileData.displayName
+          });
+        }
+      }
+      
+      // Obtener datos actualizados
+      const updatedUser = await getUserData(userId);
+      return { success: true, user: updatedUser };
+    } catch (error) {
+      return { success: false, error: 'Error al actualizar el perfil' };
+    }
+  },
+  
+  // Obtener datos de usuario
+  getUserData: async (userId: string): Promise<UserData | null> => {
+    return await getUserData(userId);
+  },
+  
+  // Verificar integridad de datos del usuario (duplicado de authService para compatibilidad)
+  verifyUserDataIntegrity: async (userId: string): Promise<AuthResponse> => {
+    return await authService.verifyUserDataIntegrity(userId);
+  }
+};

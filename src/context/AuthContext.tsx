@@ -1,23 +1,10 @@
+// src/context/AuthContext.tsx
 import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
 import { Alert } from 'react-native';
+import { authService, UserData, UserRole } from '../services/authService';
 
-// Define user role type
-export type UserRole = 'customer' | 'business_owner';
-
-// Define user type
-interface User {
-  uid: string;
-  email: string;
-  displayName: string;
-  role: UserRole;
-}
-
-// Define auth context type
 interface AuthContextType {
-  user: User | null;
+  user: UserData | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<boolean>;
   signUp: (email: string, password: string, name: string, role: UserRole) => Promise<boolean>;
@@ -25,175 +12,117 @@ interface AuthContextType {
   forgotPassword: (email: string) => Promise<boolean>;
 }
 
-// Create context
+// Crear el contexto
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Create provider component
+// Proveedor del contexto
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<UserData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // Listen for auth state changes
+  // Observar cambios en el estado de autenticación
   useEffect(() => {
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          // Get user profile from Firestore
-          const userDoc = await firebase.firestore()
-            .collection('users')
-            .doc(firebaseUser.uid)
-            .get();
-
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            
-            // Validar que el rol sea uno de los valores esperados
-            const userRole: UserRole = 
-              userData?.role === 'business_owner' ? 'business_owner' : 'customer';
-              
-            setUser({
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              displayName: userData?.displayName || firebaseUser.displayName || '',
-              role: userRole,
-            });
-            
-            console.log("Usuario autenticado con rol:", userRole);
+      setLoading(true);
+      try {
+        if (firebaseUser) {
+          // Verificar integridad de datos del usuario
+          const response = await authService.verifyUserDataIntegrity(firebaseUser.uid);
+          if (response.success && response.user) {
+            setUser(response.user);
           } else {
-            // User document doesn't exist - create a basic one
-            console.log("No se encontró documento de usuario, creando uno básico");
-            const basicUserData = {
-              displayName: firebaseUser.displayName || 'Usuario',
-              email: firebaseUser.email || '',
-              role: 'customer' as UserRole,
-              createdAt: firebase.firestore.FieldValue.serverTimestamp()
-            };
-            
-            await firebase.firestore()
-              .collection('users')
-              .doc(firebaseUser.uid)
-              .set(basicUserData);
-              
-            setUser({
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              displayName: firebaseUser.displayName || 'Usuario',
-              role: 'customer',
-            });
+            // Si hay problemas con los datos del usuario, obtener información básica
+            const userData = await authService.getCurrentUser();
+            setUser(userData);
           }
-        } catch (error) {
-          console.error("Error fetching user data:", error);
+        } else {
           setUser(null);
         }
-      } else {
+      } catch (error) {
+        console.error("Error en observador de autenticación:", error);
         setUser(null);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Sign in with email and password
+  // Iniciar sesión
   const signIn = async (email: string, password: string): Promise<boolean> => {
+    setLoading(true);
     try {
-      setLoading(true);
-      await firebase.auth().signInWithEmailAndPassword(email, password);
-      return true;
-    } catch (error: any) {
-      console.error("Error signing in:", error);
-      
-      // Mensajes de error específicos
-      let errorMessage = "Error al iniciar sesión";
-      if (error.code === 'auth/user-not-found') {
-        errorMessage = "No existe una cuenta con este correo electrónico";
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = "Contraseña incorrecta";
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = "Correo electrónico no válido";
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = "Demasiados intentos fallidos. Intenta más tarde";
+      const response = await authService.signIn(email, password);
+      if (response.success && response.user) {
+        setUser(response.user);
+        return true;
+      } else if (response.error) {
+        Alert.alert("Error de acceso", response.error);
       }
-      
-      Alert.alert("Error de acceso", errorMessage);
+      return false;
+    } catch (error) {
+      console.error("Error en inicio de sesión:", error);
+      Alert.alert("Error", "No se pudo iniciar sesión");
       return false;
     } finally {
       setLoading(false);
     }
   };
 
-  // Sign up with email and password
+  // Registrar usuario
   const signUp = async (
     email: string,
     password: string,
     name: string,
     role: UserRole
   ): Promise<boolean> => {
+    setLoading(true);
     try {
-      setLoading(true);
-      console.log(`Registrando usuario con rol: ${role}`);
-      
-      // Create user in Firebase Auth
-      const credentials = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      
-      if (credentials.user) {
-        // Update display name
-        await credentials.user.updateProfile({
-          displayName: name,
-        });
-
-        // Create user document in Firestore with the correct role
-        await firebase.firestore().collection('users').doc(credentials.user.uid).set({
-          displayName: name,
-          email,
-          role, // Asegurarse de que esto se guarde correctamente
-          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        });
-        
-        console.log(`Usuario registrado exitosamente con rol: ${role}`);
+      const response = await authService.signUp(email, password, name, role);
+      if (response.success && response.user) {
+        setUser(response.user);
         return true;
+      } else if (response.error) {
+        Alert.alert("Error de registro", response.error);
       }
       return false;
-    } catch (error: any) {
-      console.error("Error signing up:", error);
-      
-      // Mensajes de error específicos
-      let errorMessage = "Error al crear cuenta";
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = "Este correo electrónico ya está en uso";
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = "Correo electrónico no válido";
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = "La contraseña es demasiado débil";
-      }
-      
-      Alert.alert("Error de registro", errorMessage);
+    } catch (error) {
+      console.error("Error en registro:", error);
+      Alert.alert("Error", "No se pudo crear la cuenta");
       return false;
     } finally {
       setLoading(false);
     }
   };
 
-  // Sign out
+  // Cerrar sesión
   const signOut = async (): Promise<void> => {
     try {
-      await firebase.auth().signOut();
+      await authService.signOut();
+      setUser(null);
     } catch (error) {
-      console.error("Error signing out:", error);
+      console.error("Error al cerrar sesión:", error);
+      Alert.alert("Error", "No se pudo cerrar sesión");
     }
   };
 
-  // Reset password
+  // Recuperar contraseña
   const forgotPassword = async (email: string): Promise<boolean> => {
     try {
-      await firebase.auth().sendPasswordResetEmail(email);
-      return true;
+      const response = await authService.forgotPassword(email);
+      if (!response.success && response.error) {
+        Alert.alert("Error", response.error);
+      }
+      return response.success;
     } catch (error) {
-      console.error("Error sending password reset email:", error);
+      console.error("Error en recuperación de contraseña:", error);
+      Alert.alert("Error", "No se pudo enviar el correo de recuperación");
       return false;
     }
   };
 
+  // Valores del contexto
   const value = {
     user,
     loading,
@@ -210,13 +139,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   );
 };
 
-// Create custom hook for using auth context
+// Hook personalizado para usar el contexto
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
   }
   return context;
 };
 
-export default AuthContext;
+// Importación necesaria para auth state changes
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/auth';
