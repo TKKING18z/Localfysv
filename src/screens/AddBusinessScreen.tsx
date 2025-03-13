@@ -69,25 +69,32 @@ const AddBusinessScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
 
-  // Efecto para registrar cambios en los estados - ayuda para debugging
+  // Limpiar callbacks al desmontar
   useEffect(() => {
-    console.log('BusinessHours updated:', businessHours);
-  }, [businessHours]);
-
-  useEffect(() => {
-    console.log('SocialLinks updated:', socialLinks);
-  }, [socialLinks]);
-
-  useEffect(() => {
-    console.log('PaymentMethods updated:', paymentMethods);
-  }, [paymentMethods]);
+    return () => {
+      // Remover todos los callbacks pendientes
+      const callbacksToClear = [
+        'businessHours_callback',
+        'paymentMethods_callback',
+        'socialLinks_callback',
+        'videoManager_callback',
+        'menuEditor_callback'
+      ];
+      
+      callbacksToClear.forEach(id => {
+        if (store.getCallback(id)) {
+          store.removeCallback(id);
+        }
+      });
+    };
+  }, []);
 
   // Get current location
   const getCurrentLocation = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Location permission is required');
+        Alert.alert('Permiso necesario', 'Se requiere permiso de ubicación');
         return;
       }
 
@@ -111,8 +118,8 @@ const AddBusinessScreen: React.FC = () => {
         );
       }
     } catch (error) {
-      console.error('Location error:', error);
-      Alert.alert('Error', 'Could not get current location');
+      console.error('Error de ubicación:', error);
+      Alert.alert('Error', 'No se pudo obtener la ubicación actual');
     }
   };
 
@@ -140,24 +147,28 @@ const AddBusinessScreen: React.FC = () => {
         setImage(result.assets[0].uri);
       }
     } catch (error) {
-      console.log('Error picking image:', error);
+      console.log('Error al seleccionar imagen:', error);
       Alert.alert('Error', 'No se pudo seleccionar la imagen.');
     }
   };
 
-  // Navigate to various detail screens with callbacks using StoreContext
-
   // Navigate to BusinessHours screen
   const navigateToBusinessHours = () => {
-    const callbackId = `businessHours_${Date.now()}`;
+    // Usar un ID de callback fijo para simplificar
+    const callbackId = 'businessHours_callback';
     
-    // Store the callback function that will be called when the user saves
+    // Verificar si hay un callback anterior y eliminarlo
+    if (store.getCallback(callbackId)) {
+      store.removeCallback(callbackId);
+    }
+    
+    // Crear nuevo callback
     store.setCallback(callbackId, (hours: BusinessHours) => {
-      console.log('BusinessHours callback triggered with data:', hours);
+      console.log('BusinessHours callback ejecutado con datos:', hours);
       setBusinessHours(hours);
     });
     
-    // Navigate to BusinessHours screen with callbackId
+    // Navigate with fixed callbackId
     navigation.navigate('BusinessHours', {
       initialHours: businessHours,
       callbackId: callbackId
@@ -166,10 +177,15 @@ const AddBusinessScreen: React.FC = () => {
 
   // Navigate to PaymentMethods screen
   const navigateToPaymentMethods = () => {
-    const callbackId = `paymentMethods_${Date.now()}`;
+    const callbackId = 'paymentMethods_callback';
+    
+    // Verificar si hay un callback anterior y eliminarlo
+    if (store.getCallback(callbackId)) {
+      store.removeCallback(callbackId);
+    }
     
     store.setCallback(callbackId, (methods: string[]) => {
-      console.log('PaymentMethods callback triggered with data:', methods);
+      console.log('PaymentMethods callback ejecutado con datos:', methods);
       setPaymentMethods(methods);
     });
     
@@ -181,10 +197,15 @@ const AddBusinessScreen: React.FC = () => {
 
   // Navigate to SocialLinks screen
   const navigateToSocialLinks = () => {
-    const callbackId = `socialLinks_${Date.now()}`;
+    const callbackId = 'socialLinks_callback';
+    
+    // Verificar si hay un callback anterior y eliminarlo
+    if (store.getCallback(callbackId)) {
+      store.removeCallback(callbackId);
+    }
     
     store.setCallback(callbackId, (links: SocialLinks) => {
-      console.log('SocialLinks callback triggered with data:', links);
+      console.log('SocialLinks callback ejecutado con datos:', links);
       setSocialLinks(links);
     });
     
@@ -196,15 +217,20 @@ const AddBusinessScreen: React.FC = () => {
 
   // Navigate to VideoManager screen
   const navigateToVideoManager = () => {
-    const callbackId = `videoManager_${Date.now()}`;
+    const callbackId = 'videoManager_callback';
+    
+    // Verificar si hay un callback anterior y eliminarlo
+    if (store.getCallback(callbackId)) {
+      store.removeCallback(callbackId);
+    }
     
     store.setCallback(callbackId, (newVideos: VideoItem[]) => {
-      console.log('VideoManager callback triggered with data:', newVideos);
+      console.log('VideoManager callback ejecutado con datos:', newVideos);
       setVideos(newVideos);
     });
     
     navigation.navigate('VideoManager', {
-      businessId: 'new_business', // You'll update this with actual ID later
+      businessId: 'new_business', 
       initialVideos: videos,
       callbackId: callbackId
     });
@@ -212,16 +238,21 @@ const AddBusinessScreen: React.FC = () => {
 
   // Navigate to MenuEditor screen
   const navigateToMenuEditor = () => {
-    const callbackId = `menuEditor_${Date.now()}`;
+    const callbackId = 'menuEditor_callback';
+    
+    // Verificar si hay un callback anterior y eliminarlo
+    if (store.getCallback(callbackId)) {
+      store.removeCallback(callbackId);
+    }
     
     store.setCallback(callbackId, (newMenu: MenuItem[], newMenuUrl: string) => {
-      console.log('MenuEditor callback triggered with data:', { menu: newMenu, menuUrl: newMenuUrl });
+      console.log('MenuEditor callback ejecutado con datos:', { menu: newMenu, menuUrl: newMenuUrl });
       setMenu(newMenu);
       setMenuUrl(newMenuUrl);
     });
     
     navigation.navigate('MenuEditor', {
-      businessId: 'new_business', // You'll update this with actual ID later
+      businessId: 'new_business',
       initialMenu: menu,
       menuUrl,
       callbackId: callbackId
@@ -241,7 +272,7 @@ const AddBusinessScreen: React.FC = () => {
     
     try {
       // Log form data for debugging
-      console.log('Form data being submitted:', {
+      console.log('Form data siendo enviados:', {
         name, description, category, address, phone, email, website,
         location, businessHours, paymentMethods, socialLinks, videos, menu, menuUrl
       });
@@ -269,7 +300,7 @@ const AddBusinessScreen: React.FC = () => {
       const result = await firebaseService.businesses.create(businessData);
       
       if (!result.success || !result.data) {
-        throw new Error(result.error?.message || 'Failed to create business');
+        throw new Error(result.error?.message || 'Error al crear negocio');
       }
       
       const businessId = result.data.id;
@@ -296,7 +327,7 @@ const AddBusinessScreen: React.FC = () => {
       Alert.alert('Éxito', 'Negocio agregado correctamente');
       navigation.goBack();
     } catch (error) {
-      console.error('Error adding business:', error);
+      console.error('Error al agregar negocio:', error);
       Alert.alert('Error', 'No se pudo agregar el negocio. Intenta nuevamente.');
     } finally {
       setIsLoading(false);

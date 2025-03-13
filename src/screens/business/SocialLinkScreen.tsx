@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,8 +21,8 @@ interface RouteParams {
   callbackId: string;
 }
 
-type SocialLinksRouteProp = RouteProp<{ params: RouteParams }, 'params'>;
-type NavigationProp = StackNavigationProp<any>;
+type SocialLinksRouteProp = RouteProp<{ SocialLinks: RouteParams }, 'SocialLinks'>;
+type NavigationProp = StackNavigationProp<{ SocialLinks: RouteParams }, 'SocialLinks'>;
 
 // Definición de redes sociales
 const socialNetworks = [
@@ -36,13 +36,52 @@ const socialNetworks = [
 const SocialLinksScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<SocialLinksRouteProp>();
-  const { initialLinks, callbackId } = route.params;
   const store = useStore();
   
+  // Extraer parámetros de manera segura
+  const getParams = (): RouteParams => {
+    try {
+      if (!route.params) {
+        console.warn('No route params found for SocialLinksScreen');
+        return { callbackId: '' };
+      }
+      return route.params;
+    } catch (error) {
+      console.error('Error accessing route params:', error);
+      return { callbackId: '' };
+    }
+  };
+  
+  const { initialLinks, callbackId } = getParams();
+  
+  // Estado para los enlaces
   const [links, setLinks] = useState<SocialLinks>(initialLinks || {});
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  // Log iniciales para depuración
+  useEffect(() => {
+    console.log('SocialLinksScreen mounted with params:', {
+      initialLinks: initialLinks ? 'provided' : 'not provided',
+      callbackId
+    });
+    
+    // Comprobar si el callback existe
+    const callback = store.getCallback(callbackId);
+    console.log(`SocialLinksScreen - Callback exists: ${!!callback}`);
+    
+    return () => {
+      console.log(`SocialLinksScreen unmounting, callbackId: ${callbackId}`);
+    };
+  }, []);
+  
+  // Detectar cambios
+  useEffect(() => {
+    setHasChanges(true);
+  }, [links]);
   
   // Actualizar enlace
   const updateLink = (key: keyof SocialLinks, value: string) => {
+    console.log(`Updating ${key} link to: ${value}`);
     setLinks(prevLinks => ({
       ...prevLinks,
       [key]: value
@@ -54,34 +93,101 @@ const SocialLinksScreen: React.FC = () => {
     if (!url) return;
     
     // Asegurarse de que la URL tenga el prefijo correcto
-    if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      url = 'https://' + url;
-    }
+    const formattedUrl = !url.startsWith('http://') && !url.startsWith('https://') 
+      ? 'https://' + url 
+      : url;
     
-    Linking.openURL(url).catch(err => {
+    Linking.openURL(formattedUrl).catch(err => {
+      console.error('Error opening URL:', err);
       Alert.alert('Error', 'No se pudo abrir el enlace. Verifica que la URL sea correcta.');
     });
   };
   
+  // Validar una URL
+  const isValidUrl = (url: string): boolean => {
+    if (!url) return true; // Vacío es válido
+    
+    // Regex simple para validar URLs
+    const pattern = /^(https?:\/\/)?(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)$/;
+    return pattern.test(url);
+  };
+  
   // Guardar cambios
   const handleSave = () => {
-    // Verificar que los enlaces son válidos
-    const validatedLinks: SocialLinks = {};
+    if (!callbackId) {
+      console.error("No callback ID provided, cannot save social links");
+      Alert.alert(
+        "Error",
+        "No se pueden guardar los enlaces. ID de callback no válido.",
+        [{ text: "OK", onPress: () => navigation.goBack() }]
+      );
+      return;
+    }
     
+    // Validar URLs antes de guardar
+    let invalidUrls = false;
     Object.entries(links).forEach(([key, value]) => {
-      if (value && typeof value === 'string') {
-        validatedLinks[key as keyof SocialLinks] = value.trim();
+      if (value && !isValidUrl(value)) {
+        invalidUrls = true;
+        Alert.alert('URL Inválida', `La URL para ${key} no es válida.`);
       }
     });
     
-    // Obtener el callback del store
-    const saveCallback = store.getCallback(callbackId);
+    if (invalidUrls) return;
     
-    if (typeof saveCallback === 'function') {
-      saveCallback(validatedLinks);
+    try {
+      // Verificar que los enlaces son válidos
+      const validatedLinks: SocialLinks = {};
+      
+      Object.entries(links).forEach(([key, value]) => {
+        if (value && typeof value === 'string') {
+          validatedLinks[key as keyof SocialLinks] = value.trim();
+        }
+      });
+      
+      // Obtener el callback del store
+      const saveCallback = store.getCallback(callbackId);
+      
+      if (typeof saveCallback === 'function') {
+        console.log(`Executing callback with ID: ${callbackId}`);
+        console.log('Saving social links:', validatedLinks);
+        
+        // Llamar al callback con los datos actualizados
+        saveCallback(validatedLinks);
+        
+        // Mostrar confirmación
+        Alert.alert(
+          "Éxito",
+          "Enlaces sociales guardados correctamente.",
+          [{ text: "OK", onPress: () => navigation.goBack() }]
+        );
+      } else {
+        throw new Error("Callback not found or not a function");
+      }
+    } catch (error) {
+      console.error("Error saving social links:", error);
+      Alert.alert(
+        "Error",
+        "No se pudieron guardar los enlaces. Inténtelo nuevamente.",
+        [{ text: "OK" }]
+      );
     }
-    
-    navigation.goBack();
+  };
+  
+  // Confirmar antes de salir si hay cambios sin guardar
+  const handleBack = () => {
+    if (hasChanges) {
+      Alert.alert(
+        "Cambios sin guardar",
+        "Tienes cambios sin guardar. ¿Deseas descartarlos?",
+        [
+          { text: "No", style: "cancel" },
+          { text: "Sí", onPress: () => navigation.goBack() }
+        ]
+      );
+    } else {
+      navigation.goBack();
+    }
   };
   
   return (
@@ -89,7 +195,7 @@ const SocialLinksScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleBack}
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
