@@ -14,10 +14,11 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { SocialLinks } from '../../context/BusinessContext';
+import { useStore } from '../../context/StoreContext';
 
 interface RouteParams {
   initialLinks?: SocialLinks;
-  onSave: (links: SocialLinks) => void;
+  callbackId: string;
 }
 
 type SocialLinksRouteProp = RouteProp<{ params: RouteParams }, 'params'>;
@@ -35,7 +36,8 @@ const socialNetworks = [
 const SocialLinksScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<SocialLinksRouteProp>();
-  const { initialLinks, onSave } = route.params;
+  const { initialLinks, callbackId } = route.params;
+  const store = useStore();
   
   const [links, setLinks] = useState<SocialLinks>(initialLinks || {});
   
@@ -72,7 +74,13 @@ const SocialLinksScreen: React.FC = () => {
       }
     });
     
-    onSave(validatedLinks);
+    // Obtener el callback del store
+    const saveCallback = store.getCallback(callbackId);
+    
+    if (typeof saveCallback === 'function') {
+      saveCallback(validatedLinks);
+    }
+    
     navigation.goBack();
   };
   

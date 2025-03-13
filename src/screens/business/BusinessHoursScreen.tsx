@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -9,17 +9,18 @@ import {
   ScrollView,
   Alert,
   ViewStyle,
-  TextStyle
+  TextStyle,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { BusinessHours, DayHours } from '../../context/BusinessContext';
+import CustomTimePicker from '../../components/CustomTimePicker';
+import { useStore } from '../../context/StoreContext';
 
 interface RouteParams {
   initialHours?: BusinessHours;
-  onSave: (hours: BusinessHours) => void;
+  callbackId: string;
 }
 
 type BusinessHoursRouteProp = RouteProp<{ params: RouteParams }, 'params'>;
@@ -65,10 +66,18 @@ interface BusinessHoursStyles {
   copyButtonText: TextStyle;
 }
 
+// Estado para el TimePicker
+interface TimePickerConfig {
+  day: keyof BusinessHours;
+  type: 'open' | 'close';
+  currentTime: string;
+}
+
 const BusinessHoursScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<BusinessHoursRouteProp>();
-  const { initialHours, onSave } = route.params;
+  const { initialHours, callbackId } = route.params;
+  const store = useStore();
 
   const [hours, setHours] = useState<BusinessHours>(() => {
     // Inicializar con valores por defecto o los proporcionados
@@ -81,58 +90,9 @@ const BusinessHoursScreen: React.FC = () => {
     return initialHours || defaultBusinessHours;
   });
   
-  const [showTimePickerState, setShowTimePickerState] = useState(false);
-  const [timePickerConfig, setTimePickerConfig] = useState<{
-    day: keyof BusinessHours;
-    type: 'open' | 'close';
-    currentTime: Date;
-  } | null>(null);
-  
-  // Convertir string de hora a objeto Date
-  const timeStringToDate = (timeString: string): Date => {
-    const date = new Date();
-    const [hours, minutes] = timeString.split(':').map(Number);
-    date.setHours(hours, minutes, 0, 0);
-    return date;
-  };
-  
-  // Convertir objeto Date a string de hora (formato 24h)
-  const dateToTimeString = (date: Date): string => {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-  };
-  
-  // Manejar cambio de horario
-  const handleTimeChange = (event: any, selectedTime?: Date) => {
-    setShowTimePickerState(false);
-    
-    if (!timePickerConfig || !selectedTime) return;
-    
-    const { day, type } = timePickerConfig;
-    
-    setHours(prevHours => {
-      const newHours = { ...prevHours };
-      const dayHours = { ...(newHours[day] || defaultHours) };
-      
-      dayHours[type] = dateToTimeString(selectedTime);
-      newHours[day] = dayHours;
-      
-      return newHours;
-    });
-  };
-  
-  // Mostrar selector de hora - FUNCIÓN RENOMBRADA para evitar conflicto
-  const openTimePicker = (day: keyof BusinessHours, type: 'open' | 'close') => {
-    const dayHours = hours[day] || defaultHours;
-    const timeString = dayHours[type];
-    
-    setTimePickerConfig({
-      day,
-      type,
-      currentTime: timeStringToDate(timeString)
-    });
-    
-    setShowTimePickerState(true);
-  };
+  // Estado para el picker de tiempo personalizado
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [timePickerConfig, setTimePickerConfig] = useState<TimePickerConfig | null>(null);
   
   // Cambiar estado de abierto/cerrado para un día
   const toggleClosed = (day: keyof BusinessHours) => {
@@ -141,6 +101,38 @@ const BusinessHoursScreen: React.FC = () => {
       const dayHours = { ...(newHours[day] || defaultHours) };
       
       dayHours.closed = !dayHours.closed;
+      newHours[day] = dayHours;
+      
+      return newHours;
+    });
+  };
+  
+  // Mostrar selector de hora customizado
+  const openTimePicker = (day: keyof BusinessHours, type: 'open' | 'close') => {
+    const dayHours = hours[day] || defaultHours;
+    const timeString = dayHours[type];
+    
+    setTimePickerConfig({
+      day,
+      type,
+      currentTime: timeString
+    });
+    
+    setShowTimePicker(true);
+  };
+  
+  // Manejar selección de tiempo
+  const handleTimeSelected = (hoursStr: string, minutesStr: string) => {
+    if (!timePickerConfig) return;
+    
+    const { day, type } = timePickerConfig;
+    const timeString = `${hoursStr}:${minutesStr}`;
+    
+    setHours(prevHours => {
+      const newHours = { ...prevHours };
+      const dayHours = { ...(newHours[day] || defaultHours) };
+      
+      dayHours[type] = timeString;
       newHours[day] = dayHours;
       
       return newHours;
@@ -185,7 +177,13 @@ const BusinessHoursScreen: React.FC = () => {
   
   // Guardar cambios
   const handleSave = () => {
-    onSave(hours);
+    // Obtener el callback del store usando el ID
+    const saveCallback = store.getCallback(callbackId);
+    
+    if (typeof saveCallback === 'function') {
+      saveCallback(hours);
+    }
+    
     navigation.goBack();
   };
   
@@ -269,13 +267,15 @@ const BusinessHoursScreen: React.FC = () => {
         })}
       </ScrollView>
       
-      {showTimePickerState && timePickerConfig && (
-        <DateTimePicker
-          value={timePickerConfig.currentTime}
-          mode="time"
-          is24Hour={true}
-          display="default"
-          onChange={handleTimeChange}
+      {/* Time Picker personalizado */}
+      {timePickerConfig && (
+        <CustomTimePicker
+          visible={showTimePicker}
+          onClose={() => setShowTimePicker(false)}
+          onTimeSelected={handleTimeSelected}
+          initialHours={timePickerConfig.currentTime.split(':')[0]}
+          initialMinutes={timePickerConfig.currentTime.split(':')[1]}
+          title={`Seleccionar hora de ${timePickerConfig.type === 'open' ? 'apertura' : 'cierre'}`}
         />
       )}
     </SafeAreaView>

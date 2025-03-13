@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -21,11 +21,30 @@ import * as ImagePicker from 'expo-image-picker';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { firebaseService } from '../services/firebaseService';
 import { BusinessHours, SocialLinks } from '../context/BusinessContext';
+import { useStore } from '../context/StoreContext';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
+// Tipo para los videos
+interface VideoItem {
+  id?: string;
+  url: string;
+  thumbnail?: string;
+}
+
+// Tipo para los items de menú
+interface MenuItem {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  imageUrl?: string;
+  category?: string;
+}
+
 const AddBusinessScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
+  const store = useStore(); // Utilizar el store para los callbacks
   
   // Form state
   const [name, setName] = useState('');
@@ -42,13 +61,26 @@ const AddBusinessScreen: React.FC = () => {
   const [businessHours, setBusinessHours] = useState<BusinessHours | undefined>(undefined);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [socialLinks, setSocialLinks] = useState<SocialLinks | undefined>(undefined);
-  const [videos, setVideos] = useState<Array<{ url: string; thumbnail?: string }>>([]);
-  const [menu, setMenu] = useState<any[]>([]);
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [menu, setMenu] = useState<MenuItem[]>([]);
   const [menuUrl, setMenuUrl] = useState('');
   
   // Loading state
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+
+  // Efecto para registrar cambios en los estados - ayuda para debugging
+  useEffect(() => {
+    console.log('BusinessHours updated:', businessHours);
+  }, [businessHours]);
+
+  useEffect(() => {
+    console.log('SocialLinks updated:', socialLinks);
+  }, [socialLinks]);
+
+  useEffect(() => {
+    console.log('PaymentMethods updated:', paymentMethods);
+  }, [paymentMethods]);
 
   // Get current location
   const getCurrentLocation = async () => {
@@ -98,7 +130,7 @@ const AddBusinessScreen: React.FC = () => {
       
       // Launch image library
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: "images",
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -113,45 +145,86 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to various detail screens
+  // Navigate to various detail screens with callbacks using StoreContext
+
+  // Navigate to BusinessHours screen
   const navigateToBusinessHours = () => {
+    const callbackId = `businessHours_${Date.now()}`;
+    
+    // Store the callback function that will be called when the user saves
+    store.setCallback(callbackId, (hours: BusinessHours) => {
+      console.log('BusinessHours callback triggered with data:', hours);
+      setBusinessHours(hours);
+    });
+    
+    // Navigate to BusinessHours screen with callbackId
     navigation.navigate('BusinessHours', {
       initialHours: businessHours,
-      onSave: (hours: BusinessHours) => setBusinessHours(hours)
+      callbackId: callbackId
     });
   };
 
+  // Navigate to PaymentMethods screen
   const navigateToPaymentMethods = () => {
+    const callbackId = `paymentMethods_${Date.now()}`;
+    
+    store.setCallback(callbackId, (methods: string[]) => {
+      console.log('PaymentMethods callback triggered with data:', methods);
+      setPaymentMethods(methods);
+    });
+    
     navigation.navigate('PaymentMethods', {
       initialMethods: paymentMethods,
-      onSave: (methods: string[]) => setPaymentMethods(methods)
+      callbackId: callbackId
     });
   };
 
+  // Navigate to SocialLinks screen
   const navigateToSocialLinks = () => {
+    const callbackId = `socialLinks_${Date.now()}`;
+    
+    store.setCallback(callbackId, (links: SocialLinks) => {
+      console.log('SocialLinks callback triggered with data:', links);
+      setSocialLinks(links);
+    });
+    
     navigation.navigate('SocialLinks', {
       initialLinks: socialLinks,
-      onSave: (links: SocialLinks) => setSocialLinks(links)
+      callbackId: callbackId
     });
   };
 
+  // Navigate to VideoManager screen
   const navigateToVideoManager = () => {
+    const callbackId = `videoManager_${Date.now()}`;
+    
+    store.setCallback(callbackId, (newVideos: VideoItem[]) => {
+      console.log('VideoManager callback triggered with data:', newVideos);
+      setVideos(newVideos);
+    });
+    
     navigation.navigate('VideoManager', {
       businessId: 'new_business', // You'll update this with actual ID later
       initialVideos: videos,
-      onSave: (newVideos: any[]) => setVideos(newVideos)
+      callbackId: callbackId
     });
   };
 
+  // Navigate to MenuEditor screen
   const navigateToMenuEditor = () => {
+    const callbackId = `menuEditor_${Date.now()}`;
+    
+    store.setCallback(callbackId, (newMenu: MenuItem[], newMenuUrl: string) => {
+      console.log('MenuEditor callback triggered with data:', { menu: newMenu, menuUrl: newMenuUrl });
+      setMenu(newMenu);
+      setMenuUrl(newMenuUrl);
+    });
+    
     navigation.navigate('MenuEditor', {
       businessId: 'new_business', // You'll update this with actual ID later
       initialMenu: menu,
       menuUrl,
-      onSave: (newMenu: any[], newMenuUrl: string) => {
-        setMenu(newMenu);
-        setMenuUrl(newMenuUrl);
-      }
+      callbackId: callbackId
     });
   };
 
@@ -167,6 +240,12 @@ const AddBusinessScreen: React.FC = () => {
     setUploadProgress(0);
     
     try {
+      // Log form data for debugging
+      console.log('Form data being submitted:', {
+        name, description, category, address, phone, email, website,
+        location, businessHours, paymentMethods, socialLinks, videos, menu, menuUrl
+      });
+      
       // Prepare business data
       const businessData = {
         name,
@@ -358,7 +437,9 @@ const AddBusinessScreen: React.FC = () => {
               >
                 <MaterialIcons name="access-time" size={24} color="#007AFF" />
                 <Text style={styles.advancedButtonText}>Horarios de Atención</Text>
-                {businessHours && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+                {businessHours && Object.keys(businessHours).length > 0 && 
+                  <MaterialIcons name="check-circle" size={20} color="#34C759" />
+                }
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -367,7 +448,9 @@ const AddBusinessScreen: React.FC = () => {
               >
                 <MaterialIcons name="payment" size={24} color="#007AFF" />
                 <Text style={styles.advancedButtonText}>Métodos de Pago</Text>
-                {paymentMethods.length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+                {paymentMethods.length > 0 && 
+                  <MaterialIcons name="check-circle" size={20} color="#34C759" />
+                }
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -376,7 +459,9 @@ const AddBusinessScreen: React.FC = () => {
               >
                 <MaterialIcons name="link" size={24} color="#007AFF" />
                 <Text style={styles.advancedButtonText}>Redes Sociales</Text>
-                {socialLinks && Object.keys(socialLinks).length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+                {socialLinks && Object.keys(socialLinks).length > 0 && 
+                  <MaterialIcons name="check-circle" size={20} color="#34C759" />
+                }
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -385,7 +470,9 @@ const AddBusinessScreen: React.FC = () => {
               >
                 <MaterialIcons name="videocam" size={24} color="#007AFF" />
                 <Text style={styles.advancedButtonText}>Videos</Text>
-                {videos.length > 0 && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+                {videos.length > 0 && 
+                  <MaterialIcons name="check-circle" size={20} color="#34C759" />
+                }
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -394,7 +481,9 @@ const AddBusinessScreen: React.FC = () => {
               >
                 <MaterialIcons name="restaurant-menu" size={24} color="#007AFF" />
                 <Text style={styles.advancedButtonText}>Menú</Text>
-                {(menu.length > 0 || menuUrl) && <MaterialIcons name="check-circle" size={20} color="#34C759" />}
+                {(menu.length > 0 || menuUrl) && 
+                  <MaterialIcons name="check-circle" size={20} color="#34C759" />
+                }
               </TouchableOpacity>
             </View>
             

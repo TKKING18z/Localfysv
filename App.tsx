@@ -7,6 +7,7 @@ import { BusinessProvider } from './src/context/BusinessContext';
 import { LocationProvider } from './src/context/LocationContext';
 import { AuthProvider } from './src/context/AuthContext'; 
 import { ThemeProvider } from './src/context/ThemeContext';
+import { StoreProvider } from './src/context/StoreContext'; // Importar el nuevo context
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
@@ -107,15 +108,17 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <AuthProvider>
-        <ThemeProvider>
-          <LocationProvider>
-            <BusinessProvider>
-              <AppNavigator />
-            </BusinessProvider>
-          </LocationProvider>
-        </ThemeProvider>
-      </AuthProvider>
+      <StoreProvider>
+        <AuthProvider>
+          <ThemeProvider>
+            <LocationProvider>
+              <BusinessProvider>
+                <AppNavigator />
+              </BusinessProvider>
+            </LocationProvider>
+          </ThemeProvider>
+        </AuthProvider>
+      </StoreProvider>
     </SafeAreaProvider>
   );
 }
