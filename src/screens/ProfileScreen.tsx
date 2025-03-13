@@ -386,6 +386,18 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Configuración</Text>
           
+          {/* Add "Mis Negocios" button for business owners */}
+          {profile?.userType === 'Propietario' && (
+            <TouchableOpacity 
+              style={styles.menuItem}
+              onPress={() => navigation.navigate('MyBusinesses')}
+            >
+              <MaterialIcons name="store" size={24} color="#007AFF" />
+              <Text style={styles.menuItemText}>Mis Negocios</Text>
+              <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+            </TouchableOpacity>
+          )}
+          
           <View style={styles.settingItem}>
             <View style={styles.settingInfo}>
               <MaterialIcons name="notifications" size={22} color="#007AFF" />
@@ -911,6 +923,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F5',
+  },
+  menuItemText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333333',
+    marginLeft: 12,
+    fontWeight: '500',
   },
 });
 

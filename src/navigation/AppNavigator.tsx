@@ -24,6 +24,10 @@ import SocialLinksScreen from '../screens/business/SocialLinkScreen';
 import MenuEditorScreen from '../screens/business/MenuEditorScreen';
 import VideoManagerScreen from '../screens/business/VideoManagerScreen';
 
+// Importar la pantalla EditBusiness
+import EditBusinessScreen from '../screens/business/EditBusinessScreen';
+import MyBusinessesScreen from '../screens/business/MyBusinessesScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -44,6 +48,9 @@ export type RootStackParamList = {
   Favorites: undefined;
   Profile: undefined;
   AddBusiness: undefined;
+  // Agregar estas rutas faltantes
+  EditBusiness: { businessId: string };
+  MyBusinesses: undefined;
 };
 
 // Define tab navigator parameter list
@@ -191,6 +198,10 @@ const AppNavigator = () => {
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
+            
+            {/* Agregar las nuevas pantallas */}
+            <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
+            <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
             
             {/* New Business Detail Enhancement Screens */}
             <Stack.Screen 
