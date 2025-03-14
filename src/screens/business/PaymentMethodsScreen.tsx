@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,14 +13,19 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
+import { useStore } from '../../context/StoreContext';
+import { RootStackParamList } from '../../navigation/AppNavigator';
 
-interface RouteParams {
-  initialMethods?: string[];
-  onSave: (methods: string[]) => void;
-}
+// Define route parameters specifically for this screen
+type ExtendedRootStackParamList = RootStackParamList & {
+  PaymentMethods: {
+    initialMethods?: string[];
+    callbackId: string;
+  }
+};
 
-type PaymentMethodsRouteProp = RouteProp<{ params: RouteParams }, 'params'>;
-type NavigationProp = StackNavigationProp<any>;
+type PaymentMethodsRouteProp = RouteProp<ExtendedRootStackParamList, 'PaymentMethods'>;
+type PaymentMethodsNavigationProp = StackNavigationProp<ExtendedRootStackParamList, 'PaymentMethods'>;
 
 // Métodos de pago comunes
 const commonPaymentMethods = [
@@ -36,12 +41,37 @@ const commonPaymentMethods = [
 ];
 
 const PaymentMethodsScreen: React.FC = () => {
-  const navigation = useNavigation<NavigationProp>();
+  const navigation = useNavigation<PaymentMethodsNavigationProp>();
   const route = useRoute<PaymentMethodsRouteProp>();
-  const { initialMethods, onSave } = route.params;
+  const store = useStore();
   
-  const [methods, setMethods] = useState<string[]>(initialMethods || []);
+  // Extrae los parámetros de manera segura
+  const getParams = () => {
+    try {
+      if (!route.params) {
+        console.warn('No route params found for PaymentMethodsScreen');
+        return { initialMethods: [] as string[], callbackId: '' };
+      }
+      return route.params;
+    } catch (error) {
+      console.error('Error accessing route params:', error);
+      return { initialMethods: [] as string[], callbackId: '' };
+    }
+  };
+  
+  const { initialMethods = [], callbackId } = getParams();
+  
+  // Estados para los métodos de pago
+  const [methods, setMethods] = useState<string[]>(initialMethods);
   const [newMethod, setNewMethod] = useState('');
+  const [hasChanges, setHasChanges] = useState(false);
+  
+  // Detectar cambios
+  useEffect(() => {
+    if (methods !== initialMethods) {
+      setHasChanges(true);
+    }
+  }, [methods, initialMethods]);
   
   // Añadir nuevo método de pago
   const addMethod = (method: string) => {
@@ -68,8 +98,57 @@ const PaymentMethodsScreen: React.FC = () => {
   
   // Guardar cambios
   const handleSave = () => {
-    onSave(methods);
-    navigation.goBack();
+    console.log('Saving payment methods with callbackId:', callbackId);
+    
+    if (!callbackId) {
+      Alert.alert(
+        "Error", 
+        "No se pueden guardar los métodos de pago. ID de callback no válido.",
+        [{ text: "OK", onPress: () => navigation.goBack() }]
+      );
+      return;
+    }
+    
+    try {
+      // Obtener el callback del store
+      const saveCallback = store.getCallback(callbackId);
+      
+      if (typeof saveCallback === 'function') {
+        console.log('Executing callback with methods:', methods);
+        saveCallback(methods);
+        
+        Alert.alert(
+          "Éxito",
+          "Métodos de pago guardados correctamente.",
+          [{ text: "OK", onPress: () => navigation.goBack() }]
+        );
+      } else {
+        throw new Error(`Callback not found or not a function. CallbackId: ${callbackId}`);
+      }
+    } catch (error) {
+      console.error("Error saving payment methods:", error);
+      Alert.alert(
+        "Error",
+        `No se pudieron guardar los métodos de pago: ${error instanceof Error ? error.message : 'Error desconocido'}`,
+        [{ text: "OK" }]
+      );
+    }
+  };
+  
+  // Confirmar antes de salir si hay cambios sin guardar
+  const handleBack = () => {
+    if (hasChanges) {
+      Alert.alert(
+        "Cambios sin guardar",
+        "Tienes cambios sin guardar. ¿Deseas descartarlos?",
+        [
+          { text: "No", style: "cancel" },
+          { text: "Sí", onPress: () => navigation.goBack() }
+        ]
+      );
+    } else {
+      navigation.goBack();
+    }
   };
   
   return (
@@ -77,7 +156,7 @@ const PaymentMethodsScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleBack}
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
@@ -324,4 +403,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PaymentMethodsScreen;
+export default PaymentMethodsScreen

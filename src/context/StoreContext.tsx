@@ -1,24 +1,29 @@
 import React, { createContext, useState, ReactNode, useContext, useEffect } from 'react';
 
+// Tipo para cualquier callback que pueda ser almacenado
+type StoreCallback = (...args: any[]) => any;
+
 interface StoreContextType {
-  callbacks: Record<string, any>;
-  setCallback: (key: string, callback: any) => void;
-  getCallback: (key: string) => any;
-  removeCallback: (key: string) => void; // Añadimos función para limpiar callbacks
+  setCallback: (key: string, callback: StoreCallback) => void;
+  getCallback: (key: string) => StoreCallback | undefined;
+  removeCallback: (key: string) => void;
+  getCallbackIds: () => string[];
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 export const StoreProvider: React.FC<{children: ReactNode}> = ({ children }) => {
-  const [callbacks, setCallbacks] = useState<Record<string, any>>({});
+  const [callbacks, setCallbacks] = useState<Record<string, StoreCallback>>({});
 
-  // Añadir logging para depuración
+  // Método para logear los callbacks para depuración
   useEffect(() => {
     console.log('StoreContext - Current callbacks:', Object.keys(callbacks));
   }, [callbacks]);
 
-  const setCallback = (key: string, callback: any) => {
+  // Método para establecer un callback
+  const setCallback = (key: string, callback: StoreCallback) => {
     console.log(`StoreContext - Setting callback with key: ${key}`);
+    
     if (typeof callback !== 'function') {
       console.warn(`StoreContext - Attempted to set non-function callback for key: ${key}`);
       return;
@@ -30,19 +35,24 @@ export const StoreProvider: React.FC<{children: ReactNode}> = ({ children }) => 
     }));
   };
 
-  const getCallback = (key: string) => {
+  // Método para obtener un callback
+  const getCallback = (key: string): StoreCallback | undefined => {
     const callback = callbacks[key];
-    console.log(`StoreContext - Getting callback with key: ${key}, exists: ${!!callback}`);
+    const exists = !!callback;
     
-    if (!callback) {
+    console.log(`StoreContext - Getting callback with key: ${key}, exists: ${exists}`);
+    
+    if (!exists) {
       console.warn(`StoreContext - No callback found for key: ${key}`);
     }
     
     return callback;
   };
 
+  // Método para eliminar un callback
   const removeCallback = (key: string) => {
     console.log(`StoreContext - Removing callback with key: ${key}`);
+    
     setCallbacks(prev => {
       const newCallbacks = { ...prev };
       delete newCallbacks[key];
@@ -50,17 +60,31 @@ export const StoreProvider: React.FC<{children: ReactNode}> = ({ children }) => 
     });
   };
 
+  // Método para obtener todos los IDs de callbacks
+  const getCallbackIds = (): string[] => {
+    return Object.keys(callbacks);
+  };
+
+  // Valor del contexto
+  const contextValue: StoreContextType = {
+    setCallback,
+    getCallback,
+    removeCallback,
+    getCallbackIds
+  };
+
   return (
-    <StoreContext.Provider value={{ callbacks, setCallback, getCallback, removeCallback }}>
+    <StoreContext.Provider value={contextValue}>
       {children}
     </StoreContext.Provider>
   );
 };
 
+// Hook personalizado para utilizar el StoreContext
 export const useStore = () => {
   const context = useContext(StoreContext);
   if (!context) {
-    throw new Error('useStore must be used within a StoreProvider');
+    throw new Error('useStore debe ser usado dentro de un StoreProvider');
   }
   return context;
 };

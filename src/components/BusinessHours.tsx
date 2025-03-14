@@ -14,21 +14,50 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { BusinessHours, DayHours } from '../context/BusinessContext';
-import CustomTimePicker from '../components/CustomTimePicker';
 import { useStore } from '../context/StoreContext';
+import CustomTimePicker from '../components/CustomTimePicker';
+import { RootStackParamList } from '../navigation/AppNavigator';
 
-// Definir la interfaz para los parámetros de ruta de manera más estricta
-interface BusinessHoursParams {
-  initialHours?: BusinessHours;
-  callbackId: string;
+// Define DayOfWeek as a specific union type
+type DayOfWeek = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+// Define the DayHours interface
+interface DayHours {
+  open: string;
+  close: string;
+  closed?: boolean;
 }
 
-// Tipo para la ruta
-type BusinessHoursRouteProp = RouteProp<{ BusinessHours: BusinessHoursParams }, 'BusinessHours'>;
+// Define BusinessHours with a proper index signature
+interface BusinessHours {
+  monday?: DayHours;
+  tuesday?: DayHours;
+  wednesday?: DayHours;
+  thursday?: DayHours;
+  friday?: DayHours;
+  saturday?: DayHours;
+  sunday?: DayHours;
+  [key: string]: DayHours | undefined; // This allows string indexing
+}
 
-// Tipo para la navegación
-type BusinessHoursNavigationProp = StackNavigationProp<{ BusinessHours: BusinessHoursParams }, 'BusinessHours'>;
+// Extend RootStackParamList for this specific screen
+type ExtendedRootStackParamList = RootStackParamList & {
+  BusinessHours: {
+    initialHours?: BusinessHours;
+    callbackId: string;
+    onSave?: (hours: BusinessHours) => void;
+  }
+};
+
+type BusinessHoursScreenRouteProp = RouteProp<ExtendedRootStackParamList, 'BusinessHours'>;
+type BusinessHoursScreenNavigationProp = StackNavigationProp<ExtendedRootStackParamList, 'BusinessHours'>;
+
+// Type for time picker configuration
+interface TimePickerConfig {
+  day: DayOfWeek;
+  type: 'open' | 'close';
+  currentTime: string;
+}
 
 const defaultHours: DayHours = {
   open: '09:00',
@@ -37,90 +66,48 @@ const defaultHours: DayHours = {
 };
 
 const daysOfWeek = [
-  { key: 'monday', label: 'Lunes' },
-  { key: 'tuesday', label: 'Martes' },
-  { key: 'wednesday', label: 'Miércoles' },
-  { key: 'thursday', label: 'Jueves' },
-  { key: 'friday', label: 'Viernes' },
-  { key: 'saturday', label: 'Sábado' },
-  { key: 'sunday', label: 'Domingo' },
+  { key: 'monday' as DayOfWeek, label: 'Lunes' },
+  { key: 'tuesday' as DayOfWeek, label: 'Martes' },
+  { key: 'wednesday' as DayOfWeek, label: 'Miércoles' },
+  { key: 'thursday' as DayOfWeek, label: 'Jueves' },
+  { key: 'friday' as DayOfWeek, label: 'Viernes' },
+  { key: 'saturday' as DayOfWeek, label: 'Sábado' },
+  { key: 'sunday' as DayOfWeek, label: 'Domingo' },
 ];
 
-// Interface para el configurador de horas
-interface TimePickerConfig {
-  day: string;
-  type: 'open' | 'close';
-  currentTime: string;
-}
-
 const BusinessHoursScreen: React.FC = () => {
-  const navigation = useNavigation<BusinessHoursNavigationProp>();
-  const route = useRoute<BusinessHoursRouteProp>();
+  const navigation = useNavigation<BusinessHoursScreenNavigationProp>();
+  const route = useRoute<BusinessHoursScreenRouteProp>();
   const store = useStore();
   
-  // Extraer parámetros de manera segura
-  const getParams = (): BusinessHoursParams => {
-    try {
-      if (!route.params) {
-        console.warn('No route params found, using defaults');
-        return { callbackId: '' };
-      }
-      return route.params;
-    } catch (error) {
-      console.error('Error accessing route params:', error);
-      return { callbackId: '' };
-    }
-  };
+  // Extract params with proper typing
+  const { initialHours, callbackId } = route.params || { initialHours: undefined, callbackId: '' };
   
-  const { initialHours, callbackId } = getParams();
-  
-  // Estado para almacenar los horarios
+  // Initialize hours state with proper typing
   const [hours, setHours] = useState<BusinessHours>(() => {
-    // Inicializar con valores por defecto o los proporcionados
+    // Create default business hours
     const defaultBusinessHours: BusinessHours = {};
     
     daysOfWeek.forEach(day => {
       defaultBusinessHours[day.key] = { ...defaultHours };
     });
     
-    if (initialHours && Object.keys(initialHours).length > 0) {
-      console.log('Inicializando con horarios existentes:', initialHours);
-      return initialHours;
-    }
-    
-    console.log('Inicializando con horarios por defecto');
-    return defaultBusinessHours;
+    return initialHours && Object.keys(initialHours).length > 0 
+      ? initialHours 
+      : defaultBusinessHours;
   });
   
-  // Estado para el picker de tiempo personalizado
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [timePickerConfig, setTimePickerConfig] = useState<TimePickerConfig | null>(null);
   const [hasChanges, setHasChanges] = useState(false);
   
-  // Log inicial para depuración
-  useEffect(() => {
-    console.log('BusinessHoursScreen mounted with params:', {
-      initialHours: initialHours ? 'provided' : 'not provided',
-      callbackId
-    });
-    
-    // Comprobar si el callback existe
-    const callback = store.getCallback(callbackId);
-    console.log(`Callback exists: ${!!callback}`);
-    
-    // Limpiar al desmontar
-    return () => {
-      console.log(`BusinessHoursScreen unmounting, callbackId: ${callbackId}`);
-    };
-  }, []);
-  
-  // Efecto para detectar cambios
+  // Track changes to hours
   useEffect(() => {
     setHasChanges(true);
   }, [hours]);
   
-  // Cambiar estado de abierto/cerrado para un día
-  const toggleClosed = (day: string) => {
+  // Toggle closed status for a day
+  const toggleClosed = (day: DayOfWeek) => {
     setHours(prevHours => {
       const newHours = { ...prevHours };
       const dayHours = { ...(newHours[day] || defaultHours) };
@@ -132,8 +119,8 @@ const BusinessHoursScreen: React.FC = () => {
     });
   };
   
-  // Mostrar selector de hora
-  const openTimePicker = (day: string, type: 'open' | 'close') => {
+  // Open time picker with proper configuration
+  const openTimePicker = (day: DayOfWeek, type: 'open' | 'close') => {
     const dayHours = hours[day] || defaultHours;
     const timeString = dayHours[type];
     
@@ -146,12 +133,9 @@ const BusinessHoursScreen: React.FC = () => {
     setShowTimePicker(true);
   };
   
-  // Manejar selección de tiempo
+  // Handle time selection
   const handleTimeSelected = (hoursStr: string, minutesStr: string) => {
-    if (!timePickerConfig) {
-      console.warn('Time picker config is null, cannot update time');
-      return;
-    }
+    if (!timePickerConfig) return;
     
     const { day, type } = timePickerConfig;
     const timeString = `${hoursStr}:${minutesStr}`;
@@ -166,12 +150,11 @@ const BusinessHoursScreen: React.FC = () => {
       return newHours;
     });
     
-    // Ocultar el selector
     setShowTimePicker(false);
   };
   
-  // Copiar horario a todos los días
-  const copyToAllDays = (sourceDay: string) => {
+  // Copy hours from one day to all days
+  const copyToAllDays = (sourceDay: DayOfWeek) => {
     const sourceDayHours = hours[sourceDay];
     if (!sourceDayHours) return;
     
@@ -200,13 +183,13 @@ const BusinessHoursScreen: React.FC = () => {
     );
   };
   
-  // Obtener etiqueta del día
-  const getDayLabel = (day: string): string => {
+  // Get day label from day key
+  const getDayLabel = (day: DayOfWeek): string => {
     const foundDay = daysOfWeek.find(d => d.key === day);
     return foundDay ? foundDay.label : day;
   };
   
-  // Guardar cambios
+  // Save business hours
   const handleSave = () => {
     if (!callbackId) {
       console.error("No callback ID provided, cannot save");
@@ -219,17 +202,12 @@ const BusinessHoursScreen: React.FC = () => {
     }
     
     try {
-      // Obtener el callback del store
-      const saveCallback = store.getCallback(callbackId);
+      // Type the callback correctly
+      const saveCallback = store.getCallback(callbackId) as ((hours: BusinessHours) => void) | undefined;
       
       if (typeof saveCallback === 'function') {
-        console.log(`Executing callback with ID: ${callbackId}`);
-        console.log('Saving hours:', hours);
-        
-        // Llamar al callback con los datos actualizados
         saveCallback(hours);
         
-        // Mostrar confirmación
         Alert.alert(
           "Éxito",
           "Horarios guardados correctamente.",
@@ -242,13 +220,13 @@ const BusinessHoursScreen: React.FC = () => {
       console.error("Error saving business hours:", error);
       Alert.alert(
         "Error",
-        "No se pudieron guardar los horarios. Intentelo nuevamente.",
+        "No se pudieron guardar los horarios. Inténtelo nuevamente.",
         [{ text: "OK" }]
       );
     }
   };
   
-  // Confirmar antes de salir si hay cambios sin guardar
+  // Handle back button press
   const handleBack = () => {
     if (hasChanges) {
       Alert.alert(
@@ -344,7 +322,6 @@ const BusinessHoursScreen: React.FC = () => {
         })}
       </ScrollView>
       
-      {/* Time Picker personalizado */}
       {timePickerConfig && (
         <CustomTimePicker
           visible={showTimePicker}
@@ -359,7 +336,31 @@ const BusinessHoursScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create({
+// Define the styles with proper type annotations
+interface StylesType {
+  container: ViewStyle;
+  header: ViewStyle;
+  backButton: ViewStyle;
+  headerTitle: TextStyle;
+  saveButton: ViewStyle;
+  saveButtonText: TextStyle;
+  scrollContent: ViewStyle;
+  infoBox: ViewStyle;
+  infoText: TextStyle;
+  dayContainer: ViewStyle;
+  dayHeader: ViewStyle;
+  dayLabel: TextStyle;
+  closedContainer: ViewStyle;
+  closedLabel: TextStyle;
+  hoursContainer: ViewStyle;
+  timeButton: ViewStyle;
+  timeLabel: TextStyle;
+  timeValue: TextStyle;
+  copyButton: ViewStyle;
+  copyButtonText: TextStyle;
+}
+
+const styles = StyleSheet.create<StylesType>({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',

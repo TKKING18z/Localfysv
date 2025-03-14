@@ -5,10 +5,15 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   Modal,
-  ScrollView
+  ScrollView,
+  ViewStyle,
+  TextStyle
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
+/**
+ * Props interface for the CustomTimePicker component
+ */
 interface CustomTimePickerProps {
   visible: boolean;
   onClose: () => void;
@@ -18,6 +23,9 @@ interface CustomTimePickerProps {
   title?: string;
 }
 
+/**
+ * A custom component for selecting time values
+ */
 const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   visible,
   onClose,
@@ -26,17 +34,17 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   initialMinutes,
   title = 'Seleccionar hora'
 }) => {
-  // Estado para las horas y minutos seleccionados
+  // State for the hours and minutes selected
   const [selectedHours, setSelectedHours] = useState(initialHours);
   const [selectedMinutes, setSelectedMinutes] = useState(initialMinutes);
 
-  // Generar horas disponibles (00-23)
+  // Generate available hours (00-23)
   const hours = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
   
-  // Generar minutos disponibles (00, 15, 30, 45) - puedes ajustar según necesites
+  // Generate available minutes (00, 15, 30, 45)
   const minutes = ['00', '15', '30', '45'];
 
-  // Manejar la confirmación
+  // Handle the confirmation
   const handleConfirm = () => {
     onTimeSelected(selectedHours, selectedMinutes);
     onClose();
@@ -63,7 +71,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
           </View>
 
           <View style={styles.timeSelectionContainer}>
-            {/* Selector de Horas */}
+            {/* Hours Selector */}
             <View style={styles.columnContainer}>
               <Text style={styles.columnTitle}>Horas</Text>
               <ScrollView 
@@ -93,7 +101,7 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
 
             <Text style={styles.timeSeparator}>:</Text>
 
-            {/* Selector de Minutos */}
+            {/* Minutes Selector */}
             <View style={styles.columnContainer}>
               <Text style={styles.columnTitle}>Minutos</Text>
               <ScrollView 
@@ -131,7 +139,31 @@ const CustomTimePicker: React.FC<CustomTimePickerProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
+/**
+ * Style type definitions for the CustomTimePicker
+ */
+interface TimePickerStyles {
+  modalOverlay: ViewStyle;
+  pickerContainer: ViewStyle;
+  pickerHeader: ViewStyle;
+  pickerTitle: TextStyle;
+  doneButton: ViewStyle;
+  doneButtonText: TextStyle;
+  timeSelectionContainer: ViewStyle;
+  columnContainer: ViewStyle;
+  columnTitle: TextStyle;
+  scrollColumn: ViewStyle;
+  scrollContent: ViewStyle;
+  timeOption: ViewStyle;
+  selectedOption: ViewStyle;
+  timeText: TextStyle;
+  selectedText: TextStyle;
+  timeSeparator: TextStyle;
+  timePreview: ViewStyle;
+  previewText: TextStyle;
+}
+
+const styles = StyleSheet.create<TimePickerStyles>({
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -147,7 +179,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 10,
     elevation: 20,
-    minHeight: 400, // Altura mínima para asegurar suficiente espacio
+    minHeight: 400, // Minimum height to ensure sufficient space
   },
   pickerHeader: {
     flexDirection: 'row',
