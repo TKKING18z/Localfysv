@@ -12,6 +12,7 @@ interface GalleryImage {
 interface EnhancedGalleryProps {
   images: GalleryImage[];
   title?: string;
+  fullWidth?: boolean; // Añadir esta prop como opcional
 }
 
 const { width } = Dimensions.get('window');
