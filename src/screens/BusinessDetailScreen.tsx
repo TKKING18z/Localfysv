@@ -32,6 +32,11 @@ import VideoPlayer from '../components/VideoPlayer';
 import SocialLinks from '../components/SocialLinks';
 import MenuViewer from '../components/MenuViewer';
 
+// Nuevas importaciones para reseñas
+import { useBusinessReviews } from '../../hooks/useReviews';
+import ReviewList from '../../components/reviews/ReviewList';
+import ReviewForm from '../../components/reviews/ReviewForm';
+
 // Constantes de diseño
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HEADER_HEIGHT = 350;  // Header más alto para mejor impacto visual
@@ -245,6 +250,26 @@ const BusinessDetailScreen: React.FC = () => {
     return currentTimeStr >= currentHours.open && currentTimeStr <= currentHours.close;
   };
 
+  // Hook para cargar reseñas
+  const {
+    reviews,
+    loading: reviewsLoading,
+    error: reviewsError,
+    hasMore: hasMoreReviews,
+    stats: reviewsStats,
+    loadMore: loadMoreReviews,
+    filterByRating,
+    activeFilter,
+    sortBy,
+    changeSortMethod,
+  } = useBusinessReviews(businessId);
+
+  // Se asume un currentUserId (reemplazar con el valor real de la sesión)
+  const currentUserId = "currentUser";
+
+  // Estado para mostrar formulario de reseña
+  const [showReviewForm, setShowReviewForm] = useState(false);
+
   // Loading state with improved UI
   if (loading) {
     return (
@@ -304,6 +329,9 @@ const BusinessDetailScreen: React.FC = () => {
     if (business?.videos && business.videos.length > 0) {
       tabOptions.push('videos');
     }
+    
+    // Agregamos siempre la pestaña de reseñas
+    tabOptions.push('reseñas');
     
     const index = tabOptions.indexOf(activeTab);
     const availableTabs = tabOptions.length;
@@ -545,6 +573,22 @@ const BusinessDetailScreen: React.FC = () => {
               </TouchableOpacity>
             )}
             
+            {/* Nueva pestaña de reseñas */}
+            <TouchableOpacity 
+              style={[styles.tab, activeTab === 'reseñas' && styles.activeTab]} 
+              onPress={() => setActiveTab('reseñas')}
+              activeOpacity={0.8}
+            >
+              <MaterialIcons 
+                name="rate-review" 
+                size={22} 
+                color={activeTab === 'reseñas' ? "#FFFFFF" : "#8E8E93"} 
+              />
+              <Text style={[
+                styles.tabText, 
+                activeTab === 'reseñas' && styles.activeTabText
+              ]}>Reseñas</Text>
+            </TouchableOpacity>
             {/* Indicador animado */}
             <Animated.View style={[
               styles.tabIndicator,
@@ -695,6 +739,37 @@ const BusinessDetailScreen: React.FC = () => {
               )}
             </>
           )}
+
+          {/* Nueva sección de reseñas */}
+          {activeTab === 'reseñas' && (
+            <View style={{ paddingVertical: 20 }}>
+              {/* Lista de reseñas */}
+              <ReviewList
+                reviews={reviews}
+                currentUserId={currentUserId}
+                isBusinessOwner={false} // Ajustar según se requiera
+                loading={reviewsLoading}
+                loadMore={loadMoreReviews}
+                hasMore={hasMoreReviews}
+                stats={reviewsStats}
+                onReply={(reviewId) => { /* Implementar respuesta */ }}
+                onReport={(reviewId) => { /* Implementar reporte */ }}
+                onEditReview={(review) => { /* Implementar edición */ }}
+                onDeleteReview={(reviewId) => { /* Implementar eliminación */ }}
+                onFilterChange={filterByRating}
+                activeFilter={activeFilter}
+                sortBy={sortBy}
+                onSortChange={changeSortMethod}
+              />
+              {/* Botón para agregar reseña */}
+              <TouchableOpacity 
+                style={styles.addReviewButton}
+                onPress={() => setShowReviewForm(true)}
+              >
+                <Text style={styles.addReviewButtonText}>Agregar Reseña</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </Animated.ScrollView>
       
@@ -740,6 +815,24 @@ const BusinessDetailScreen: React.FC = () => {
             </TouchableOpacity>
           )}
         </Animated.View>
+      )}
+
+      {/* Modal o renderizado condicional del formulario de reseña */}
+      {showReviewForm && (
+        // Ejemplo de modal inline; se puede reemplazar por un modal nativo
+        <View style={styles.reviewFormContainer}>
+          <ReviewForm
+            businessId={businessId}
+            businessName={business.name}
+            userId={currentUserId}
+            userName="Usuario Actual" // Reemplazar por nombre real
+            onSuccess={(reviewId) => {
+              setShowReviewForm(false);
+              // Se podría refrescar la lista o notificar al usuario
+            }}
+            onCancel={() => setShowReviewForm(false)}
+          />
+        </View>
       )}
     </SafeAreaView>
   );
@@ -1156,6 +1249,29 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 8,
     fontSize: 16,
+  },
+  addReviewButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignSelf: 'center',
+    marginTop: 16,
+  },
+  addReviewButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  reviewFormContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    padding: 20,
   },
 });
 
