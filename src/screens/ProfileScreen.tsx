@@ -22,6 +22,8 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import { useBusinesses } from '../context/BusinessContext';
 import { TextInput } from 'react-native-gesture-handler';
+import * as ImagePicker from 'expo-image-picker';
+import 'firebase/compat/storage';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -48,6 +50,7 @@ const ProfileScreen: React.FC = () => {
   const [privateProfile, setPrivateProfile] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   // Recent activity data
   const [recentActivity, setRecentActivity] = useState<{
@@ -226,6 +229,77 @@ const ProfileScreen: React.FC = () => {
     }
   };
 
+  // Función para seleccionar y subir foto de perfil
+  const handleChangePhoto = async () => {
+    try {
+      // Solicitar permisos de galería
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para seleccionar una foto.');
+        return;
+      }
+      
+      // Abrir selector de imágenes
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const selectedImage = result.assets[0];
+        setUploadingPhoto(true);
+        
+        try {
+          // Subir imagen a Firebase Storage
+          const user = firebase.auth().currentUser;
+          if (!user) throw new Error('No hay usuario autenticado');
+          
+          // Crear nombre único para la imagen
+          const filename = `profile_photos/${user.uid}/${Date.now().toString()}`;
+          const storageRef = firebase.storage().ref(filename);
+          
+          // Convertir URI a blob
+          const response = await fetch(selectedImage.uri);
+          const blob = await response.blob();
+          
+          // Subir blob a Firebase Storage
+          await storageRef.put(blob);
+          
+          // Obtener URL de la imagen
+          const downloadURL = await storageRef.getDownloadURL();
+          
+          // Actualizar perfil del usuario en Firestore
+          await firebase.firestore()
+            .collection('users')
+            .doc(user.uid)
+            .update({
+              photoURL: downloadURL,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          
+          // Actualizar la UI
+          setProfile(prevProfile => prevProfile ? {
+            ...prevProfile,
+            photoURL: downloadURL
+          } : null);
+          
+          Alert.alert('Éxito', 'Tu foto de perfil ha sido actualizada');
+        } catch (error) {
+          console.error('Error al subir imagen:', error);
+          Alert.alert('Error', 'No se pudo actualizar tu foto de perfil');
+        } finally {
+          setUploadingPhoto(false);
+        }
+      }
+    } catch (error) {
+      console.error('Error al seleccionar imagen:', error);
+      Alert.alert('Error', 'Hubo un problema al seleccionar la imagen');
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -274,8 +348,16 @@ const ProfileScreen: React.FC = () => {
               </View>
             )}
             
-            {editMode && (
-              <TouchableOpacity style={styles.changePhotoButton}>
+            {uploadingPhoto ? (
+              <View style={styles.changePhotoButton}>
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              </View>
+            ) : (
+              <TouchableOpacity 
+                style={styles.changePhotoButton}
+                onPress={handleChangePhoto}
+                disabled={uploadingPhoto}
+              >
                 <MaterialIcons name="camera-alt" size={20} color="#FFFFFF" />
               </TouchableOpacity>
             )}
@@ -622,7 +704,7 @@ const styles = StyleSheet.create({
   },
   changePhotoButton: {
     position: 'absolute',
-    bottom: 16,
+    bottom: 0,
     right: 0,
     backgroundColor: '#007AFF',
     width: 36,
@@ -632,6 +714,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 2,
     borderColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   profileInfo: {
     alignItems: 'center',

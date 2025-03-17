@@ -26,15 +26,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setLoading(true);
       try {
         if (firebaseUser) {
-          // Verificar integridad de datos del usuario
-          const response = await authService.verifyUserDataIntegrity(firebaseUser.uid);
-          if (response.success && response.user) {
-            setUser(response.user);
-          } else {
-            // Si hay problemas con los datos del usuario, obtener información básica
-            const userData = await authService.getCurrentUser();
-            setUser(userData);
-          }
+          // Obtener datos actualizados del usuario desde Firestore
+          const userDoc = await firebase.firestore().collection('users').doc(firebaseUser.uid).get();
+          
+          // Combinar datos de Firebase Auth con datos de Firestore
+          const userData = userDoc.exists ? userDoc.data() : {};
+          
+          // Asegurar que tenemos el rol del usuario - obtenerlo de Firestore o usar un valor por defecto
+          const userRole = userData?.role || 'customer';
+          
+          setUser({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            displayName: userData?.displayName || firebaseUser.displayName,
+            photoURL: userData?.photoURL || firebaseUser.photoURL,
+            role: userRole, // Asegurarnos de incluir el rol del usuario
+            // Otros campos según necesites
+          });
         } else {
           setUser(null);
         }

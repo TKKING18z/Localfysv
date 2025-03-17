@@ -2,10 +2,12 @@ export interface Review {
   id: string;
   businessId: string;
   userId: string;
+  userName: string;
+  userPhotoURL?: string;
   rating: number; // 1-5 stars
   text: string;
   createdAt: Date;
-  updatedAt: Date;
+  updatedAt?: Date;
   images?: ReviewImage[];
   ownerReply?: OwnerReply;
   reactions?: Reactions;
@@ -13,10 +15,10 @@ export interface Review {
 }
 
 export interface ReviewImage {
-  id: string;
+  id?: string;
   url: string;
-  thumbnailUrl: string;
-  uploadedAt: Date;
+  thumbnailUrl?: string;
+  uploadedAt?: Date;
 }
 
 export interface OwnerReply {
@@ -33,14 +35,14 @@ export interface Reactions {
 export interface ReviewsStats {
   totalCount: number;
   averageRating: number;
-  ratingDistribution: {
-    [key: number]: number; // key: 1-5, value: count
-  };
+  ratingDistribution: Record<number, number>;
+  ratingCounts: { [key: string]: number };
+  ratingPercentages: { [key: string]: number };
 }
 
-export interface ReviewFilters {
-  rating?: number; // filter by specific rating
-  sortBy: 'recent' | 'rating' | 'relevant';
+export type ReviewFilters = {
   businessId?: string;
   userId?: string;
-}
+  rating?: number; // filter by specific rating
+  sortBy: 'recent' | 'rating' | 'relevant';
+};

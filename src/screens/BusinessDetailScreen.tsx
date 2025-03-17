@@ -1,11 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   SafeAreaView,
   TouchableOpacity,
-  ScrollView,
   StatusBar,
   ActivityIndicator,
   Alert,
@@ -13,143 +12,229 @@ import {
   Platform,
   Animated,
   Share,
-  Dimensions
+  useWindowDimensions
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { MaterialIcons, FontAwesome } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import { useLocation } from '../hooks/useLocation';
+import { useAuth } from '../context/AuthContext'; // Importar el contexto de autenticación
 
-// Importa los componentes de visualización
+// Components
 import BusinessHoursView from '../components/BusinessHoursView';
 import PaymentMethodsView from '../components/PaymentMethodsView';
 import EnhancedGallery from '../components/EnhancedGallery';
 import VideoPlayer from '../components/VideoPlayer';
 import SocialLinks from '../components/SocialLinks';
 import MenuViewer from '../components/MenuViewer';
-
-// Nuevas importaciones para reseñas
-import { useBusinessReviews } from '../../hooks/useReviews';
 import ReviewList from '../../components/reviews/ReviewList';
 import ReviewForm from '../../components/reviews/ReviewForm';
 
-// Constantes de diseño
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const HEADER_HEIGHT = 350;  // Header más alto para mejor impacto visual
+// Hooks
+import { useBusinessReviews } from '../../hooks/useReviews';
 
-// Colores para efectos de gradiente - definición corregida
+// Tipos necesarios para resolver incompatibilidades
+type ReviewSortMethod = 'recent' | 'rating' | 'relevant';
+
+// Constants
+const HEADER_HEIGHT = 350;
 const GRADIENT_COLORS = {
-  primary: ['#007AFF', '#00C2FF'] as const,
-  secondary: ['#FF9500', '#FF2D55'] as const,
-  success: ['#34C759', '#32D74B'] as const,
-  danger: ['#FF3B30', '#FF2D55'] as const
+  primary: ['#007AFF', '#00C2FF'] as readonly [string, string],
+  secondary: ['#FF9500', '#FF2D55'] as readonly [string, string],
+  success: ['#34C759', '#32D74B'] as readonly [string, string],
+  danger: ['#FF3B30', '#FF2D55'] as readonly [string, string]
 };
 
+// Types
 type BusinessDetailRouteProp = RouteProp<RootStackParamList, 'BusinessDetail'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
+// Componentes más pequeños
+const LoadingState = () => (
+  <SafeAreaView style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color="#007AFF" />
+    <Text style={styles.loadingText}>Cargando negocio...</Text>
+  </SafeAreaView>
+);
+
+const ErrorState = ({ message, onBack }: { message: string | null, onBack: () => void }) => (
+  <SafeAreaView style={styles.errorContainer}>
+    <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+    <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
+    <Text style={styles.errorText}>{message || 'No se pudo cargar el negocio'}</Text>
+    <TouchableOpacity 
+      style={styles.backButton}
+      onPress={onBack}
+      accessibilityRole="button"
+      accessibilityLabel="Volver atrás"
+    >
+      <Text style={styles.backButtonText}>Volver</Text>
+    </TouchableOpacity>
+  </SafeAreaView>
+);
+
+// Componente principal optimizado
 const BusinessDetailScreen: React.FC = () => {
+  const dimensions = useWindowDimensions();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<BusinessDetailRouteProp>();
   const { businessId } = route.params;
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
   
+  // Obtener información del usuario actual - CORREGIDO
+  const { user } = useAuth(); // Cambiar 'currentUser' a 'user' para coincidir con el AuthContext
+  
+  // Estados principales
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [isFav, setIsFav] = useState(false);
   const [activeTab, setActiveTab] = useState('info');
-
-  // Animaciones mejoradas
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  
+  // Valores animados
   const scrollY = useRef(new Animated.Value(0)).current;
   const favoriteScale = useRef(new Animated.Value(1)).current;
   const tabBarOpacity = useRef(new Animated.Value(0)).current;
-  
-  // Animación para los botones de acción
   const actionButtonsY = useRef(new Animated.Value(100)).current;
   
-  // Más animaciones para los elementos de la interfaz
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, HEADER_HEIGHT - 50],
-    outputRange: [HEADER_HEIGHT, 80],
-    extrapolate: 'clamp'
-  });
+  // Hook para reseñas - adaptando los tipos para eliminar errores de tipado
+  const {
+    reviews,
+    loading: reviewsLoading,
+    error: _reviewsError, 
+    hasMore: hasMoreReviews,
+    stats: reviewsStats,
+    loadMore: loadMoreReviews,
+    filterByRating: originalFilterByRating,
+    activeFilter,
+    sortBy,
+    changeSortMethod: originalChangeSortMethod,
+    refreshReviews, 
+  } = useBusinessReviews(businessId);
+
+  // Adaptadores para resolver incompatibilidades de tipo
+  const filterByRating = useCallback((rating: number | null) => {
+    // Convertir number | null a ReviewFilterOption
+    const filter = rating === null ? 'all' : rating.toString() as '1' | '2' | '3' | '4' | '5';
+    originalFilterByRating(filter);
+  }, [originalFilterByRating]);
+
+  const changeSortMethod = useCallback((sort: ReviewSortMethod) => {
+    // Mapear ReviewSortMethod a ReviewSortOption
+    let mappedSort: 'recent' | 'highest' | 'lowest';
+    switch (sort) {
+      case 'rating':
+        mappedSort = 'highest'; 
+        break;
+      case 'relevant':
+        mappedSort = 'recent'; 
+        break;
+      default:
+        mappedSort = 'recent';
+    }
+    originalChangeSortMethod(mappedSort);
+  }, [originalChangeSortMethod]);
   
-  const headerOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_HEIGHT - 120, HEADER_HEIGHT - 80],
-    outputRange: [0, 0, 1],
-    extrapolate: 'clamp'
-  });
+  // Manejadores de eventos para reseñas - IMPORTANTE: definidos antes de cualquier retorno condicional
+  const handleReviewReply = useCallback((_reviewId: string) => {
+    // Implementación futura
+  }, []);
   
-  const businessNameOpacity = scrollY.interpolate({
-    inputRange: [0, 80, 120],
-    outputRange: [1, 0.8, 0],
-    extrapolate: 'clamp'
-  });
+  const handleReviewReport = useCallback((_reviewId: string) => {
+    // Implementación futura
+  }, []);
   
-  // Mostrar animación de los botones de acción cuando se carga el componente
-  useEffect(() => {
-    setTimeout(() => {
+  const handleEditReview = useCallback((_review: any) => {
+    // Implementación futura
+  }, []);
+  
+  const handleDeleteReview = useCallback((_reviewId: string) => {
+    // Implementación futura
+  }, []);
+  
+  // Animaciones derivadas (memoizadas)
+  const headerAnimations = useMemo(() => ({
+    height: scrollY.interpolate({
+      inputRange: [0, HEADER_HEIGHT - 50],
+      outputRange: [HEADER_HEIGHT, 80],
+      extrapolate: 'clamp'
+    }),
+    opacity: scrollY.interpolate({
+      inputRange: [0, HEADER_HEIGHT - 120, HEADER_HEIGHT - 80],
+      outputRange: [0, 0, 1],
+      extrapolate: 'clamp'
+    }),
+    nameOpacity: scrollY.interpolate({
+      inputRange: [0, 80, 120],
+      outputRange: [1, 0.8, 0],
+      extrapolate: 'clamp'
+    })
+  }), [scrollY]);
+
+  // Efecto para animaciones iniciales - optimizado con useCallback
+  const startInitialAnimations = useCallback(() => {
+    // Secuencia de animaciones ordenadas para mejor rendimiento
+    const animations = [
+      Animated.timing(tabBarOpacity, {
+        toValue: 1,
+        duration: 400,
+        delay: 300,
+        useNativeDriver: true
+      }),
       Animated.spring(actionButtonsY, {
         toValue: 0,
         tension: 50,
         friction: 7,
         useNativeDriver: true
-      }).start();
-    }, 400);
+      })
+    ];
     
-    // Animar la aparición de la barra de pestañas
-    Animated.timing(tabBarOpacity, {
-      toValue: 1,
-      duration: 400,
-      delay: 300,
-      useNativeDriver: true
-    }).start();
-  }, []);
+    // Iniciar animaciones en secuencia después de un pequeño retraso
+    setTimeout(() => {
+      Animated.sequence(animations).start();
+    }, 100);
+  }, [actionButtonsY, tabBarOpacity]);
 
-  // Función para compartir negocio
-  const shareBusiness = () => {
-    if (!business) return;
-    
-    Share.share({
-      title: business.name,
-      message: `¡Mira este negocio en Localfy! ${business.name} - ${business.description}`,
-    });
-  };
+  // Carga de datos del negocio - optimizado con useCallback
+  const fetchBusiness = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadingError(null);
+      
+      const fetchedBusiness = await getBusinessById(businessId);
+      if (fetchedBusiness) {
+        setBusiness(fetchedBusiness);
+        setIsFav(isFavorite(businessId));
+      } else {
+        setLoadingError('No se pudo encontrar el negocio');
+      }
+    } catch (error) {
+      console.error('Error fetching business details:', error);
+      setLoadingError('Error al cargar los detalles del negocio');
+    } finally {
+      setLoading(false);
+    }
+  }, [businessId, getBusinessById, isFavorite]);
+
+  // Inicializar datos y animaciones
+  useEffect(() => {
+    fetchBusiness();
+  }, [fetchBusiness]);
 
   useEffect(() => {
-    const fetchBusiness = async () => {
-      try {
-        setLoading(true);
-        setLoadingError(null);
-        
-        const fetchedBusiness = await getBusinessById(businessId);
-        if (fetchedBusiness) {
-          setBusiness(fetchedBusiness);
-          // Initialize favorite state
-          setIsFav(isFavorite(businessId));
-        } else {
-          setLoadingError('No se pudo encontrar el negocio');
-        }
-      } catch (error) {
-        console.error('Error fetching business details:', error);
-        setLoadingError('Error al cargar los detalles del negocio');
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (!loading && business) {
+      startInitialAnimations();
+    }
+  }, [loading, business, startInitialAnimations]);
 
-    fetchBusiness();
-  }, [businessId]);
-
-  // Handle toggling favorite with improved animation
-  const handleFavoriteToggle = () => {
-    // Animar el botón de favorito con un efecto más pronunciado
+  // Manejadores de eventos optimizados con useCallback
+  const handleFavoriteToggle = useCallback(() => {
     Animated.sequence([
       Animated.spring(favoriteScale, {
         toValue: 1.4,
@@ -166,11 +251,10 @@ const BusinessDetailScreen: React.FC = () => {
     ]).start();
     
     toggleFavorite(businessId);
-    setIsFav(!isFav);
-  };
+    setIsFav(prev => !prev);
+  }, [favoriteScale, toggleFavorite, businessId]);
 
-  // Call business phone number
-  const handleCallBusiness = () => {
+  const handleCallBusiness = useCallback(() => {
     if (!business?.phone) return;
     
     const phoneNumber = Platform.OS === 'android' 
@@ -189,10 +273,9 @@ const BusinessDetailScreen: React.FC = () => {
         console.error('Error al intentar llamar:', error);
         Alert.alert('Error', 'No se pudo iniciar la llamada');
       });
-  };
+  }, [business?.phone]);
 
-  // Send email to business
-  const handleEmailBusiness = () => {
+  const handleEmailBusiness = useCallback(() => {
     if (!business?.email) return;
     
     const emailUrl = `mailto:${business.email}`;
@@ -209,22 +292,29 @@ const BusinessDetailScreen: React.FC = () => {
         console.error('Error al intentar enviar correo:', error);
         Alert.alert('Error', 'No se pudo abrir el cliente de correo');
       });
-  };
+  }, [business?.email]);
 
-  // Get business image or fallback
-  const getBusinessImage = () => {
-    if (business?.images && business.images.length > 0) {
-      const mainImage = business.images.find(img => img.isMain);
-      if (mainImage && mainImage.url) {
-        return mainImage.url;
-      }
-      return business.images[0].url;
+  const shareBusiness = useCallback(() => {
+    if (!business) return;
+    
+    Share.share({
+      title: business.name,
+      message: `¡Mira este negocio en Localfy! ${business.name} - ${business.description}`,
+    });
+  }, [business]);
+
+  // Funciones de utilidad - memoizadas para evitar recálculos
+  const getBusinessImage = useMemo(() => {
+    if (!business?.images || business.images.length === 0) return null;
+    
+    const mainImage = business.images.find(img => img.isMain);
+    if (mainImage && mainImage.url) {
+      return mainImage.url;
     }
-    return null;
-  };
+    return business.images[0].url;
+  }, [business?.images]);
 
-  // Generate color from business name for placeholder
-  const getPlaceholderColor = () => {
+  const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';
     
     const colors = [
@@ -234,10 +324,9 @@ const BusinessDetailScreen: React.FC = () => {
     
     const sum = business.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return colors[sum % colors.length];
-  };
+  }, [business]);
 
-  // Verificar si el negocio está abierto ahora
-  const isOpenNow = () => {
+  const isOpenNow = useMemo(() => {
     if (!business?.businessHours) return null;
     
     const now = new Date();
@@ -248,99 +337,70 @@ const BusinessDetailScreen: React.FC = () => {
     
     const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
     return currentTimeStr >= currentHours.open && currentTimeStr <= currentHours.close;
-  };
+  }, [business?.businessHours]);
 
-  // Hook para cargar reseñas
-  const {
-    reviews,
-    loading: reviewsLoading,
-    error: reviewsError,
-    hasMore: hasMoreReviews,
-    stats: reviewsStats,
-    loadMore: loadMoreReviews,
-    filterByRating,
-    activeFilter,
-    sortBy,
-    changeSortMethod,
-  } = useBusinessReviews(businessId);
-
-  // Se asume un currentUserId (reemplazar con el valor real de la sesión)
-  const currentUserId = "currentUser";
-
-  // Estado para mostrar formulario de reseña
-  const [showReviewForm, setShowReviewForm] = useState(false);
-
-  // Loading state with improved UI
-  if (loading) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Cargando negocio...</Text>
-      </SafeAreaView>
-    );
-  }
-
-  // Error state with improved UI
-  if (loadingError || !business) {
-    return (
-      <SafeAreaView style={styles.errorContainer}>
-        <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
-        <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
-        <Text style={styles.errorText}>{loadingError || 'No se pudo cargar el negocio'}</Text>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backButtonText}>Volver</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
-  }
-
-  // Get business image or use placeholder
-  const businessImage = getBusinessImage();
-  
-  // Get formatted distance
-  const distance = getFormattedDistance(business);
-
-  // Función para determinar si es un restaurante basado en la categoría
-  const isRestaurant = () => {
+  const isRestaurant = useMemo(() => {
+    if (!business) return false;
+    
     const category = business.category.toLowerCase();
     return category.includes('restaurante') || 
            category.includes('café') || 
            category.includes('cafetería') || 
            category.includes('comida') ||
            category.includes('bar');
-  };
+  }, [business]);
 
-  // Estado de apertura
-  const openStatus = isOpenNow();
-
-  // Animated TabBar indicator
-  const getTabIndicatorPosition = () => {
-    // Calculate position based on active tab
-    const tabWidth = SCREEN_WIDTH / 4; // Assuming max 4 tabs
-    const tabOptions = ['info', 'gallery'];
+  const availableTabs = useMemo(() => {
+    const tabs = ['info', 'gallery'];
     
-    if (isRestaurant() && (business?.menu || business?.menuUrl)) {
-      tabOptions.push('menu');
+    if (business) {
+      if (isRestaurant && (business.menu || business.menuUrl)) {
+        tabs.push('menu');
+      }
+      
+      if (business.videos && business.videos.length > 0) {
+        tabs.push('videos');
+      }
+      
+      tabs.push('reseñas');
     }
     
-    if (business?.videos && business.videos.length > 0) {
-      tabOptions.push('videos');
-    }
-    
-    // Agregamos siempre la pestaña de reseñas
-    tabOptions.push('reseñas');
-    
-    const index = tabOptions.indexOf(activeTab);
-    const availableTabs = tabOptions.length;
+    return tabs;
+  }, [business, isRestaurant]);
+
+  // Cálculo de la posición del indicador de pestañas
+  const tabIndicatorPosition = useMemo(() => {
+    const index = availableTabs.indexOf(activeTab);
+    const tabWidth = dimensions.width / availableTabs.length;
     
     return {
-      width: SCREEN_WIDTH / availableTabs,
-      transform: [{ translateX: (SCREEN_WIDTH / availableTabs) * index }]
+      width: tabWidth,
+      transform: [{ translateX: tabWidth * index }]
     };
-  };
+  }, [activeTab, availableTabs, dimensions.width]);
+
+  // Para manejar el scroll animado
+  const handleScroll = Animated.event(
+    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+    { useNativeDriver: false }
+  );
+
+  // Distancia formateada
+  const distance = business ? getFormattedDistance(business) : null;
+
+  // Mock user ID - en producción, usar el real
+  const currentUserId = user?.uid || "anonymousUser";
+  const currentUserName = user?.displayName || user?.email?.split('@')[0] || "Usuario";
+  const currentUserPhoto = user?.photoURL;
+
+  // Estados renderizados
+  if (loading) {
+    return <LoadingState />;
+  }
+
+  if (loadingError || !business) {
+    return <ErrorState message={loadingError} onBack={() => navigation.goBack()} />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -350,8 +410,8 @@ const BusinessDetailScreen: React.FC = () => {
       <Animated.View style={[
         styles.floatingHeader,
         { 
-          opacity: headerOpacity,
-          transform: [{ translateY: headerOpacity.interpolate({
+          opacity: headerAnimations.opacity,
+          transform: [{ translateY: headerAnimations.opacity.interpolate({
             inputRange: [0, 1],
             outputRange: [-50, 0]
           })}]
@@ -360,14 +420,26 @@ const BusinessDetailScreen: React.FC = () => {
         <TouchableOpacity 
           style={styles.floatingBackButton}
           onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Volver atrás"
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <MaterialIcons name="arrow-back-ios" size={22} color="#333" />
         </TouchableOpacity>
-        <Text numberOfLines={1} style={styles.floatingHeaderTitle}>{business.name}</Text>
+        <Text 
+          numberOfLines={1} 
+          style={styles.floatingHeaderTitle}
+          accessibilityRole="header"
+        >
+          {business.name}
+        </Text>
         <Animated.View style={{ transform: [{ scale: favoriteScale }] }}>
           <TouchableOpacity 
             style={styles.floatingActionButton}
             onPress={handleFavoriteToggle}
+            accessibilityRole="button"
+            accessibilityLabel={isFav ? "Quitar de favoritos" : "Añadir a favoritos"}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
             <MaterialIcons 
               name={isFav ? "favorite" : "favorite-border"} 
@@ -380,24 +452,26 @@ const BusinessDetailScreen: React.FC = () => {
       
       <Animated.ScrollView 
         showsVerticalScrollIndicator={false}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
+        onScroll={handleScroll}
         scrollEventThrottle={16}
+        contentContainerStyle={styles.scrollContent}
+        overScrollMode="never"
       >
         {/* Business Image Header con animación */}
-        <Animated.View style={[styles.imageContainer, { height: headerHeight }]}>
-          {businessImage ? (
+        <Animated.View style={[styles.imageContainer, { height: headerAnimations.height }]}>
+          {getBusinessImage ? (
             <Image 
-              source={{ uri: businessImage }} 
+              source={{ uri: getBusinessImage }} 
               style={styles.businessImage}
               contentFit="cover"
               transition={500}
               cachePolicy="memory-disk"
+              contentPosition="center"
+              placeholder={Platform.OS === 'ios' ? null : { color: getPlaceholderColor }}
+              accessibilityLabel={`Imagen principal de ${business.name}`}
             />
           ) : (
-            <View style={[styles.placeholderImage, { backgroundColor: getPlaceholderColor() }]}>
+            <View style={[styles.placeholderImage, { backgroundColor: getPlaceholderColor }]}>
               <Text style={styles.placeholderText}>{business.name.charAt(0).toUpperCase()}</Text>
             </View>
           )}
@@ -415,6 +489,8 @@ const BusinessDetailScreen: React.FC = () => {
               style={styles.iconButton}
               onPress={() => navigation.goBack()}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel="Volver atrás"
             >
               <MaterialIcons name="arrow-back-ios" size={22} color="white" />
             </TouchableOpacity>
@@ -424,6 +500,8 @@ const BusinessDetailScreen: React.FC = () => {
                 style={styles.iconButton}
                 onPress={shareBusiness}
                 activeOpacity={0.7}
+                accessibilityRole="button"
+                accessibilityLabel="Compartir negocio"
               >
                 <MaterialIcons name="share" size={22} color="white" />
               </TouchableOpacity>
@@ -439,6 +517,8 @@ const BusinessDetailScreen: React.FC = () => {
                   ]}
                   onPress={handleFavoriteToggle}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={isFav ? "Quitar de favoritos" : "Añadir a favoritos"}
                 >
                   <MaterialIcons 
                     name={isFav ? "favorite" : "favorite-border"} 
@@ -453,29 +533,35 @@ const BusinessDetailScreen: React.FC = () => {
           {/* Nombre del negocio flotante animado */}
           <Animated.View style={[
             styles.overlayBusinessNameContainer,
-            { opacity: businessNameOpacity }
+            { opacity: headerAnimations.nameOpacity }
           ]}>
-            <Text style={styles.overlayBusinessName}>{business.name}</Text>
+            <Text 
+              style={styles.overlayBusinessName}
+              numberOfLines={2}
+              accessibilityRole="header"
+            >
+              {business.name}
+            </Text>
             <View style={styles.ratingContainer}>
               <MaterialIcons name="star" size={16} color="#FFCC00" />
               <Text style={styles.ratingText}>
-                {(Math.random() * 2 + 3).toFixed(1)}
+                {reviewsStats?.averageRating?.toFixed(1) || (Math.random() * 2 + 3).toFixed(1)}
               </Text>
             </View>
           </Animated.View>
           
           {/* Estado de apertura con diseño mejorado */}
-          {openStatus !== null && (
+          {isOpenNow !== null && (
             <View style={[
               styles.openStatusBadge,
-              openStatus ? styles.openBadge : styles.closedBadge
+              isOpenNow ? styles.openBadge : styles.closedBadge
             ]}>
               <View style={[
                 styles.statusDot,
-                openStatus ? styles.openDot : styles.closedDot
+                isOpenNow ? styles.openDot : styles.closedDot
               ]} />
               <Text style={styles.openStatusText}>
-                {openStatus ? 'Abierto ahora' : 'Cerrado'}
+                {isOpenNow ? 'Abierto ahora' : 'Cerrado'}
               </Text>
             </View>
           )}
@@ -483,7 +569,13 @@ const BusinessDetailScreen: React.FC = () => {
         
         {/* Business Details con diseño mejorado */}
         <View style={styles.detailsContainer}>
-          <Text style={styles.businessName}>{business.name}</Text>
+          <Text 
+            style={styles.businessName}
+            accessibilityRole="header"
+            numberOfLines={2}
+          >
+            {business.name}
+          </Text>
           
           <View style={styles.infoRow}>
             <View style={styles.tagContainer}>
@@ -504,95 +596,43 @@ const BusinessDetailScreen: React.FC = () => {
               styles.tabsContainer,
               { opacity: tabBarOpacity }
             ]}
+            accessibilityRole="tablist"
           >
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'info' && styles.activeTab]} 
-              onPress={() => setActiveTab('info')}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons 
-                name="info" 
-                size={22} 
-                color={activeTab === 'info' ? "#FFFFFF" : "#8E8E93"} 
-              />
-              <Text style={[
-                styles.tabText, 
-                activeTab === 'info' && styles.activeTabText
-              ]}>Información</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'gallery' && styles.activeTab]} 
-              onPress={() => setActiveTab('gallery')}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons 
-                name="photo-library" 
-                size={22} 
-                color={activeTab === 'gallery' ? "#FFFFFF" : "#8E8E93"} 
-              />
-              <Text style={[
-                styles.tabText, 
-                activeTab === 'gallery' && styles.activeTabText
-              ]}>Galería</Text>
-            </TouchableOpacity>
-            
-            {isRestaurant() && (business.menu || business.menuUrl) && (
+            {availableTabs.map(tab => (
               <TouchableOpacity 
-                style={[styles.tab, activeTab === 'menu' && styles.activeTab]} 
-                onPress={() => setActiveTab('menu')}
+                key={tab}
+                style={[styles.tab, activeTab === tab && styles.activeTab]} 
+                onPress={() => setActiveTab(tab)}
                 activeOpacity={0.8}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: activeTab === tab }}
+                accessibilityLabel={`Pestaña ${tab}`}
               >
                 <MaterialIcons 
-                  name="restaurant-menu" 
+                  name={
+                    tab === 'info' ? 'info' :
+                    tab === 'gallery' ? 'photo-library' :
+                    tab === 'menu' ? 'restaurant-menu' :
+                    tab === 'videos' ? 'videocam' : 'rate-review'
+                  } 
                   size={22} 
-                  color={activeTab === 'menu' ? "#FFFFFF" : "#8E8E93"} 
+                  color={activeTab === tab ? "#FFFFFF" : "#8E8E93"} 
                 />
                 <Text style={[
                   styles.tabText, 
-                  activeTab === 'menu' && styles.activeTabText
-                ]}>Menú</Text>
+                  activeTab === tab && styles.activeTabText
+                ]}>
+                  {tab === 'info' ? 'Información' :
+                   tab === 'gallery' ? 'Galería' :
+                   tab === 'menu' ? 'Menú' :
+                   tab === 'videos' ? 'Videos' : 'Reseñas'}
+                </Text>
               </TouchableOpacity>
-            )}
-            
-            {business.videos && business.videos.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.tab, activeTab === 'videos' && styles.activeTab]} 
-                onPress={() => setActiveTab('videos')}
-                activeOpacity={0.8}
-              >
-                <MaterialIcons 
-                  name="videocam" 
-                  size={22} 
-                  color={activeTab === 'videos' ? "#FFFFFF" : "#8E8E93"} 
-                />
-                <Text style={[
-                  styles.tabText, 
-                  activeTab === 'videos' && styles.activeTabText
-                ]}>Videos</Text>
-              </TouchableOpacity>
-            )}
-            
-            {/* Nueva pestaña de reseñas */}
-            <TouchableOpacity 
-              style={[styles.tab, activeTab === 'reseñas' && styles.activeTab]} 
-              onPress={() => setActiveTab('reseñas')}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons 
-                name="rate-review" 
-                size={22} 
-                color={activeTab === 'reseñas' ? "#FFFFFF" : "#8E8E93"} 
-              />
-              <Text style={[
-                styles.tabText, 
-                activeTab === 'reseñas' && styles.activeTabText
-              ]}>Reseñas</Text>
-            </TouchableOpacity>
+            ))}
             {/* Indicador animado */}
             <Animated.View style={[
               styles.tabIndicator,
-              getTabIndicatorPosition()
+              tabIndicatorPosition
             ]} />
           </Animated.View>
           
@@ -626,6 +666,8 @@ const BusinessDetailScreen: React.FC = () => {
                     style={styles.contactItem}
                     onPress={handleCallBusiness}
                     activeOpacity={0.6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Llamar a ${business.phone}`}
                   >
                     <View style={[styles.contactIconCircle, {backgroundColor: '#34C759'}]}>
                       <MaterialIcons name="phone" size={20} color="white" />
@@ -639,6 +681,8 @@ const BusinessDetailScreen: React.FC = () => {
                     style={styles.contactItem}
                     onPress={handleEmailBusiness}
                     activeOpacity={0.6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Enviar correo a ${business.email}`}
                   >
                     <View style={[styles.contactIconCircle, {backgroundColor: '#FF9500'}]}>
                       <MaterialIcons name="email" size={20} color="white" />
@@ -666,11 +710,13 @@ const BusinessDetailScreen: React.FC = () => {
                       Linking.openURL(url);
                     }}
                     activeOpacity={0.6}
+                    accessibilityRole="link"
+                    accessibilityLabel={`Visitar sitio web ${business.website}`}
                   >
                     <View style={[styles.contactIconCircle, {backgroundColor: '#007AFF'}]}>
                       <MaterialIcons name="public" size={20} color="white" />
                     </View>
-                    <Text style={[styles.contactText, styles.websiteText]}>{business.website}</Text>
+                    <Text style={[styles.contactText, styles.websiteText]} numberOfLines={1}>{business.website}</Text>
                     <MaterialIcons name="arrow-forward-ios" size={18} color="#8E8E93" style={{marginLeft: 'auto'}} />
                   </TouchableOpacity>
                 )}
@@ -707,7 +753,7 @@ const BusinessDetailScreen: React.FC = () => {
           )}
           
           {/* Contenido de la pestaña de Menú */}
-          {activeTab === 'menu' && isRestaurant() && (
+          {activeTab === 'menu' && isRestaurant && (
             <>
               {(business.menu || business.menuUrl) ? (
                 <View style={styles.card}>
@@ -740,33 +786,43 @@ const BusinessDetailScreen: React.FC = () => {
             </>
           )}
 
-          {/* Nueva sección de reseñas */}
+          {/* Sección de reseñas */}
           {activeTab === 'reseñas' && (
-            <View style={{ paddingVertical: 20 }}>
+            <View style={styles.reviewsContainer}>
               {/* Lista de reseñas */}
               <ReviewList
                 reviews={reviews}
                 currentUserId={currentUserId}
-                isBusinessOwner={false} // Ajustar según se requiera
+                isBusinessOwner={false}
                 loading={reviewsLoading}
                 loadMore={loadMoreReviews}
                 hasMore={hasMoreReviews}
                 stats={reviewsStats}
-                onReply={(reviewId) => { /* Implementar respuesta */ }}
-                onReport={(reviewId) => { /* Implementar reporte */ }}
-                onEditReview={(review) => { /* Implementar edición */ }}
-                onDeleteReview={(reviewId) => { /* Implementar eliminación */ }}
+                onReply={handleReviewReply}
+                onReport={handleReviewReport}
+                onEditReview={handleEditReview}
+                onDeleteReview={handleDeleteReview}
                 onFilterChange={filterByRating}
-                activeFilter={activeFilter}
-                sortBy={sortBy}
+                activeFilter={activeFilter === 'all' ? null : parseInt(activeFilter)}
+                sortBy={sortBy === 'recent' ? 'recent' : sortBy === 'highest' ? 'rating' : 'relevant'}
                 onSortChange={changeSortMethod}
               />
               {/* Botón para agregar reseña */}
               <TouchableOpacity 
                 style={styles.addReviewButton}
                 onPress={() => setShowReviewForm(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Añadir reseña"
               >
-                <Text style={styles.addReviewButtonText}>Agregar Reseña</Text>
+                <LinearGradient
+                  colors={GRADIENT_COLORS.primary}
+                  style={styles.reviewButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  <MaterialIcons name="rate-review" size={20} color="white" />
+                  <Text style={styles.addReviewButtonText}>Añadir Reseña</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           )}
@@ -784,6 +840,8 @@ const BusinessDetailScreen: React.FC = () => {
               style={styles.actionButton}
               onPress={handleCallBusiness}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Llamar al negocio"
             >
               <LinearGradient
                 colors={GRADIENT_COLORS.success}
@@ -802,6 +860,8 @@ const BusinessDetailScreen: React.FC = () => {
               style={styles.actionButton}
               onPress={handleEmailBusiness}
               activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Enviar correo al negocio"
             >
               <LinearGradient
                 colors={GRADIENT_COLORS.secondary}
@@ -817,31 +877,60 @@ const BusinessDetailScreen: React.FC = () => {
         </Animated.View>
       )}
 
-      {/* Modal o renderizado condicional del formulario de reseña */}
+      {/* Modal de formulario de reseña */}
       {showReviewForm && (
-        // Ejemplo de modal inline; se puede reemplazar por un modal nativo
-        <View style={styles.reviewFormContainer}>
-          <ReviewForm
-            businessId={businessId}
-            businessName={business.name}
-            userId={currentUserId}
-            userName="Usuario Actual" // Reemplazar por nombre real
-            onSuccess={(reviewId) => {
-              setShowReviewForm(false);
-              // Se podría refrescar la lista o notificar al usuario
-            }}
-            onCancel={() => setShowReviewForm(false)}
+        <View style={[styles.reviewFormOverlay, { zIndex: 2000 }]}>
+          <TouchableOpacity 
+            style={styles.reviewFormBackdrop}
+            onPress={() => setShowReviewForm(false)}
+            activeOpacity={1}
           />
+          <View style={[styles.reviewFormContainer]}>
+            <View style={styles.reviewFormHeader}>
+              <Text style={styles.reviewFormTitle}>Añadir Reseña</Text>
+              <TouchableOpacity 
+                onPress={() => setShowReviewForm(false)}
+                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+              >
+                <MaterialIcons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            {/* ReviewForm con manejo de éxito mejorado */}
+            <ReviewForm
+              businessId={businessId}
+              businessName={business.name}
+              userId={currentUserId}
+              userName={currentUserName}
+              userPhotoURL={currentUserPhoto ?? undefined} // Ya corregido anteriormente
+              onSuccess={(reviewId) => {
+                console.log('Reseña añadida exitosamente:', reviewId);
+                console.log('Foto de perfil del usuario:', currentUserPhoto); // Añadir para depuración
+                setShowReviewForm(false);
+                
+                // Refrescar la lista de reseñas
+                setTimeout(() => {
+                  refreshReviews();
+                }, 500);
+              }}
+              onCancel={() => setShowReviewForm(false)}
+            />
+          </View>
         </View>
       )}
     </SafeAreaView>
   );
 };
 
+// Estilos optimizados
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 20,
   },
   loadingContainer: {
     flex: 1,
@@ -853,6 +942,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666666',
+    fontWeight: '500',
   },
   errorContainer: {
     flex: 1,
@@ -879,6 +969,11 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: {width: 0, height: 2},
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   backButtonText: {
     color: 'white',
@@ -906,17 +1001,17 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 16,
   },
   floatingBackButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(240,240,245,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   floatingActionButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(240,240,245,0.8)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -969,9 +1064,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
   },
   iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(0, 0, 0, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
@@ -995,7 +1090,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 6,
+    marginBottom: 8,
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
@@ -1003,15 +1098,17 @@ const styles = StyleSheet.create({
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
   },
   ratingText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 4,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
   },
   detailsContainer: {
     padding: 20,
@@ -1082,16 +1179,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     color: '#007AFF',
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   distanceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(142, 142, 147, 0.1)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   distanceText: {
     fontSize: 14,
     color: '#8E8E93',
     marginLeft: 4,
+    fontWeight: '500',
   },
   tabsContainer: {
     flexDirection: 'row',
@@ -1106,7 +1208,7 @@ const styles = StyleSheet.create({
   tab: {
     alignItems: 'center',
     paddingVertical: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 10,
     borderRadius: 25,
     zIndex: 1,
     flex: 1,
@@ -1115,7 +1217,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   tabText: {
-    fontSize: 13,
+    fontSize: 12,
     color: '#8E8E93',
     marginTop: 4,
     fontWeight: '500',
@@ -1175,19 +1277,21 @@ const styles = StyleSheet.create({
   contactText: {
     fontSize: 16,
     color: '#333333',
+    flex: 1,
   },
   websiteText: {
     color: '#007AFF',
-    textDecorationLine: 'underline',
   },
   noInfoText: {
     fontSize: 16,
     color: '#8E8E93',
     fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 10,
   },
   galleryCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
     marginBottom: 16,
     shadowColor: '#000',
@@ -1198,8 +1302,8 @@ const styles = StyleSheet.create({
   },
   emptyCard: {
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    padding: 24,
     marginBottom: 16,
     justifyContent: 'center',
     alignItems: 'center',
@@ -1212,7 +1316,12 @@ const styles = StyleSheet.create({
   emptyCardText: {
     fontSize: 16,
     color: '#8E8E93',
-    marginTop: 8,
+    marginTop: 12,
+    textAlign: 'center',
+  },
+  reviewsContainer: {
+    marginTop: 16,
+    marginBottom: 24,
   },
   actionButtonsContainer: {
     flexDirection: 'row',
@@ -1251,28 +1360,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   addReviewButton: {
-    backgroundColor: '#007AFF',
+    alignSelf: 'center',
+    marginTop: 20,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  reviewButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 20,
-    borderRadius: 8,
-    alignSelf: 'center',
-    marginTop: 16,
   },
   addReviewButtonText: {
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
+    marginLeft: 8,
   },
-  reviewFormContainer: {
+  reviewFormOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
-    padding: 20,
+    alignItems: 'center',
+    zIndex: 2000, // Increased z-index
+    elevation: 10, // For Android
   },
+  reviewFormBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.6)', // Darker for better contrast
+  },
+  reviewFormContainer: {
+    width: '95%',
+    height: '90%', // Mayor altura para asegurar espacio suficiente
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 0, // Quitamos el padding para que no interfiera con el ScrollView interno
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 8,
+  },
+  reviewFormHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F5',
+  },
+  reviewFormTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333333',
+  }
 });
 
 export default BusinessDetailScreen;

@@ -19,6 +19,7 @@ import { Review } from '../../models/reviewTypes';
 import StarRating from './StarRating';
 import ImageUploader from './ImageUploader';
 import { LinearGradient } from 'expo-linear-gradient';
+import { addReview, updateReview, uploadReviewImages } from '../../services/reviewService';
 
 interface ReviewFormProps {
   businessId: string;
@@ -125,61 +126,87 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
     
     try {
       setLoading(true);
+      console.log('Enviando reseña...', { rating, text: reviewText.trim(), userPhotoURL });
       
       if (isEditing && existingReview) {
         // Update existing review
+        console.log('Actualizando reseña existente:', existingReview.id);
         await updateReview(existingReview.id, {
           rating,
           text: reviewText.trim(),
         });
         
-        // Handle images if needed
+        // Handle images if needed - no bloqueamos la actualización por errores en imágenes
+        let imageUploadSuccess = true;
         if (selectedImages.length > 0) {
           try {
+            console.log('Subiendo nuevas imágenes para reseña existente');
             await uploadReviewImages(existingReview.id, selectedImages);
           } catch (imageError) {
-            console.error('Image upload error:', imageError);
-            // Continue even if images fail - the review was already updated
+            console.error('Error al subir imágenes:', imageError);
+            imageUploadSuccess = false;
+          }
+        }
+        
+        console.log('Reseña actualizada correctamente');
+        
+        // Notificar sobre error de imágenes solo si hubo intento de subir
+        if (!imageUploadSuccess && selectedImages.length > 0) {
+          setTimeout(() => {
             Alert.alert(
               'Advertencia', 
               'Tu reseña fue actualizada, pero las imágenes no pudieron subirse.'
             );
-          }
+          }, 500);
         }
         
         onSuccess(existingReview.id);
       } else {
-        // Create new review
+        // Create new review - primero creamos la reseña
+        console.log('Creando nueva reseña para negocio:', businessId);
         const reviewData = {
           businessId,
           userId,
           userName,
-          userPhotoURL,
+          userPhotoURL, // Aseguramos que este campo se incluya correctamente
           rating,
           text: reviewText.trim(),
-          createdAt: new Date()
+          createdAt: new Date(),
+          images: [] // Inicialmente sin imágenes
         };
         
+        console.log('Datos de la reseña:', reviewData);
         const reviewId = await addReview(reviewData);
+        console.log('Reseña creada con ID:', reviewId);
         
-        // Upload images if any
+        // Luego intentamos subir imágenes, pero no bloqueamos si fallan
+        let imageUploadSuccess = true;
         if (selectedImages.length > 0) {
           try {
+            console.log('Subiendo imágenes para nueva reseña');
             await uploadReviewImages(reviewId, selectedImages);
           } catch (imageError) {
-            console.error('Image upload error:', imageError);
-            // Continue even if images fail - the review was already created
+            console.error('Error al subir imágenes:', imageError);
+            imageUploadSuccess = false;
+          }
+        }
+        
+        console.log('Reseña publicada exitosamente');
+        
+        // Notificar sobre error de imágenes solo si hubo intento de subir
+        if (!imageUploadSuccess && selectedImages.length > 0) {
+          setTimeout(() => {
             Alert.alert(
               'Advertencia', 
-              'Tu reseña fue publicada, pero las imágenes no pudieron subirse.'
+              'Tu reseña fue publicada, pero las imágenes no pudieron subirse debido a un problema de permisos.'
             );
-          }
+          }, 500);
         }
         
         onSuccess(reviewId);
       }
     } catch (error) {
-      console.error('Error submitting review:', error);
+      console.error('Error al enviar reseña:', error);
       Alert.alert(
         'Error',
         isEditing
@@ -220,13 +247,11 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
   };
   
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
-    >
+    <View style={styles.container}>
       <ScrollView 
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Cabecera del negocio */}
         <Animated.View 
@@ -354,10 +379,13 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
             </View>
           </View>
         </Animated.View>
+        
+        {/* Espacio adicional al final para asegurar scroll suficiente */}
+        <View style={{height: 100}} />
       </ScrollView>
       
-      {/* Botones de acción fijos en la parte inferior */}
-      <View style={styles.actionButtonsContainer}>
+      {/* Botones de acción fijos - FUERA del KeyboardAvoidingView y del ScrollView */}
+      <View style={styles.fixedActionButtonsContainer}>
         <TouchableOpacity
           style={styles.cancelButton}
           onPress={onCancel}
@@ -390,7 +418,7 @@ const ReviewForm: React.FC<ReviewFormProps> = ({
           </LinearGradient>
         </TouchableOpacity>
       </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 };
 
@@ -398,9 +426,10 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF', // Un fondo más claro y moderno
+    position: 'relative', // Importante para los botones fijos
   },
   scrollContainer: {
-    paddingBottom: 100, // Espacio para los botones de acción
+    paddingBottom: 120, // Suficiente espacio para los botones
   },
   businessHeader: {
     flexDirection: 'row',
@@ -530,7 +559,7 @@ const styles = StyleSheet.create({
     color: '#666666',
     marginLeft: 4,
   },
-  actionButtonsContainer: {
+  fixedActionButtonsContainer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
@@ -540,6 +569,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E0E0E0',
+    zIndex: 1000, // Valor muy alto para asegurar visibilidad
+    elevation: 8, // Para Android
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   cancelButton: {
     flex: 1,
@@ -575,19 +610,3 @@ const styles = StyleSheet.create({
 });
 
 export default ReviewForm;
-
-// Importaciones de funciones que deben estar definidas en sus respectivos servicios
-function addReview(reviewData: any): Promise<string> {
-  // Implementación real en tu servicio
-  return Promise.resolve('review-id');
-}
-
-function updateReview(id: string, data: any): Promise<void> {
-  // Implementación real en tu servicio
-  return Promise.resolve();
-}
-
-function uploadReviewImages(reviewId: string, images: string[]): Promise<void> {
-  // Implementación real en tu servicio
-  return Promise.resolve();
-}

@@ -1,5 +1,5 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image, Animated } from 'react-native';
+import React, { useState, useRef, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Animated, Alert } from 'react-native';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { Ionicons, MaterialIcons } from '@expo/vector-icons';
@@ -19,6 +19,76 @@ interface ReviewItemProps {
   onDeleteReview?: (reviewId: string) => void;
 }
 
+// Función auxiliar para formatear fechas de forma segura
+const formatDate = (date: any): string => {
+  try {
+    // Revisamos si la fecha es un timestamp de Firestore
+    if (date && typeof date === 'object' && 'toDate' in date) {
+      date = date.toDate();
+    }
+    
+    // Si es una cadena ISO, la convertimos a Date
+    if (typeof date === 'string') {
+      date = new Date(date);
+    }
+    
+    // Verificamos que sea un objeto Date válido
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      return 'Fecha no disponible';
+    }
+
+    // Formatear con Intl.DateTimeFormat para mejor localización
+    return new Intl.DateTimeFormat('es-ES', {
+      year: 'numeric',
+      month: 'short', 
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }).format(date);
+  } catch (error) {
+    console.warn('Error al formatear fecha:', error);
+    return 'Fecha no disponible';
+  }
+};
+
+// Calcular tiempo relativo (hace X días, etc.)
+const getRelativeTime = (date: any): string => {
+  try {
+    // Convertir a Date si es necesario
+    if (date && typeof date === 'object' && 'toDate' in date) {
+      date = date.toDate();
+    }
+    
+    if (typeof date === 'string') {
+      date = new Date(date);
+    }
+    
+    // Verificar validez
+    if (!(date instanceof Date) || isNaN(date.getTime())) {
+      return '';
+    }
+
+    const now = new Date();
+    const diffInMs = now.getTime() - date.getTime();
+    const diffInSecs = Math.floor(diffInMs / 1000);
+    const diffInMins = Math.floor(diffInSecs / 60);
+    const diffInHours = Math.floor(diffInMins / 60);
+    const diffInDays = Math.floor(diffInHours / 24);
+    const diffInMonths = Math.floor(diffInDays / 30);
+    const diffInYears = Math.floor(diffInDays / 365);
+
+    if (diffInSecs < 60) return 'hace un momento';
+    if (diffInMins < 60) return `hace ${diffInMins} ${diffInMins === 1 ? 'minuto' : 'minutos'}`;
+    if (diffInHours < 24) return `hace ${diffInHours} ${diffInHours === 1 ? 'hora' : 'horas'}`;
+    if (diffInDays < 30) return `hace ${diffInDays} ${diffInDays === 1 ? 'día' : 'días'}`;
+    if (diffInMonths < 12) return `hace ${diffInMonths} ${diffInMonths === 1 ? 'mes' : 'meses'}`;
+    return `hace ${diffInYears} ${diffInYears === 1 ? 'año' : 'años'}`;
+  } catch (error) {
+    console.warn('Error al calcular tiempo relativo:', error);
+    return '';
+  }
+};
+
 const ReviewItem: React.FC<ReviewItemProps> = ({
   review,
   currentUserId,
@@ -37,28 +107,6 @@ const ReviewItem: React.FC<ReviewItemProps> = ({
   const hasImages = review.images && review.images.length > 0;
   const hasLongText = review.text ? review.text.length > 150 : false;
   
-  const formatDate = useCallback((date: Date | undefined) => {
-    if (!date) return 'Fecha desconocida';
-    try {
-      // Convert string to Date object if needed
-      const dateObj = typeof date === 'string' ? new Date(date) : date;
-      return format(dateObj, "d 'de' MMMM, yyyy", { locale: es });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      // Fallback formatting if date-fns fails
-      try {
-        const dateObj = typeof date === 'string' ? new Date(date) : date;
-        return dateObj.toLocaleDateString('es-ES', { 
-          day: 'numeric', 
-          month: 'long', 
-          year: 'numeric' 
-        });
-      } catch {
-        return 'Fecha inválida';
-      }
-    }
-  }, []);
-
   const handleToggleLike = async () => {
     if (isLiking) return;
     
@@ -87,27 +135,38 @@ const ReviewItem: React.FC<ReviewItemProps> = ({
     }
   };
   
+  // Usar las funciones de formateo seguro
+  const formattedDate = formatDate(review.createdAt);
+  const relativeTime = getRelativeTime(review.createdAt);
+  
+  // Log para depuración
+  console.log(`Mostrando reseña ${review.id} de ${review.userName} con foto: ${review.userPhotoURL}`);
+  
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.userInfo}>
-          {(review as any).userPhotoURL ? (
+          {review.userPhotoURL ? (
             <Image 
-              source={{ uri: (review as any).userPhotoURL }} 
+              source={{ uri: review.userPhotoURL }} 
               style={styles.avatar}
+              // Añadir propiedades para asegurar carga correcta
+              onError={(e) => console.log('Error cargando imagen de perfil:', e.nativeEvent.error)}
             />
           ) : (
             <View style={[styles.avatar, styles.defaultAvatar]}>
               <Text style={styles.avatarText}>
-                {((review as any).userName || 'U')[0].toUpperCase()}
+                {review.userName ? review.userName[0].toUpperCase() : 'U'}
               </Text>
             </View>
           )}
           <View>
-            <Text style={styles.username}>{(review as any).userName || 'Usuario'}</Text>
+             <Text style={styles.username}>
+              {review.userName || 'Anónimo'}
+            </Text>
             <Text style={styles.date}>
-              {formatDate(review.createdAt)}
+              {relativeTime}
             </Text>
           </View>
         </View>
