@@ -15,7 +15,7 @@ import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { MenuItem } from '../context/BusinessContext';
 
-// Updated component props interface
+// Interface actualizada
 interface MenuViewerProps {
   menu?: MenuItem[];
   menuUrl?: string;

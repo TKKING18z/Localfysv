@@ -12,7 +12,8 @@ import {
   Image,
   Platform,
   KeyboardAvoidingView,
-  BackHandler
+  BackHandler,
+  Modal
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -26,6 +27,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { firebaseService } from '../services/firebaseService';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
+import MapView, { Marker, Region } from 'react-native-maps';
 
 // Navigation type
 type AddBusinessScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AddBusiness'>;
@@ -102,6 +104,7 @@ interface BusinessData {
   menu?: MenuItem[];
   menuUrl?: string;
   images?: Array<{id?: string, url: string, isMain?: boolean}>;
+  acceptsReservations?: boolean; // Nueva propiedad
   createdAt?: any;
   updatedAt?: any;
   createdBy?: string;
@@ -115,6 +118,37 @@ const CALLBACK_IDS = {
   VIDEO_MANAGER: 'videoManager_callback',
   MENU_EDITOR: 'menuEditor_callback'
 };
+
+// Añadir un array constante con categorías predefinidas (fuera del componente)
+const BUSINESS_CATEGORIES = [
+  "Restaurante", 
+  "Cafetería", 
+  "Bar", 
+  "Tienda", 
+  "Supermercado",
+  "Hotel", 
+  "Hostal", 
+  "Peluquería", 
+  "Gimnasio", 
+  "Farmacia",
+  "Panadería", 
+  "Carnicería", 
+  "Zapatería", 
+  "Ropa", 
+  "Electrónica",
+  "Librería", 
+  "Ferretería", 
+  "Salón de Belleza", 
+  "Centro Médico", 
+  "Veterinaria",
+  "Lavandería", 
+  "Floristería", 
+  "Joyería", 
+  "Mueblería",
+  "Lugares Turísticos",
+  "Tour Operador",
+  "Agencia de Viajes"
+];
 
 const AddBusinessScreen: React.FC = () => {
   const navigation = useNavigation<AddBusinessScreenNavigationProp>();
@@ -144,6 +178,23 @@ const AddBusinessScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  // Añadir estado para categorías sugeridas
+  const [suggestedCategories, setSuggestedCategories] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Añadir estados para el mapa
+  const [mapVisible, setMapVisible] = useState(false);
+  const [mapRegion, setMapRegion] = useState<Region>({
+    latitude: 13.6929,  // Centrado en El Salvador por defecto
+    longitude: -89.2182,
+    latitudeDelta: 0.0922,
+    longitudeDelta: 0.0421,
+  });
+  const [markerLocation, setMarkerLocation] = useState<BusinessLocation | null>(null);
+
+  // Añadir un nuevo estado para controlar si acepta reservaciones
+  const [acceptsReservations, setAcceptsReservations] = useState<boolean>(true);
 
   // Track form changes - Fix the infinite loop by using a flag
   useEffect(() => {
@@ -412,6 +463,31 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
+  // Fix these navigation functions to use the correct route names
+  const navigateToReservations = () => {
+    try {
+      navigation.navigate('Reservations', {
+        businessId: 'new_business',
+        businessName: name || 'Nuevo Negocio',
+      } as any);
+    } catch (error) {
+      console.error('Error navegando a Reservations:', error);
+      Alert.alert('Error', 'No se pudo abrir la pantalla de reservaciones. Intente nuevamente.');
+    }
+  };
+
+  const navigateToPromotions = () => {
+    try {
+      navigation.navigate('Promotions', {
+        businessId: 'new_business',
+        businessName: name || 'Nuevo Negocio',
+      } as any);
+    } catch (error) {
+      console.error('Error navegando a Promotions:', error);
+      Alert.alert('Error', 'No se pudo abrir la pantalla de promociones. Intente nuevamente.');
+    }
+  };
+
   // Validate form before submission
   const validateForm = (): boolean => {
     if (!name.trim()) {
@@ -496,6 +572,7 @@ const AddBusinessScreen: React.FC = () => {
         ...(videos && videos.length > 0 ? { videos } : {}),
         ...(menu && menu.length > 0 ? { menu } : {}),
         ...(menuUrl ? { menuUrl } : {}),
+        acceptsReservations, // Añadir esta propiedad
         createdBy: user.uid,
         images: []  // Will be populated after upload
       };
@@ -596,6 +673,146 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
+  // Función para filtrar categorías según entrada del usuario
+  const updateCategorySuggestions = (text: string) => {
+    setCategory(text);
+    
+    if (text.length > 0) {
+      const filteredCategories = BUSINESS_CATEGORIES.filter(
+        cat => cat.toLowerCase().includes(text.toLowerCase())
+      ).slice(0, 5); // Limitar a 5 sugerencias para no sobrecargar la UI
+      
+      setSuggestedCategories(filteredCategories);
+      setShowSuggestions(filteredCategories.length > 0);
+    } else {
+      setSuggestedCategories([]);
+      setShowSuggestions(false);
+    }
+  };
+
+  // Función para seleccionar una categoría sugerida
+  const selectCategory = (selectedCategory: string) => {
+    setCategory(selectedCategory);
+    setShowSuggestions(false);
+  };
+
+  // Función para abrir el selector de mapa
+  const openLocationPicker = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permiso necesario', 'Se requiere permiso de ubicación para esta funcionalidad');
+        return;
+      }
+
+      setIsLoading(true);
+      
+      // Intentar obtener ubicación actual para centrar el mapa
+      const currentPosition = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced
+      });
+      
+      // Actualizar la región del mapa con la ubicación actual
+      setMapRegion({
+        latitude: currentPosition.coords.latitude,
+        longitude: currentPosition.coords.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+      
+      // Si ya existe una ubicación seleccionada, mostrarla
+      if (location) {
+        setMarkerLocation(location);
+      }
+      
+      setIsLoading(false);
+      setMapVisible(true);
+    } catch (error) {
+      console.error('Error preparando mapa:', error);
+      setIsLoading(false);
+      Alert.alert('Error', 'No se pudo inicializar el mapa. Intente nuevamente.');
+    }
+  };
+
+  // Función para manejar selección en el mapa
+  const handleMapPress = (event: any) => {
+    const { coordinate } = event.nativeEvent;
+    setMarkerLocation({
+      latitude: coordinate.latitude,
+      longitude: coordinate.longitude
+    });
+  };
+
+  // Función para confirmar ubicación seleccionada
+  const confirmLocationSelection = async () => {
+    if (!markerLocation) {
+      Alert.alert('Ubicación requerida', 'Por favor selecciona un punto en el mapa');
+      return;
+    }
+    
+    try {
+      setIsLoading(true);
+      
+      // Guardar la ubicación seleccionada
+      setLocation(markerLocation);
+      
+      // Obtener dirección a partir de coordenadas
+      const addresses = await Location.reverseGeocodeAsync({
+        latitude: markerLocation.latitude,
+        longitude: markerLocation.longitude
+      });
+      
+      if (addresses.length > 0) {
+        const firstAddress = addresses[0];
+        const addressStr = [
+          firstAddress.street && firstAddress.streetNumber ? 
+            `${firstAddress.streetNumber} ${firstAddress.street}` : 
+            firstAddress.street || firstAddress.name,
+          firstAddress.district,
+          firstAddress.city,
+          firstAddress.region,
+          firstAddress.country
+        ].filter(Boolean).join(', ');
+        
+        setAddress(addressStr);
+      }
+      
+      setMapVisible(false);
+    } catch (error) {
+      console.error('Error obteniendo dirección:', error);
+      Alert.alert('Error', 'No se pudo obtener la dirección para la ubicación seleccionada');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Función para centrar en ubicación actual en el mapa
+  const centerMapOnCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') return;
+      
+      const currentPosition = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced
+      });
+      
+      setMapRegion({
+        latitude: currentPosition.coords.latitude,
+        longitude: currentPosition.coords.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      });
+      
+      setMarkerLocation({
+        latitude: currentPosition.coords.latitude,
+        longitude: currentPosition.coords.longitude
+      });
+    } catch (error) {
+      console.error('Error centrando mapa:', error);
+      Alert.alert('Error', 'No se pudo obtener la ubicación actual');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -651,13 +868,32 @@ const AddBusinessScreen: React.FC = () => {
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Categoría *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, showSuggestions && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
                   value={category}
-                  onChangeText={setCategory}
+                  onChangeText={updateCategorySuggestions}
                   placeholder="Categoría (ej. Restaurante, Tienda)"
                   placeholderTextColor="#8E8E93"
                   maxLength={50}
                 />
+                {showSuggestions && (
+                  <View style={styles.suggestionsContainer}>
+                    <ScrollView 
+                      style={styles.suggestionsList}
+                      keyboardShouldPersistTaps="handled"
+                      nestedScrollEnabled={true}
+                    >
+                      {suggestedCategories.map((suggestion, index) => (
+                        <TouchableOpacity 
+                          key={index} 
+                          style={styles.suggestionItem}
+                          onPress={() => selectCategory(suggestion)}
+                        >
+                          <Text style={styles.suggestionText}>{suggestion}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
               </View>
             </View>
             
@@ -677,11 +913,16 @@ const AddBusinessScreen: React.FC = () => {
                   />
                   <TouchableOpacity 
                     style={styles.locationButton}
-                    onPress={getCurrentLocation}
+                    onPress={openLocationPicker}
                   >
-                    <MaterialIcons name="my-location" size={24} color="#007AFF" />
+                    <MaterialIcons name="map" size={24} color="#007AFF" />
                   </TouchableOpacity>
                 </View>
+                {location && (
+                  <Text style={styles.locationConfirmed}>
+                    <MaterialIcons name="check-circle" size={14} color="#34C759" /> Ubicación seleccionada
+                  </Text>
+                )}
               </View>
               
               <View style={styles.formGroup}>
@@ -791,6 +1032,72 @@ const AddBusinessScreen: React.FC = () => {
                   color={(menu.length > 0 || menuUrl) ? "#34C759" : "#E5E5EA"} 
                 />
               </TouchableOpacity>
+              
+              {/* New buttons for reservations and promotions */}
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToReservations}
+              >
+                <MaterialIcons name="event-available" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Reservaciones</Text>
+                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToPromotions}
+              >
+                <MaterialIcons name="local-offer" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Promociones</Text>
+                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>Opciones de Reservación</Text>
+              
+              <View style={styles.toggleContainer}>
+                <Text style={styles.toggleLabel}>Permitir reservaciones</Text>
+                <TouchableOpacity 
+                  style={[
+                    styles.toggleButton,
+                    acceptsReservations ? styles.toggleButtonActive : styles.toggleButtonInactive
+                  ]}
+                  onPress={() => setAcceptsReservations(!acceptsReservations)}
+                >
+                  <View style={[
+                    styles.toggleKnob,
+                    acceptsReservations ? styles.toggleKnobActive : styles.toggleKnobInactive
+                  ]} />
+                </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.toggleDescription}>
+                {acceptsReservations 
+                  ? "Tu negocio aparecerá como disponible para reservaciones. Los clientes podrán realizar reservas desde la app." 
+                  : "Tu negocio no recibirá reservaciones a través de la app."}
+              </Text>
+              
+              {acceptsReservations && (
+                <TouchableOpacity 
+                  style={styles.advancedButton}
+                  onPress={navigateToReservations}
+                >
+                  <MaterialIcons name="event-available" size={24} color="#007AFF" />
+                  <Text style={styles.advancedButtonText}>Configurar Reservaciones</Text>
+                  <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+                </TouchableOpacity>
+              )}
+                    
+              <TouchableOpacity 
+                style={styles.advancedButton}
+                onPress={navigateToPromotions}
+              >
+                <MaterialIcons name="local-offer" size={24} color="#007AFF" />
+                <Text style={styles.advancedButtonText}>Promociones</Text>
+                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+              </TouchableOpacity>
+              
             </View>
             
             {/* Image Picker */}
@@ -853,6 +1160,62 @@ const AddBusinessScreen: React.FC = () => {
           </TouchableOpacity>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* Modal con el mapa */}
+      <Modal
+        visible={mapVisible}
+        animationType="slide"
+        onRequestClose={() => setMapVisible(false)}
+      >
+        <SafeAreaView style={styles.mapModalContainer}>
+          <View style={styles.mapHeader}>
+            <TouchableOpacity 
+              onPress={() => setMapVisible(false)}
+              style={styles.mapCloseButton}
+            >
+              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            <Text style={styles.mapHeaderTitle}>Seleccionar Ubicación</Text>
+            <View style={styles.mapHeaderRight}></View>
+          </View>
+          
+          <View style={styles.mapContainer}>
+            <MapView
+              style={styles.map}
+              region={mapRegion}
+              onRegionChangeComplete={setMapRegion}
+              onPress={handleMapPress}
+            >
+              {markerLocation && (
+                <Marker
+                  coordinate={{
+                    latitude: markerLocation.latitude,
+                    longitude: markerLocation.longitude,
+                  }}
+                />
+              )}
+            </MapView>
+            
+            <TouchableOpacity 
+              style={styles.currentLocationMapButton}
+              onPress={centerMapOnCurrentLocation}
+            >
+              <MaterialIcons name="my-location" size={24} color="#007AFF" />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[
+                styles.confirmLocationButton,
+                !markerLocation && styles.disabledButton
+              ]}
+              onPress={confirmLocationSelection}
+              disabled={!markerLocation}
+            >
+              <Text style={styles.confirmLocationButtonText}>Confirmar Ubicación</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -1008,6 +1371,152 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     marginLeft: 8,
+  },
+  suggestionsContainer: {
+    backgroundColor: 'white',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    borderTopWidth: 0,
+    maxHeight: 200,
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  suggestionsList: {
+    maxHeight: 200,
+  },
+  suggestionItem: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F5',
+  },
+  suggestionText: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  mapModalContainer: {
+    flex: 1,
+    backgroundColor: '#F5F7FF',
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  mapCloseButton: {
+    padding: 8,
+  },
+  mapHeaderTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+  },
+  mapHeaderRight: {
+    width: 40,
+  },
+  mapContainer: {
+    flex: 1,
+    position: 'relative',
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  currentLocationMapButton: {
+    position: 'absolute',
+    right: 16,
+    top: 16,
+    backgroundColor: 'white',
+    padding: 12,
+    borderRadius: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 5,
+  },
+  confirmLocationButton: {
+    position: 'absolute',
+    bottom: 32,
+    alignSelf: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  disabledButton: {
+    backgroundColor: '#A2D1FF',
+  },
+  confirmLocationButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  locationConfirmed: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 4,
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  toggleLabel: {
+    fontSize: 16,
+    color: '#333333',
+    flex: 1,
+  },
+  toggleButton: {
+    width: 50,
+    height: 30,
+    borderRadius: 15,
+    padding: 2,
+  },
+  toggleButtonActive: {
+    backgroundColor: '#34C759',
+  },
+  toggleButtonInactive: {
+    backgroundColor: '#E5E5EA',
+  },
+  toggleKnob: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'white',
+  },
+  toggleKnobActive: {
+    transform: [{ translateX: 20 }],
+  },
+  toggleKnobInactive: {
+    transform: [{ translateX: 0 }],
+  },
+  toggleDescription: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 16,
+    fontStyle: 'italic',
   },
 });
 

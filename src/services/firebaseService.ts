@@ -1,8 +1,9 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
+import 'firebase/compat/firestore';  // Esta importación es crucial
 import 'firebase/compat/storage';
 import { Business } from '../context/BusinessContext';
+import { Promotion, Reservation, ReservationAvailability } from '../types/businessTypes';
 
 // Query options interface
 interface QueryOptions {
@@ -443,6 +444,281 @@ export const firebaseService = {
         return { success: true };
       } catch (error) {
         return { success: false, error: handleFirebaseError(error, 'storage/deleteImage') };
+      }
+    }
+  },
+
+  // Nuevo servicio para promociones
+  promotions: {
+    getByBusinessId: async (businessId: string): Promise<FirebaseResponse<Promotion[]>> => {
+      try {
+        const snapshot = await firebase.firestore()
+          .collection('promotions')
+          .where('businessId', '==', businessId)
+          .where('isActive', '==', true)
+          .orderBy('startDate', 'desc')
+          .get();
+        
+        const promotions = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Promotion[];
+        
+        return { success: true, data: promotions };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/getByBusinessId') };
+      }
+    },
+
+    getById: async (id: string): Promise<FirebaseResponse<Promotion>> => {
+      try {
+        const doc = await firebase.firestore().collection('promotions').doc(id).get();
+        
+        if (!doc.exists) {
+          return { success: false, error: { message: 'Promoción no encontrada' } };
+        }
+        
+        return { success: true, data: { id: doc.id, ...doc.data() } as Promotion };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/getById') };
+      }
+    },
+
+    create: async (data: Omit<Promotion, 'id'>): Promise<FirebaseResponse<{id: string}>> => {
+      try {
+        const cleanedData = cleanDataForFirestore(data);
+        const docRef = await firebase.firestore().collection('promotions').add({
+          ...cleanedData,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          isActive: true
+        });
+        
+        return { success: true, data: { id: docRef.id } };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/create') };
+      }
+    },
+    
+    update: async (id: string, data: Partial<Promotion>): Promise<FirebaseResponse<null>> => {
+      try {
+        const cleanedData = cleanDataForFirestore(data);
+        await firebase.firestore().collection('promotions').doc(id).update({
+          ...cleanedData,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/update') };
+      }
+    },
+    
+    delete: async (id: string): Promise<FirebaseResponse<null>> => {
+      try {
+        await firebase.firestore().collection('promotions').doc(id).delete();
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/delete') };
+      }
+    },
+    
+    deactivate: async (id: string): Promise<FirebaseResponse<null>> => {
+      try {
+        await firebase.firestore().collection('promotions').doc(id).update({
+          isActive: false,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'promotions/deactivate') };
+      }
+    }
+  },
+
+  // Nuevo servicio para reservas
+  reservations: {
+    getByBusinessId: async (businessId: string, status?: string): Promise<FirebaseResponse<Reservation[]>> => {
+      try {
+        let query: firebase.firestore.Query = firebase.firestore()
+          .collection('reservations')
+          .where('businessId', '==', businessId)
+          .orderBy('date', 'desc');
+        
+        if (status) {
+          query = query.where('status', '==', status);
+        }
+        
+        const snapshot = await query.get();
+        
+        const reservations = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Reservation[];
+        
+        return { success: true, data: reservations };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/getByBusinessId') };
+      }
+    },
+
+    getByUserId: async (userId: string): Promise<FirebaseResponse<Reservation[]>> => {
+      try {
+        const snapshot = await firebase.firestore()
+          .collection('reservations')
+          .where('userId', '==', userId)
+          .orderBy('date', 'desc')
+          .get();
+        
+        const reservations = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Reservation[];
+        
+        return { success: true, data: reservations };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/getByUserId') };
+      }
+    },
+
+    getByUserAndBusinessId: async (userId: string, businessId: string): Promise<FirebaseResponse<Reservation[]>> => {
+      try {
+        const snapshot = await firebase.firestore()
+          .collection('reservations')
+          .where('userId', '==', userId)
+          .where('businessId', '==', businessId)
+          .orderBy('date', 'desc')
+          .get();
+        
+        const reservations = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Reservation[];
+        
+        return { success: true, data: reservations };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/getByUserAndBusinessId') };
+      }
+    },
+
+    getById: async (id: string): Promise<FirebaseResponse<Reservation>> => {
+      try {
+        const doc = await firebase.firestore().collection('reservations').doc(id).get();
+        
+        if (!doc.exists) {
+          return { success: false, error: { message: 'Reserva no encontrada' } };
+        }
+        
+        return { success: true, data: { id: doc.id, ...doc.data() } as Reservation };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/getById') };
+      }
+    },
+
+    create: async (data: Omit<Reservation, 'id'>): Promise<FirebaseResponse<{id: string}>> => {
+      try {
+        const cleanedData = cleanDataForFirestore(data);
+        const docRef = await firebase.firestore().collection('reservations').add({
+          ...cleanedData,
+          status: 'pending',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true, data: { id: docRef.id } };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/create') };
+      }
+    },
+    
+    update: async (id: string, data: Partial<Reservation>): Promise<FirebaseResponse<null>> => {
+      try {
+        const cleanedData = cleanDataForFirestore(data);
+        await firebase.firestore().collection('reservations').doc(id).update({
+          ...cleanedData,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/update') };
+      }
+    },
+    
+    updateStatus: async (id: string, status: 'pending' | 'confirmed' | 'canceled' | 'completed'): Promise<FirebaseResponse<null>> => {
+      try {
+        await firebase.firestore().collection('reservations').doc(id).update({
+          status,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/updateStatus') };
+      }
+    },
+    
+    delete: async (id: string): Promise<FirebaseResponse<null>> => {
+      try {
+        await firebase.firestore().collection('reservations').doc(id).delete();
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/delete') };
+      }
+    },
+    
+    getAvailability: async (businessId: string): Promise<FirebaseResponse<ReservationAvailability>> => {
+      try {
+        const doc = await firebase.firestore()
+          .collection('reservation_availability')
+          .doc(businessId)
+          .get();
+          
+        if (!doc.exists) {
+          return { 
+            success: false, 
+            error: { message: 'No hay información de disponibilidad para este negocio' } 
+          };
+        }
+        
+        // Convertir los datos correcti
+        const data = doc.data();
+        
+        // Verificar que los datos contienen las propiedades necesarias
+        if (!data || !data.availableDays || !data.timeSlots || !data.maxPartySizes) {
+          return {
+            success: false,
+            error: { message: 'Los datos de disponibilidad están incompletos o tienen un formato inválido' }
+          };
+        }
+        
+        // Crear el objeto con la estructura correcta
+        const availabilityData: ReservationAvailability = {
+          businessId,
+          availableDays: data.availableDays,
+          timeSlots: data.timeSlots,
+          maxPartySizes: data.maxPartySizes,
+          // Propiedades opcionales
+          unavailableDates: data.unavailableDates,
+          specialSchedules: data.specialSchedules,
+        };
+        
+        return { success: true, data: availabilityData };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/getAvailability') };
+      }
+    },
+    
+    saveAvailability: async (data: ReservationAvailability): Promise<FirebaseResponse<null>> => {
+      try {
+        const cleanedData = cleanDataForFirestore(data);
+        await firebase.firestore()
+          .collection('reservation_availability')
+          .doc(data.businessId)
+          .set(cleanedData, { merge: true });
+          
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/saveAvailability') };
       }
     }
   }
