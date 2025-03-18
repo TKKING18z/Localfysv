@@ -51,6 +51,38 @@ const handleFirebaseError = (error: any, context: string): any => {
   };
 };
 
+// Función de utilidad para limpiar datos antes de enviarlos a Firestore
+const cleanDataForFirestore = (data: any): any => {
+  // Si el dato es undefined, devuelve null
+  if (data === undefined) return null;
+  
+  // Si el dato es un array, limpia cada elemento
+  if (Array.isArray(data)) {
+    return data.map(item => cleanDataForFirestore(item));
+  }
+  
+  // Si el dato es un objeto, limpia cada propiedad
+  if (data !== null && typeof data === 'object' && !(data instanceof Date) && !(data instanceof firebase.firestore.Timestamp)) {
+    const cleanedData: Record<string, any> = {};
+    
+    // Recorre todas las propiedades del objeto
+    Object.keys(data).forEach(key => {
+      const value = data[key];
+      
+      // Si la propiedad no es undefined, límpiala recursivamente
+      if (value !== undefined) {
+        cleanedData[key] = cleanDataForFirestore(value);
+      }
+      // Si es undefined, omítela (no la incluyas en cleanedData)
+    });
+    
+    return cleanedData;
+  }
+  
+  // Devuelve el dato sin modificar si no es objeto ni array
+  return data;
+};
+
 // The main Firebase service
 export const firebaseService = {
   // Auth methods
@@ -202,12 +234,17 @@ export const firebaseService = {
           return { success: false, error: { message: 'Usuario no autenticado' } };
         }
         
+        // Limpia los datos antes de agregarlos a Firestore
+        const cleanedData = cleanDataForFirestore(businessData);
+        
         const businessWithMeta = {
-          ...businessData,
+          ...cleanedData, // Usa los datos limpios
           ownerId: user.uid,
           createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         };
+        
+        console.log('Datos listos para Firestore:', JSON.stringify(businessWithMeta));
         
         const docRef = await firebase.firestore().collection('businesses').add(businessWithMeta);
         
@@ -220,8 +257,11 @@ export const firebaseService = {
     // Update a business
     update: async (id: string, data: Partial<Business>): Promise<FirebaseResponse<null>> => {
       try {
+        // Limpia los datos antes de actualizarlos en Firestore
+        const cleanedData = cleanDataForFirestore(data);
+        
         await firebase.firestore().collection('businesses').doc(id).update({
-          ...data,
+          ...cleanedData, // Usa los datos limpios
           updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
         });
         
@@ -363,22 +403,18 @@ export const firebaseService = {
     // Upload an image
     uploadImage: async (uri: string, path: string): Promise<FirebaseResponse<string>> => {
       try {
-        // Convert URI to blob
         const response = await fetch(uri);
         const blob = await response.blob();
         
-        // Upload to Firebase Storage
-        const storageRef = firebase.storage().ref();
-        const imageRef = storageRef.child(path);
+        const ref = firebase.storage().ref().child(path);
         
-        await imageRef.put(blob);
+        await ref.put(blob);
+        const downloadUrl = await ref.getDownloadURL();
         
-        // Get download URL
-        const downloadURL = await imageRef.getDownloadURL();
-        
-        return { success: true, data: downloadURL };
+        return { success: true, data: downloadUrl };
       } catch (error) {
-        return { success: false, error: handleFirebaseError(error, 'storage/uploadImage') };
+        console.error('Error uploading image:', error);
+        return { success: false, error: { message: error instanceof Error ? error.message : 'Error desconocido' } };
       }
     },
     

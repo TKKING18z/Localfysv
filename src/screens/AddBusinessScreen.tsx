@@ -480,25 +480,27 @@ const AddBusinessScreen: React.FC = () => {
         });
       }, 100);
       
-      // Prepare business data with proper typing
-      const businessData: BusinessData = {
+      // Prepare business data with proper typing, omitiendo campos undefined
+      const businessData = {
         name,
         description,
         category,
-        address,
-        phone,
-        email,
-        website,
-        location: location ? location : undefined,
-        businessHours,
-        paymentMethods,
-        socialLinks,
-        videos,
-        menu,
-        menuUrl,
+        ...(address ? { address } : {}), // Solo incluir si tiene valor
+        ...(phone ? { phone } : {}),
+        ...(email ? { email } : {}),
+        ...(website ? { website } : {}),
+        ...(location ? { location } : {}),
+        ...(businessHours && Object.keys(businessHours).length > 0 ? { businessHours } : {}),
+        ...(paymentMethods && paymentMethods.length > 0 ? { paymentMethods } : {}),
+        ...(socialLinks && Object.keys(socialLinks).length > 0 ? { socialLinks } : {}),
+        ...(videos && videos.length > 0 ? { videos } : {}),
+        ...(menu && menu.length > 0 ? { menu } : {}),
+        ...(menuUrl ? { menuUrl } : {}),
         createdBy: user.uid,
         images: []  // Will be populated after upload
       };
+      
+      console.log('Preparando datos del negocio:', JSON.stringify(businessData));
       
       // Create business in Firestore
       const result = await firebaseService.businesses.create(businessData);
@@ -509,6 +511,24 @@ const AddBusinessScreen: React.FC = () => {
       
       const businessId = result.data.id;
       setUploadProgress(80); // Update progress after business creation
+      
+      // AÑADE ESTO - Guardar menú explícitamente después de crear el negocio
+      if (menu && menu.length > 0) {
+        try {
+          await firebase.firestore()
+            .collection('businesses')
+            .doc(businessId)
+            .update({
+              menu: menu,
+              menuUrl: menuUrl || "",
+              lastUpdated: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          console.log("Menú guardado exitosamente en el nuevo negocio");
+        } catch (menuError) {
+          console.error("Error al guardar menú:", menuError);
+          // Continuar con el resto del proceso aunque falle el menú
+        }
+      }
       
       // Upload main image if available
       if (image) {

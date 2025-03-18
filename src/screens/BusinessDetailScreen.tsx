@@ -350,6 +350,20 @@ const BusinessDetailScreen: React.FC = () => {
            category.includes('bar');
   }, [business]);
 
+  const isTouristAttraction = useMemo(() => {
+    if (!business) return false;
+    
+    const category = business.category.toLowerCase();
+    return category.includes('turismo') || 
+           category.includes('atracción') || 
+           category.includes('turistico') ||
+           category.includes('turística') ||
+           category.includes('tour') ||
+           category.includes('aventura') ||
+           category.includes('excursión') ||
+           category.includes('viajes');
+  }, [business]);
+
   const availableTabs = useMemo(() => {
     const tabs = ['info', 'gallery'];
     
@@ -612,7 +626,7 @@ const BusinessDetailScreen: React.FC = () => {
                   name={
                     tab === 'info' ? 'info' :
                     tab === 'gallery' ? 'photo-library' :
-                    tab === 'menu' ? 'restaurant-menu' :
+                    tab === 'menu' ? (isTouristAttraction ? 'hiking' : 'restaurant-menu') :
                     tab === 'videos' ? 'videocam' : 'rate-review'
                   } 
                   size={22} 
@@ -624,7 +638,7 @@ const BusinessDetailScreen: React.FC = () => {
                 ]}>
                   {tab === 'info' ? 'Información' :
                    tab === 'gallery' ? 'Galería' :
-                   tab === 'menu' ? 'Menú' :
+                   tab === 'menu' ? (isTouristAttraction ? 'Planes' : 'Menú') :
                    tab === 'videos' ? 'Videos' : 'Reseñas'}
                 </Text>
               </TouchableOpacity>
@@ -753,17 +767,30 @@ const BusinessDetailScreen: React.FC = () => {
           )}
           
           {/* Contenido de la pestaña de Menú */}
-          {activeTab === 'menu' && isRestaurant && (
+          {activeTab === 'menu' && (
             <>
               {(business.menu || business.menuUrl) ? (
                 <View style={styles.card}>
-                  <Text style={styles.cardSectionTitle}>Menú</Text>
-                  <MenuViewer menu={business.menu} menuUrl={business.menuUrl} />
+                  <Text style={styles.cardSectionTitle}>
+                    {isTouristAttraction ? 'Planes y Actividades' : 'Menú'}
+                  </Text>
+                  <MenuViewer 
+                    menu={business.menu} 
+                    menuUrl={business.menuUrl} 
+                    isNested={true}
+                    viewType={isTouristAttraction ? 'tourism' : 'restaurant'}
+                  />
                 </View>
               ) : (
                 <View style={styles.emptyCard}>
-                  <MaterialIcons name="restaurant-menu" size={48} color="#E5E5EA" />
-                  <Text style={styles.emptyCardText}>No hay menú disponible</Text>
+                  <MaterialIcons 
+                    name={isTouristAttraction ? "hiking" : "restaurant-menu"} 
+                    size={48} 
+                    color="#E5E5EA" 
+                  />
+                  <Text style={styles.emptyCardText}>
+                    {isTouristAttraction ? 'No hay planes disponibles' : 'No hay menú disponible'}
+                  </Text>
                 </View>
               )}
             </>
