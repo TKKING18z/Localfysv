@@ -8,12 +8,16 @@ interface StoreContextType {
   getCallback: (key: string) => StoreCallback | undefined;
   removeCallback: (key: string) => void;
   getCallbackIds: () => string[];
+  setTempData: (key: string, data: any) => void;
+  getTempData: (key: string) => any;
+  removeTempData: (key: string) => void;
 }
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 export const StoreProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [callbacks, setCallbacks] = useState<Record<string, StoreCallback>>({});
+  const [tempData, setTempDataState] = useState<Record<string, any>>({});
 
   // Método para logear los callbacks para depuración
   useEffect(() => {
@@ -65,12 +69,35 @@ export const StoreProvider: React.FC<{children: ReactNode}> = ({ children }) => 
     return Object.keys(callbacks);
   };
 
+  // Métodos para manejar datos temporales
+  const setTempData = (key: string, data: any) => {
+    setTempDataState(prev => ({
+      ...prev,
+      [key]: data
+    }));
+  };
+
+  const getTempData = (key: string) => {
+    return tempData[key];
+  };
+
+  const removeTempData = (key: string) => {
+    setTempDataState(prev => {
+      const newData = { ...prev };
+      delete newData[key];
+      return newData;
+    });
+  };
+
   // Valor del contexto
   const contextValue: StoreContextType = {
     setCallback,
     getCallback,
     removeCallback,
-    getCallbackIds
+    getCallbackIds,
+    setTempData,
+    getTempData,
+    removeTempData
   };
 
   return (

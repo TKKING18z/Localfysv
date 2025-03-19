@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,8 @@ import {
   Platform,
   KeyboardAvoidingView,
   BackHandler,
-  Modal
+  Modal,
+  Linking
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -96,7 +97,7 @@ interface BusinessData {
   phone?: string;
   email?: string;
   website?: string;
-  location?: BusinessLocation | string;
+  location?: BusinessLocation | null;
   businessHours?: BusinessHours;
   paymentMethods?: string[];
   socialLinks?: SocialLinks;
@@ -104,7 +105,7 @@ interface BusinessData {
   menu?: MenuItem[];
   menuUrl?: string;
   images?: Array<{id?: string, url: string, isMain?: boolean}>;
-  acceptsReservations?: boolean; // Nueva propiedad
+  acceptsReservations?: boolean;
   createdAt?: any;
   updatedAt?: any;
   createdBy?: string;
@@ -119,35 +120,35 @@ const CALLBACK_IDS = {
   MENU_EDITOR: 'menuEditor_callback'
 };
 
-// Añadir un array constante con categorías predefinidas (fuera del componente)
+// Categorías predefinidas (mejoradas y organizadas alfabéticamente)
 const BUSINESS_CATEGORIES = [
-  "Restaurante", 
-  "Cafetería", 
-  "Bar", 
-  "Tienda", 
-  "Supermercado",
-  "Hotel", 
-  "Hostal", 
-  "Peluquería", 
-  "Gimnasio", 
-  "Farmacia",
-  "Panadería", 
-  "Carnicería", 
-  "Zapatería", 
-  "Ropa", 
+  "Agencia de Viajes",
+  "Bar",
+  "Cafetería",
+  "Carnicería",
+  "Centro Médico",
   "Electrónica",
-  "Librería", 
-  "Ferretería", 
-  "Salón de Belleza", 
-  "Centro Médico", 
-  "Veterinaria",
-  "Lavandería", 
-  "Floristería", 
-  "Joyería", 
-  "Mueblería",
+  "Farmacia",
+  "Ferretería",
+  "Floristería",
+  "Gimnasio",
+  "Hostal",
+  "Hotel",
+  "Joyería",
+  "Lavandería",
+  "Librería",
   "Lugares Turísticos",
+  "Mueblería",
+  "Panadería",
+  "Peluquería",
+  "Restaurante",
+  "Ropa",
+  "Salón de Belleza",
+  "Supermercado",
+  "Tienda",
   "Tour Operador",
-  "Agencia de Viajes"
+  "Veterinaria",
+  "Zapatería"
 ];
 
 const AddBusinessScreen: React.FC = () => {
@@ -178,12 +179,13 @@ const AddBusinessScreen: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
 
-  // Añadir estado para categorías sugeridas
+  // Estado para categorías sugeridas
   const [suggestedCategories, setSuggestedCategories] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  // Añadir estados para el mapa
+  // Estados para el mapa
   const [mapVisible, setMapVisible] = useState(false);
   const [mapRegion, setMapRegion] = useState<Region>({
     latitude: 13.6929,  // Centrado en El Salvador por defecto
@@ -193,7 +195,7 @@ const AddBusinessScreen: React.FC = () => {
   });
   const [markerLocation, setMarkerLocation] = useState<BusinessLocation | null>(null);
 
-  // Añadir un nuevo estado para controlar si acepta reservaciones
+  // Configuración de reservaciones
   const [acceptsReservations, setAcceptsReservations] = useState<boolean>(true);
 
   // Track form changes - Fix the infinite loop by using a flag
@@ -298,7 +300,24 @@ const AddBusinessScreen: React.FC = () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso necesario', 'Se requiere permiso de ubicación para esta funcionalidad');
+        Alert.alert(
+          'Permiso necesario', 
+          'Se requiere permiso de ubicación para esta funcionalidad',
+          [
+            { text: 'Cancelar' },
+            { 
+              text: 'Abrir Configuración', 
+              onPress: () => {
+                // Abrir configuraciones del dispositivo
+                if (Platform.OS === 'ios') {
+                  Linking.openURL('app-settings:');
+                } else {
+                  Linking.openSettings();
+                }
+              }
+            }
+          ]
+        );
         return;
       }
 
@@ -355,7 +374,20 @@ const AddBusinessScreen: React.FC = () => {
         if (status !== 'granted') {
           Alert.alert(
             'Permiso denegado', 
-            'Necesitamos permiso para acceder a tus fotos. Por favor habilita el permiso en configuración.'
+            'Necesitamos permiso para acceder a tus fotos. Por favor habilita el permiso en configuración.',
+            [
+              { text: 'Cancelar' },
+              { 
+                text: 'Abrir Configuración', 
+                onPress: () => {
+                  if (Platform.OS === 'ios') {
+                    Linking.openURL('app-settings:');
+                  } else {
+                    Linking.openSettings();
+                  }
+                }
+              }
+            ]
           );
           return;
         }
@@ -372,21 +404,33 @@ const AddBusinessScreen: React.FC = () => {
       if (!result.canceled && result.assets && result.assets.length > 0) {
         const selectedUri = result.assets[0].uri;
         
-        // Verify image size (optional: limit to 5MB)
-        const fileInfo = await fetch(selectedUri).then(r => {
-          const contentLength = r.headers.get('Content-Length');
-          return contentLength ? parseInt(contentLength, 10) : 0;
-        });
-        
-        if (fileInfo > 5 * 1024 * 1024) {
-          Alert.alert(
-            'Imagen demasiado grande', 
-            'Por favor selecciona una imagen más pequeña (máximo 5MB)'
-          );
-          return;
+        // Verificar tamaño de imagen (opcional: limitar a 5MB)
+        try {
+          const fileInfo = await fetch(selectedUri).then(r => {
+            const contentLength = r.headers.get('Content-Length');
+            return contentLength ? parseInt(contentLength, 10) : 0;
+          });
+          
+          if (fileInfo > 5 * 1024 * 1024) {
+            Alert.alert(
+              'Imagen demasiado grande', 
+              'Por favor selecciona una imagen más pequeña (máximo 5MB)'
+            );
+            return;
+          }
+        } catch (sizeError) {
+          console.warn('No se pudo verificar el tamaño de la imagen:', sizeError);
+          // Continue anyway
         }
         
         setImage(selectedUri);
+        
+        // Limpiar error de validación si existe
+        setValidationErrors(prev => {
+          const newErrors = {...prev};
+          delete newErrors.image;
+          return newErrors;
+        });
       }
     } catch (error) {
       console.error('Error al seleccionar imagen:', error);
@@ -394,7 +438,7 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to BusinessHours screen with improved error handling
+  // Navigate to different screens with improved error handling
   const navigateToBusinessHours = () => {
     try {
       navigation.navigate('BusinessHours' as keyof RootStackParamList, {
@@ -407,10 +451,8 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to PaymentMethods screen with improved error handling
   const navigateToPaymentMethods = () => {
     try {
-      console.log('Navigating to PaymentMethods with callbackId:', CALLBACK_IDS.PAYMENT_METHODS);
       navigation.navigate('PaymentMethods', {
         initialMethods: paymentMethods,
         callbackId: CALLBACK_IDS.PAYMENT_METHODS
@@ -421,7 +463,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to SocialLinks screen with improved error handling
   const navigateToSocialLinks = () => {
     try {
       navigation.navigate('SocialLinks' as keyof RootStackParamList, {
@@ -434,7 +475,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to VideoManager screen with improved error handling
   const navigateToVideoManager = () => {
     try {
       navigation.navigate('VideoManager' as keyof RootStackParamList, {
@@ -448,7 +488,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Navigate to MenuEditor screen with improved error handling
   const navigateToMenuEditor = () => {
     try {
       navigation.navigate('MenuEditor' as keyof RootStackParamList, {
@@ -463,7 +502,7 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Fix these navigation functions to use the correct route names
+  // Navegar a las pantallas de reservaciones y promociones de manera segura
   const navigateToReservations = () => {
     try {
       navigation.navigate('Reservations', {
@@ -488,43 +527,75 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Validate form before submission
+  // Validar correo electrónico
+  const validateEmail = (email: string) => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return email === '' || emailRegex.test(email);
+  };
+
+  // Validar URL de sitio web
+  const validateWebsite = (website: string) => {
+    const urlRegex = /^(https?:\/\/)?(www\.)?[a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)$/;
+    return website === '' || urlRegex.test(website);
+  };
+
+  // Validar teléfono
+  const validatePhone = (phone: string) => {
+    const phoneRegex = /^[0-9+\-\s()]{7,20}$/;
+    return phone === '' || phoneRegex.test(phone);
+  };
+
+  // Validar formulario antes de enviar con mensajes claros
   const validateForm = (): boolean => {
+    const newErrors: Record<string, string> = {};
+    
+    // Validar nombre
     if (!name.trim()) {
-      Alert.alert('Información incompleta', 'El nombre del negocio es obligatorio');
-      return false;
+      newErrors.name = 'El nombre del negocio es obligatorio';
+    } else if (name.length < 3) {
+      newErrors.name = 'El nombre debe tener al menos 3 caracteres';
     }
     
+    // Validar descripción
     if (!description.trim()) {
-      Alert.alert('Información incompleta', 'La descripción del negocio es obligatoria');
-      return false;
+      newErrors.description = 'La descripción del negocio es obligatoria';
+    } else if (description.length < 20) {
+      newErrors.description = 'La descripción debe tener al menos 20 caracteres';
     }
     
+    // Validar categoría
     if (!category.trim()) {
-      Alert.alert('Información incompleta', 'La categoría del negocio es obligatoria');
-      return false;
+      newErrors.category = 'La categoría del negocio es obligatoria';
     }
     
+    // Validar email
+    if (email && !validateEmail(email)) {
+      newErrors.email = 'Por favor, ingrese un correo electrónico válido';
+    }
+    
+    // Validar sitio web
+    if (website && !validateWebsite(website)) {
+      newErrors.website = 'Por favor, ingrese un sitio web válido';
+    }
+    
+    // Validar teléfono
+    if (phone && !validatePhone(phone)) {
+      newErrors.phone = 'Por favor, ingrese un número de teléfono válido';
+    }
+    
+    // Validar imagen
     if (!image) {
-      Alert.alert('Información incompleta', 'Debe seleccionar una imagen para el negocio');
-      return false;
+      newErrors.image = 'Debe seleccionar una imagen para el negocio';
     }
     
-    // Validate email format if provided
-    if (email && !email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) {
-      Alert.alert('Email inválido', 'Por favor, ingrese un correo electrónico válido');
-      return false;
-    }
+    setValidationErrors(newErrors);
     
-    // Validate website format if provided
-    if (website && !website.match(/^(https?:\/\/)?(www\.)?[a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)$/)) {
-      Alert.alert('URL inválida', 'Por favor, ingrese un sitio web válido');
-      return false;
-    }
-    
-    // Validate phone format if provided (simple check)
-    if (phone && !phone.match(/^[0-9+\-\s()]{7,20}$/)) {
-      Alert.alert('Teléfono inválido', 'Por favor, ingrese un número de teléfono válido');
+    // Mostrar error general si hay errores
+    if (Object.keys(newErrors).length > 0) {
+      Alert.alert(
+        'Información incompleta', 
+        'Por favor, complete todos los campos requeridos correctamente'
+      );
       return false;
     }
     
@@ -533,7 +604,7 @@ const AddBusinessScreen: React.FC = () => {
 
   // Submit the form with extended error handling and progress tracking
   const handleSubmit = async () => {
-    // Validate form
+    // Validar formulario
     if (!validateForm()) {
       return;
     }
@@ -557,11 +628,11 @@ const AddBusinessScreen: React.FC = () => {
       }, 100);
       
       // Prepare business data with proper typing, omitiendo campos undefined
-      const businessData = {
+      const businessData: BusinessData = {
         name,
         description,
         category,
-        ...(address ? { address } : {}), // Solo incluir si tiene valor
+        ...(address ? { address } : {}),
         ...(phone ? { phone } : {}),
         ...(email ? { email } : {}),
         ...(website ? { website } : {}),
@@ -572,7 +643,7 @@ const AddBusinessScreen: React.FC = () => {
         ...(videos && videos.length > 0 ? { videos } : {}),
         ...(menu && menu.length > 0 ? { menu } : {}),
         ...(menuUrl ? { menuUrl } : {}),
-        acceptsReservations, // Añadir esta propiedad
+        acceptsReservations,
         createdBy: user.uid,
         images: []  // Will be populated after upload
       };
@@ -589,7 +660,7 @@ const AddBusinessScreen: React.FC = () => {
       const businessId = result.data.id;
       setUploadProgress(80); // Update progress after business creation
       
-      // AÑADE ESTO - Guardar menú explícitamente después de crear el negocio
+      // Guardar menú explícitamente después de crear el negocio
       if (menu && menu.length > 0) {
         try {
           await firebase.firestore()
@@ -677,6 +748,15 @@ const AddBusinessScreen: React.FC = () => {
   const updateCategorySuggestions = (text: string) => {
     setCategory(text);
     
+    // Limpiar error de validación si existe
+    if (text.trim()) {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.category;
+        return newErrors;
+      });
+    }
+    
     if (text.length > 0) {
       const filteredCategories = BUSINESS_CATEGORIES.filter(
         cat => cat.toLowerCase().includes(text.toLowerCase())
@@ -694,6 +774,13 @@ const AddBusinessScreen: React.FC = () => {
   const selectCategory = (selectedCategory: string) => {
     setCategory(selectedCategory);
     setShowSuggestions(false);
+    
+    // Limpiar error de validación
+    setValidationErrors(prev => {
+      const newErrors = {...prev};
+      delete newErrors.category;
+      return newErrors;
+    });
   };
 
   // Función para abrir el selector de mapa
@@ -701,7 +788,23 @@ const AddBusinessScreen: React.FC = () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permiso necesario', 'Se requiere permiso de ubicación para esta funcionalidad');
+        Alert.alert(
+          'Permiso necesario', 
+          'Se requiere permiso de ubicación para esta funcionalidad',
+          [
+            { text: 'Cancelar' },
+            { 
+              text: 'Abrir Configuración', 
+              onPress: () => {
+                if (Platform.OS === 'ios') {
+                  Linking.openURL('app-settings:');
+                } else {
+                  Linking.openSettings();
+                }
+              }
+            }
+          ]
+        );
         return;
       }
 
@@ -813,11 +916,114 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
+  // Actualizar email con validación
+  const handleEmailChange = (text: string) => {
+    setEmail(text);
+    
+    if (text && !validateEmail(text)) {
+      setValidationErrors(prev => ({
+        ...prev,
+        email: 'Formato de email inválido'
+      }));
+    } else {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.email;
+        return newErrors;
+      });
+    }
+  };
+
+  // Actualizar sitio web con validación
+  const handleWebsiteChange = (text: string) => {
+    setWebsite(text);
+    
+    if (text && !validateWebsite(text)) {
+      setValidationErrors(prev => ({
+        ...prev,
+        website: 'Formato de URL inválida'
+      }));
+    } else {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.website;
+        return newErrors;
+      });
+    }
+  };
+
+  // Actualizar teléfono con validación
+  const handlePhoneChange = (text: string) => {
+    // Limpiar caracteres no válidos
+    const cleanedText = text.replace(/[^\d+\s()-]/g, '');
+    setPhone(cleanedText);
+    
+    if (cleanedText && !validatePhone(cleanedText)) {
+      setValidationErrors(prev => ({
+        ...prev,
+        phone: 'Formato de teléfono inválido'
+      }));
+    } else {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.phone;
+        return newErrors;
+      });
+    }
+  };
+
+  // Actualizar nombre con validación
+  const handleNameChange = (text: string) => {
+    setName(text);
+    
+    if (!text.trim()) {
+      setValidationErrors(prev => ({
+        ...prev,
+        name: 'El nombre es obligatorio'
+      }));
+    } else if (text.length < 3) {
+      setValidationErrors(prev => ({
+        ...prev,
+        name: 'El nombre debe tener al menos 3 caracteres'
+      }));
+    } else {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.name;
+        return newErrors;
+      });
+    }
+  };
+
+  // Actualizar descripción con validación
+  const handleDescriptionChange = (text: string) => {
+    setDescription(text);
+    
+    if (!text.trim()) {
+      setValidationErrors(prev => ({
+        ...prev,
+        description: 'La descripción es obligatoria'
+      }));
+    } else if (text.length < 20) {
+      setValidationErrors(prev => ({
+        ...prev,
+        description: 'La descripción debe tener al menos 20 caracteres'
+      }));
+    } else {
+      setValidationErrors(prev => {
+        const newErrors = {...prev};
+        delete newErrors.description;
+        return newErrors;
+      });
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={{ flex: 1 }}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 64 : 0}
       >
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {/* Header */}
@@ -825,6 +1031,8 @@ const AddBusinessScreen: React.FC = () => {
             <TouchableOpacity 
               style={styles.backButton} 
               onPress={handleBackNavigation}
+              accessibilityLabel="Volver atrás"
+              accessibilityRole="button"
             >
               <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
             </TouchableOpacity>
@@ -841,21 +1049,31 @@ const AddBusinessScreen: React.FC = () => {
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Nombre del Negocio *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    validationErrors.name ? styles.inputError : null
+                  ]}
                   value={name}
-                  onChangeText={setName}
+                  onChangeText={handleNameChange}
                   placeholder="Nombre del negocio"
                   placeholderTextColor="#8E8E93"
                   maxLength={100}
                 />
+                {validationErrors.name && (
+                  <Text style={styles.errorText}>{validationErrors.name}</Text>
+                )}
               </View>
               
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Descripción *</Text>
                 <TextInput
-                  style={[styles.input, styles.textArea]}
+                  style={[
+                    styles.input, 
+                    styles.textArea,
+                    validationErrors.description ? styles.inputError : null
+                  ]}
                   value={description}
-                  onChangeText={setDescription}
+                  onChangeText={handleDescriptionChange}
                   placeholder="Describe tu negocio..."
                   placeholderTextColor="#8E8E93"
                   multiline={true}
@@ -863,18 +1081,28 @@ const AddBusinessScreen: React.FC = () => {
                   textAlignVertical="top"
                   maxLength={500}
                 />
+                {validationErrors.description && (
+                  <Text style={styles.errorText}>{validationErrors.description}</Text>
+                )}
               </View>
               
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Categoría *</Text>
                 <TextInput
-                  style={[styles.input, showSuggestions && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }]}
+                  style={[
+                    styles.input, 
+                    validationErrors.category ? styles.inputError : null,
+                    showSuggestions && { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 }
+                  ]}
                   value={category}
                   onChangeText={updateCategorySuggestions}
                   placeholder="Categoría (ej. Restaurante, Tienda)"
                   placeholderTextColor="#8E8E93"
                   maxLength={50}
                 />
+                {validationErrors.category && (
+                  <Text style={styles.errorText}>{validationErrors.category}</Text>
+                )}
                 {showSuggestions && (
                   <View style={styles.suggestionsContainer}>
                     <ScrollView 
@@ -928,39 +1156,57 @@ const AddBusinessScreen: React.FC = () => {
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Teléfono</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    validationErrors.phone ? styles.inputError : null
+                  ]}
                   value={phone}
-                  onChangeText={setPhone}
+                  onChangeText={handlePhoneChange}
                   placeholder="+503 7123 4567"
                   placeholderTextColor="#8E8E93"
                   keyboardType="phone-pad"
                 />
+                {validationErrors.phone && (
+                  <Text style={styles.errorText}>{validationErrors.phone}</Text>
+                )}
               </View>
               
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Correo Electrónico</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    validationErrors.email ? styles.inputError : null
+                  ]}
                   value={email}
-                  onChangeText={setEmail}
+                  onChangeText={handleEmailChange}
                   placeholder="contacto@minegocio.com"
                   placeholderTextColor="#8E8E93"
                   keyboardType="email-address"
                   autoCapitalize="none"
                 />
+                {validationErrors.email && (
+                  <Text style={styles.errorText}>{validationErrors.email}</Text>
+                )}
               </View>
               
               <View style={styles.formGroup}>
                 <Text style={styles.label}>Sitio Web</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[
+                    styles.input,
+                    validationErrors.website ? styles.inputError : null
+                  ]}
                   value={website}
-                  onChangeText={setWebsite}
+                  onChangeText={handleWebsiteChange}
                   placeholder="www.minegocio.com"
                   placeholderTextColor="#8E8E93"
                   autoCapitalize="none"
                   keyboardType="url"
                 />
+                {validationErrors.website && (
+                  <Text style={styles.errorText}>{validationErrors.website}</Text>
+                )}
               </View>
             </View>
             
@@ -1032,25 +1278,6 @@ const AddBusinessScreen: React.FC = () => {
                   color={(menu.length > 0 || menuUrl) ? "#34C759" : "#E5E5EA"} 
                 />
               </TouchableOpacity>
-              
-              {/* New buttons for reservations and promotions */}
-              <TouchableOpacity 
-                style={styles.advancedButton}
-                onPress={navigateToReservations}
-              >
-                <MaterialIcons name="event-available" size={24} color="#007AFF" />
-                <Text style={styles.advancedButtonText}>Reservaciones</Text>
-                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.advancedButton}
-                onPress={navigateToPromotions}
-              >
-                <MaterialIcons name="local-offer" size={24} color="#007AFF" />
-                <Text style={styles.advancedButtonText}>Promociones</Text>
-                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
-              </TouchableOpacity>
             </View>
 
             <View style={styles.sectionContainer}>
@@ -1088,7 +1315,7 @@ const AddBusinessScreen: React.FC = () => {
                   <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
                 </TouchableOpacity>
               )}
-                    
+              
               <TouchableOpacity 
                 style={styles.advancedButton}
                 onPress={navigateToPromotions}
@@ -1097,14 +1324,16 @@ const AddBusinessScreen: React.FC = () => {
                 <Text style={styles.advancedButtonText}>Promociones</Text>
                 <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
               </TouchableOpacity>
-              
             </View>
             
             {/* Image Picker */}
             <View style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>Imagen Principal *</Text>
               <TouchableOpacity 
-                style={styles.imagePicker} 
+                style={[
+                  styles.imagePicker,
+                  validationErrors.image ? styles.imagePickerError : null
+                ]} 
                 onPress={pickImage}
               >
                 {image ? (
@@ -1120,6 +1349,9 @@ const AddBusinessScreen: React.FC = () => {
                   </View>
                 )}
               </TouchableOpacity>
+              {validationErrors.image && (
+                <Text style={styles.errorText}>{validationErrors.image}</Text>
+              )}
             </View>
 
             {/* Progress Indicator */}
@@ -1166,12 +1398,15 @@ const AddBusinessScreen: React.FC = () => {
         visible={mapVisible}
         animationType="slide"
         onRequestClose={() => setMapVisible(false)}
+        transparent={false}
       >
         <SafeAreaView style={styles.mapModalContainer}>
           <View style={styles.mapHeader}>
             <TouchableOpacity 
               onPress={() => setMapVisible(false)}
               style={styles.mapCloseButton}
+              accessibilityLabel="Volver atrás"
+              accessibilityRole="button"
             >
               <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
             </TouchableOpacity>
@@ -1199,6 +1434,8 @@ const AddBusinessScreen: React.FC = () => {
             <TouchableOpacity 
               style={styles.currentLocationMapButton}
               onPress={centerMapOnCurrentLocation}
+              accessibilityLabel="Mi ubicación actual"
+              accessibilityRole="button"
             >
               <MaterialIcons name="my-location" size={24} color="#007AFF" />
             </TouchableOpacity>
@@ -1210,6 +1447,8 @@ const AddBusinessScreen: React.FC = () => {
               ]}
               onPress={confirmLocationSelection}
               disabled={!markerLocation}
+              accessibilityLabel="Confirmar ubicación"
+              accessibilityRole="button"
             >
               <Text style={styles.confirmLocationButtonText}>Confirmar Ubicación</Text>
             </TouchableOpacity>
@@ -1287,6 +1526,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333333',
   },
+  inputError: {
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    backgroundColor: '#FFF5F5',
+  },
+  errorText: {
+    color: '#FF3B30',
+    fontSize: 12,
+    marginTop: 4,
+    marginLeft: 4,
+  },
   textArea: {
     height: 120,
     textAlignVertical: 'top',
@@ -1308,6 +1558,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
+  },
+  imagePickerError: {
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+    backgroundColor: '#FFF5F5',
   },
   selectedImage: {
     width: '100%',
@@ -1520,4 +1775,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default AddBusinessScreen
+export default AddBusinessScreen;

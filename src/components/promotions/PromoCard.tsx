@@ -14,17 +14,24 @@ interface PromoCardProps {
 }
 
 const PromoCard: React.FC<PromoCardProps> = ({ promotion, onPress, compact = false }) => {
-  // Formato de fechas
-  const formatDate = (timestamp: firebase.firestore.Timestamp) => {
-    if (!timestamp) return 'N/A';
+  // Formato de fechas - versión corregida y segura
+  const formatDate = (timestamp: firebase.firestore.Timestamp | undefined) => {
+    if (!timestamp || !timestamp.toDate) {
+      return 'N/A';
+    }
     
-    // Usar el método toDate() de Timestamp para convertir a Date
-    const date = timestamp.toDate();
-    return date.toLocaleDateString('es-ES', { 
-      year: 'numeric', 
-      month: 'short', 
-      day: 'numeric' 
-    });
+    try {
+      // Usar el método toDate() de Timestamp para convertir a Date
+      const date = timestamp.toDate();
+      return date.toLocaleDateString('es-ES', { 
+        year: 'numeric', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    } catch (error) {
+      console.error('Error al formatear fecha:', error);
+      return 'N/A';
+    }
   };
   
   // Formatear el valor del descuento
@@ -45,32 +52,51 @@ const PromoCard: React.FC<PromoCardProps> = ({ promotion, onPress, compact = fal
   
   // Verificar si la promo aún está activa
   const isActive = () => {
-    const now = new Date();
-    const endDate = promotion.endDate.toDate();
-    return now <= endDate;
+    try {
+      if (!promotion.endDate || !promotion.endDate.toDate) {
+        return false;
+      }
+      
+      const now = new Date();
+      const endDate = promotion.endDate.toDate();
+      return now <= endDate;
+    } catch (error) {
+      console.error('Error verificando estado de promoción:', error);
+      return false;
+    }
   };
   
   // Calcular tiempo restante
   const getTimeRemaining = () => {
-    const now = new Date();
-    const endDate = promotion.endDate.toDate();
-    
-    if (endDate <= now) return 'Expirado';
-    
-    const diffTime = Math.abs(endDate.getTime() - now.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    
-    if (diffDays > 1) return `${diffDays} días restantes`;
-    
-    const diffHours = Math.ceil(diffTime / (1000 * 60 * 60));
-    return `${diffHours} horas restantes`;
+    try {
+      if (!promotion.endDate || !promotion.endDate.toDate) {
+        return 'N/A';
+      }
+      
+      const now = new Date();
+      const endDate = promotion.endDate.toDate();
+      
+      if (endDate <= now) return 'Expirado';
+      
+      const diffTime = Math.abs(endDate.getTime() - now.getTime());
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      
+      if (diffDays > 1) return `${diffDays} días restantes`;
+      
+      const diffHours = Math.ceil(diffTime / (1000 * 60 * 60));
+      return `${diffHours} horas restantes`;
+    } catch (error) {
+      console.error('Error calculando tiempo restante:', error);
+      return 'N/A';
+    }
   };
   
+  // Versión compacta
   if (compact) {
     return (
       <TouchableOpacity 
         style={styles.compactContainer}
-        onPress={() => onPress?.(promotion)}
+        onPress={() => onPress && onPress(promotion)}
         disabled={!onPress}
       >
         <LinearGradient
@@ -98,10 +124,11 @@ const PromoCard: React.FC<PromoCardProps> = ({ promotion, onPress, compact = fal
     );
   }
   
+  // Versión completa
   return (
     <TouchableOpacity 
       style={styles.container}
-      onPress={() => onPress?.(promotion)}
+      onPress={() => onPress && onPress(promotion)}
       disabled={!onPress}
     >
       <LinearGradient
@@ -128,7 +155,7 @@ const PromoCard: React.FC<PromoCardProps> = ({ promotion, onPress, compact = fal
           <Image 
             source={{ uri: promotion.imageUrl }} 
             style={styles.image}
-            resizeMode="cover" 
+            contentFit="cover" 
           />
         )}
         

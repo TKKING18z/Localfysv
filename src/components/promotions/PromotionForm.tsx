@@ -10,14 +10,15 @@ import {
   Switch,
   Platform,
   ActivityIndicator,
-  Alert
+  Alert,
+  Linking,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
 import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';  // Asegúrate de tener esta línea
+import 'firebase/compat/firestore';
 import { Promotion } from '../../types/businessTypes';
 import { firebaseService } from '../../services/firebaseService';
 
@@ -47,12 +48,41 @@ const PromotionForm: React.FC<PromotionFormProps> = ({
   );
   const [promoCode, setPromoCode] = useState(initialValues?.promoCode || '');
   const [termsAndConditions, setTermsAndConditions] = useState(initialValues?.termsAndConditions || '');
-  const [startDate, setStartDate] = useState(
-    initialValues?.startDate ? initialValues.startDate.toDate() : new Date()
-  );
-  const [endDate, setEndDate] = useState(
-    initialValues?.endDate ? initialValues.endDate.toDate() : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-  );
+  
+  // Inicialización segura de fechas
+  const getInitialStartDate = () => {
+    if (initialValues?.startDate && typeof initialValues.startDate.toDate === 'function') {
+      try {
+        return initialValues.startDate.toDate();
+      } catch (error) {
+        console.error('Error al convertir startDate:', error);
+        return new Date();
+      }
+    }
+    return new Date();
+  };
+  
+  const getInitialEndDate = () => {
+    if (initialValues?.endDate && typeof initialValues.endDate.toDate === 'function') {
+      try {
+        return initialValues.endDate.toDate();
+      } catch (error) {
+        console.error('Error al convertir endDate:', error);
+        // Por defecto, una semana desde hoy
+        const date = new Date();
+        date.setDate(date.getDate() + 7);
+        return date;
+      }
+    }
+    // Por defecto, una semana desde hoy
+    const date = new Date();
+    date.setDate(date.getDate() + 7);
+    return date;
+  };
+  
+  const [startDate, setStartDate] = useState(getInitialStartDate());
+  const [endDate, setEndDate] = useState(getInitialEndDate());
+  
   const [imageUrl, setImageUrl] = useState(initialValues?.imageUrl || '');
   const [localImageUri, setLocalImageUri] = useState<string | null>(null);
   
@@ -88,7 +118,7 @@ const PromotionForm: React.FC<PromotionFormProps> = ({
   };
   
   // Manejar cambio de fecha de inicio
-  const handleStartDateChange = (_event: any, selectedDate?: Date) => {
+  const handleStartDateChange = (event: any, selectedDate?: Date) => {
     setShowStartDatePicker(Platform.OS === 'ios');
     if (selectedDate) {
       setStartDate(selectedDate);
@@ -104,7 +134,7 @@ const PromotionForm: React.FC<PromotionFormProps> = ({
   };
   
   // Manejar cambio de fecha de fin
-  const handleEndDateChange = (_event: any, selectedDate?: Date) => {
+  const handleEndDateChange = (event: any, selectedDate?: Date) => {
     setShowEndDatePicker(Platform.OS === 'ios');
     if (selectedDate) {
       if (selectedDate < startDate) {
@@ -115,21 +145,31 @@ const PromotionForm: React.FC<PromotionFormProps> = ({
     }
   };
   
-  // Guardar promoción
-  const handleSubmit = async () => {
+  // Validar formulario
+  const validateForm = (): boolean => {
     // Validar campos requeridos
     if (!title.trim()) {
       Alert.alert('Error', 'El título es obligatorio');
-      return;
+      return false;
     }
     
     if (!description.trim()) {
       Alert.alert('Error', 'La descripción es obligatoria');
-      return;
+      return false;
     }
     
     if (discountType !== 'special' && (!discountValue || isNaN(parseFloat(discountValue)))) {
       Alert.alert('Error', 'El valor del descuento es obligatorio');
+      return false;
+    }
+    
+    return true;
+  };
+  
+  // Guardar promoción
+  const handleSubmit = async () => {
+    // Validar formulario
+    if (!validateForm()) {
       return;
     }
     

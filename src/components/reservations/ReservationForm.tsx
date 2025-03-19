@@ -50,6 +50,10 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [availablePartySizes, setAvailablePartySizes] = useState<number[]>([]);
   
+  // Valores por defecto
+  const DEFAULT_TIMES = ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
+  const DEFAULT_PARTY_SIZES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20];
+  
   // Cargar disponibilidad al montar
   useEffect(() => {
     const loadAvailability = async () => {
@@ -66,32 +70,30 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
             setAvailableTimes(result.data.timeSlots);
           } else {
             // Valores predeterminados si no hay horarios configurados
-            const defaultTimes = ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
-            setTime(defaultTimes[0]);
-            setAvailableTimes(defaultTimes);
+            setTime(DEFAULT_TIMES[0]);
+            setAvailableTimes(DEFAULT_TIMES);
           }
           
           if (result.data.maxPartySizes && result.data.maxPartySizes.length > 0) {
             setAvailablePartySizes(result.data.maxPartySizes);
           } else {
             // Valores predeterminados si no se han configurado tamaños de grupo
-            setAvailablePartySizes([1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20]);
+            setAvailablePartySizes(DEFAULT_PARTY_SIZES);
           }
         } else {
           // Valores predeterminados
-          const defaultTimes = ['12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00'];
-          setTime(defaultTimes[0]);
-          setAvailableTimes(defaultTimes);
-          setAvailablePartySizes([1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 20]);
+          setTime(DEFAULT_TIMES[0]);
+          setAvailableTimes(DEFAULT_TIMES);
+          setAvailablePartySizes(DEFAULT_PARTY_SIZES);
         }
       } catch (error) {
         console.error('Error cargando disponibilidad:', error);
         Alert.alert('Error', 'No se pudo cargar la disponibilidad');
         
         // Valores predeterminados en caso de error
-        setAvailableTimes(['12:00', '13:00', '14:00', '18:00', '19:00', '20:00']);
-        setTime('12:00');
-        setAvailablePartySizes([1, 2, 3, 4, 5, 6, 8, 10]);
+        setAvailableTimes(DEFAULT_TIMES);
+        setTime(DEFAULT_TIMES[0]);
+        setAvailablePartySizes(DEFAULT_PARTY_SIZES);
       } finally {
         setLoadingAvailability(false);
       }
@@ -100,7 +102,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     loadAvailability();
   }, [businessId]);
   
-  // Manejar cambio de fecha
+  // Manejar cambio de fecha de manera segura
   const handleDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(Platform.OS === 'ios');
     
@@ -112,7 +114,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
         const dateString = selectedDate.toISOString().split('T')[0];
         const specialSchedule = availability.specialSchedules[dateString];
         
-        if (specialSchedule && specialSchedule.timeSlots.length > 0) {
+        if (specialSchedule && specialSchedule.timeSlots && specialSchedule.timeSlots.length > 0) {
           setAvailableTimes(specialSchedule.timeSlots);
           setTime(specialSchedule.timeSlots[0]);
           return;
@@ -187,7 +189,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     return true;
   };
   
-  // Crear reserva
+  // Crear reserva de manera segura
   const createReservation = async () => {
     if (!validateForm()) return;
     if (!user) {
@@ -198,6 +200,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     setLoading(true);
     
     try {
+      // Crear objeto de reserva con datos seguros
       const reservationData = {
         businessId,
         businessName,
@@ -205,12 +208,12 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
         userName: name,
         userEmail: email,
         contactInfo: {
-          phone,
-          email
+          phone: phone || undefined,
+          email: email || undefined
         },
         date: firebase.firestore.Timestamp.fromDate(date),
         time,
-        partySize: parseInt(partySize, 10),
+        partySize: parseInt(partySize, 10) || 1,
         notes: notes.trim() || undefined,
         status: 'pending' as 'pending' | 'confirmed' | 'canceled' | 'completed',
         createdAt: firebase.firestore.Timestamp.now()
@@ -234,6 +237,21 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
     }
   };
   
+  // Formatear fecha para mostrar
+  const formatDate = (dateToFormat: Date) => {
+    try {
+      return dateToFormat.toLocaleDateString('es-ES', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } catch (error) {
+      console.error('Error formateando fecha:', error);
+      return 'Fecha no disponible';
+    }
+  };
+  
   // Renderizar la UI del formulario
   return (
     <ScrollView style={styles.container}>
@@ -249,7 +267,7 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
         >
           <MaterialIcons name="event" size={20} color="#007AFF" />
           <Text style={styles.dateButtonText}>
-            {date.toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+            {formatDate(date)}
           </Text>
         </TouchableOpacity>
         

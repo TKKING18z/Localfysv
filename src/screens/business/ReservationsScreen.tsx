@@ -25,11 +25,13 @@ import { Reservation, Business, ReservationSettings } from '../../types/business
 import ReservationCard from '../../components/reservations/ReservationCard';
 import ReservationForm from '../../components/reservations/ReservationForm';
 import { useAuth } from '../../context/AuthContext';
+import { useStore } from '../../context/StoreContext';
 
 // Definir explícitamente los parámetros que espera esta pantalla
 type ReservationsScreenParams = {
   businessId: string;
   businessName: string;
+  isNewBusiness?: boolean;
 };
 
 // Corregir el tipo para la ruta
@@ -41,8 +43,9 @@ type FilterStatus = 'all' | 'pending' | 'confirmed' | 'canceled' | 'completed';
 const ReservationsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<ReservationsRouteProp>();
-  const { businessId, businessName } = route.params;
+  const { businessId, businessName, isNewBusiness } = route.params;
   const { user } = useAuth();
+  const store = useStore();
   
   // Estados
   const [loading, setLoading] = useState(true);
@@ -61,10 +64,29 @@ const ReservationsScreen: React.FC = () => {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [newTimeSlot, setNewTimeSlot] = useState('');
   
+  // Initialize reservation settings from store if this is a new business
+  useEffect(() => {
+    if (isNewBusiness) {
+      const tempSettings = store.getTempData('tempReservationSettings');
+      if (tempSettings) {
+        setReservationSettings(tempSettings);
+      }
+    }
+  }, [isNewBusiness, store]);
+
+  // Check if this is a temporary business for setup
+  const isTempBusiness = businessId.toString().startsWith('temp_');
+  
   // Comprobar si el usuario es el propietario del negocio
   useEffect(() => {
     const checkOwnership = async () => {
       if (!user) return;
+      
+      // For temporary businesses, the current user is always the owner
+      if (isTempBusiness) {
+        setIsBusinessOwner(true);
+        return;
+      }
       
       try {
         const businessData = await firebaseService.businesses.getById(businessId);
@@ -85,12 +107,19 @@ const ReservationsScreen: React.FC = () => {
     };
     
     checkOwnership();
-  }, [businessId, user]);
+  }, [businessId, user, isTempBusiness]);
   
   // Cargar reservaciones apropiadas según el rol del usuario
   const loadReservations = useCallback(async () => {
     try {
       setLoading(true);
+      
+      // For temporary businesses, we don't need to load reservations
+      if (isTempBusiness) {
+        setReservations([]);
+        setLoading(false);
+        return;
+      }
       
       if (!user) {
         setLoading(false);
@@ -121,7 +150,7 @@ const ReservationsScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [businessId, user, isBusinessOwner]);
+  }, [businessId, user, isBusinessOwner, isTempBusiness]);
   
   // Cargar al montar el componente o cuando cambie isBusinessOwner
   useEffect(() => {
@@ -305,6 +334,15 @@ const ReservationsScreen: React.FC = () => {
 
   // Guardar configuración de reservaciones
   const saveReservationSettings = async () => {
+    if (isTempBusiness) {
+      // Store settings in context for later use during business creation
+      store.setTempData('tempReservationSettings', reservationSettings);
+      Alert.alert('Éxito', 'Configuración guardada', [
+        { text: 'OK', onPress: () => navigation.goBack() }
+      ]);
+      return;
+    }
+    
     if (!businessId) return;
     
     try {
@@ -657,6 +695,16 @@ const ReservationsScreen: React.FC = () => {
           </ScrollView>
         </SafeAreaView>
       </Modal>
+      
+      {/* Add info banner for new businesses */}
+      {isTempBusiness && (
+        <View style={styles.infoBanner}>
+          <MaterialIcons name="info" size={20} color="#007AFF" />
+          <Text style={styles.infoBannerText}>
+            Configure las opciones de reservación para su nuevo negocio. Esta configuración se aplicará cuando se cree el negocio.
+          </Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -914,6 +962,21 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginHorizontal: 16,
+    marginVertical: 8,
+    alignItems: 'center',
+  },
+  infoBannerText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#007AFF',
   },
 });
 

@@ -24,6 +24,7 @@ import PromotionForm from '../../components/promotions/PromotionForm';
 type PromotionsScreenParams = {
   businessId: string;
   businessName: string;
+  isNewBusiness?: boolean;
 };
 
 // Corregir el tipo para la ruta
@@ -33,7 +34,7 @@ type NavigationProp = StackNavigationProp<RootStackParamList>;
 const PromotionsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<PromotionsRouteProp>();
-  const { businessId, businessName } = route.params;
+  const { businessId, businessName, isNewBusiness } = route.params;
   
   // Estados
   const [promotions, setPromotions] = useState<Promotion[]>([]);
@@ -42,10 +43,21 @@ const PromotionsScreen: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedPromotion, setSelectedPromotion] = useState<Promotion | null>(null);
   
+  // Check if this is a temporary business
+  const isTempBusiness = businessId.toString().startsWith('temp_');
+  
   // Cargar promociones
   const loadPromotions = useCallback(async () => {
     try {
       setLoading(true);
+      
+      // For temporary businesses, just set empty promotions
+      if (isTempBusiness) {
+        setPromotions([]);
+        setLoading(false);
+        return;
+      }
+      
       const result = await firebaseService.promotions.getByBusinessId(businessId);
       
       if (result.success && result.data) {
@@ -60,7 +72,7 @@ const PromotionsScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [businessId]);
+  }, [businessId, isTempBusiness]);
   
   // Cargar al montar el componente
   useEffect(() => {
@@ -113,6 +125,30 @@ const PromotionsScreen: React.FC = () => {
   // Guardar promoción (nueva o editada)
   const handleSave = async (promotionData: any) => {
     try {
+      // For temporary businesses, store in local state only
+      if (isTempBusiness) {
+        if (selectedPromotion) {
+          // Update existing
+          setPromotions(prev => 
+            prev.map(p => p.id === selectedPromotion.id ? { ...p, ...promotionData } : p)
+          );
+        } else {
+          // Add new with temp ID
+          const tempPromotion = {
+            ...promotionData,
+            id: 'temp_promo_' + Date.now(),
+            businessId,
+            isActive: true,
+          };
+          setPromotions(prev => [...prev, tempPromotion]);
+        }
+        
+        setShowForm(false);
+        setSelectedPromotion(null);
+        Alert.alert('Éxito', 'Promoción guardada localmente. Se creará cuando registre el negocio.');
+        return;
+      }
+      
       let result;
       
       if (selectedPromotion) {
@@ -203,6 +239,16 @@ const PromotionsScreen: React.FC = () => {
       <View style={styles.businessInfo}>
         <Text style={styles.businessName}>{businessName}</Text>
       </View>
+      
+      {/* Add info banner for new businesses */}
+      {isTempBusiness && (
+        <View style={styles.infoBanner}>
+          <MaterialIcons name="info" size={20} color="#007AFF" />
+          <Text style={styles.infoBannerText}>
+            Las promociones se guardarán cuando el negocio sea creado.
+          </Text>
+        </View>
+      )}
       
       {/* Lista de promociones */}
       {loading && !refreshing ? (
@@ -389,6 +435,20 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    margin: 16,
+    alignItems: 'center',
+  },
+  infoBannerText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#007AFF',
   },
 });
 

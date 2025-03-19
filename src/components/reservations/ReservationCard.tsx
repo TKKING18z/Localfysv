@@ -32,34 +32,48 @@ const ReservationCard: React.FC<ReservationCardProps> = ({
   onCancelReservation,
   isBusinessView = false
 }) => {
-  // Formatear fecha
-  const formatDate = (timestamp: firebase.firestore.Timestamp) => {
-    if (!timestamp) return 'N/A';
+  // Formatear fecha de manera segura
+  const formatDate = (timestamp: firebase.firestore.Timestamp | undefined) => {
+    if (!timestamp || typeof timestamp.toDate !== 'function') {
+      return 'Fecha no disponible';
+    }
     
-    const date = timestamp.toDate();
-    return date.toLocaleDateString('es-ES', { 
-      weekday: 'long', 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
+    try {
+      const date = timestamp.toDate();
+      return date.toLocaleDateString('es-ES', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+      });
+    } catch (error) {
+      console.error('Error al formatear fecha:', error);
+      return 'Fecha inválida';
+    }
   };
   
   // Verificar si la reserva es en el futuro
   const isFutureReservation = () => {
-    if (!reservation.date) return false;
+    if (!reservation.date || typeof reservation.date.toDate !== 'function') {
+      return false;
+    }
     
-    const reservationDate = reservation.date.toDate();
-    reservationDate.setHours(23, 59, 59);
-    
-    return reservationDate > new Date();
+    try {
+      const reservationDate = reservation.date.toDate();
+      reservationDate.setHours(23, 59, 59);
+      
+      return reservationDate > new Date();
+    } catch (error) {
+      console.error('Error al verificar fecha futura:', error);
+      return false;
+    }
   };
   
   // Verificar si la reserva se puede cancelar
   const canCancel = () => {
     return (
-      reservation.status === 'pending' || 
-      reservation.status === 'confirmed'
+      (reservation.status === 'pending' || 
+      reservation.status === 'confirmed')
     ) && isFutureReservation();
   };
   
@@ -68,6 +82,22 @@ const ReservationCard: React.FC<ReservationCardProps> = ({
     if (onCancelReservation) {
       onCancelReservation(reservation.id);
     }
+  };
+
+  // Obtener color seguro basado en el estado
+  const getStatusColor = () => {
+    if (STATUS_COLORS[reservation.status as keyof typeof STATUS_COLORS]) {
+      return STATUS_COLORS[reservation.status as keyof typeof STATUS_COLORS];
+    }
+    return '#8E8E93'; // Color por defecto
+  };
+
+  // Obtener etiqueta segura basada en el estado
+  const getStatusLabel = () => {
+    if (STATUS_LABELS[reservation.status as keyof typeof STATUS_LABELS]) {
+      return STATUS_LABELS[reservation.status as keyof typeof STATUS_LABELS];
+    }
+    return 'Estado desconocido'; // Etiqueta por defecto
   };
   
   return (
@@ -78,13 +108,13 @@ const ReservationCard: React.FC<ReservationCardProps> = ({
     >
       <View style={styles.header}>
         <Text style={styles.title}>
-          {isBusinessView ? `Reserva de ${reservation.userName}` : reservation.businessName}
+          {isBusinessView ? `Reserva de ${reservation.userName || 'Usuario'}` : (reservation.businessName || 'Negocio')}
         </Text>
         <View style={[
           styles.statusBadge, 
-          { backgroundColor: STATUS_COLORS[reservation.status] }
+          { backgroundColor: getStatusColor() }
         ]}>
-          <Text style={styles.statusText}>{STATUS_LABELS[reservation.status]}</Text>
+          <Text style={styles.statusText}>{getStatusLabel()}</Text>
         </View>
       </View>
       
@@ -96,12 +126,12 @@ const ReservationCard: React.FC<ReservationCardProps> = ({
         
         <View style={styles.detailItem}>
           <MaterialIcons name="access-time" size={16} color="#666666" />
-          <Text style={styles.detailText}>{reservation.time}</Text>
+          <Text style={styles.detailText}>{reservation.time || 'Hora no disponible'}</Text>
         </View>
         
         <View style={styles.detailItem}>
           <MaterialIcons name="person" size={16} color="#666666" />
-          <Text style={styles.detailText}>{reservation.partySize} personas</Text>
+          <Text style={styles.detailText}>{reservation.partySize || '?'} personas</Text>
         </View>
       </View>
       
