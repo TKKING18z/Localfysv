@@ -14,7 +14,8 @@ import {
   KeyboardAvoidingView,
   BackHandler,
   Modal,
-  Linking
+  Linking,
+  Switch
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -29,6 +30,7 @@ import { firebaseService } from '../services/firebaseService';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import MapView, { Marker, Region } from 'react-native-maps';
+import { DEFAULT_TIME_SLOTS, DEFAULT_AVAILABLE_DAYS } from '../../models/reservationTypes';
 
 // Navigation type
 type AddBusinessScreenNavigationProp = StackNavigationProp<RootStackParamList, 'AddBusiness'>;
@@ -105,7 +107,7 @@ interface BusinessData {
   menu?: MenuItem[];
   menuUrl?: string;
   images?: Array<{id?: string, url: string, isMain?: boolean}>;
-  acceptsReservations?: boolean;
+  acceptsReservations: boolean; // Changed from optional to required
   createdAt?: any;
   updatedAt?: any;
   createdBy?: string;
@@ -117,7 +119,8 @@ const CALLBACK_IDS = {
   PAYMENT_METHODS: 'paymentMethods_callback',
   SOCIAL_LINKS: 'socialLinks_callback',
   VIDEO_MANAGER: 'videoManager_callback',
-  MENU_EDITOR: 'menuEditor_callback'
+  MENU_EDITOR: 'menuEditor_callback',
+  RESERVATION_SETTINGS: 'reservationSettings_callback'
 };
 
 // Categorías predefinidas (mejoradas y organizadas alfabéticamente)
@@ -197,6 +200,12 @@ const AddBusinessScreen: React.FC = () => {
 
   // Configuración de reservaciones
   const [acceptsReservations, setAcceptsReservations] = useState<boolean>(true);
+  const [reservationSettings, setReservationSettings] = useState({
+    enabled: true,
+    maxGuestsPerTable: 10,
+    timeSlots: DEFAULT_TIME_SLOTS,
+    availableDays: DEFAULT_AVAILABLE_DAYS
+  });
 
   // Track form changes - Fix the infinite loop by using a flag
   useEffect(() => {
@@ -272,6 +281,11 @@ const AddBusinessScreen: React.FC = () => {
         console.log('MenuEditor callback executed with data:', { menu: newMenu, menuUrl: newMenuUrl });
         setMenu(newMenu);
         setMenuUrl(newMenuUrl);
+      });
+      
+      store.setCallback(CALLBACK_IDS.RESERVATION_SETTINGS, (settings: any) => {
+        console.log('ReservationSettings callback executed with data:', settings);
+        setReservationSettings(settings);
       });
       
       callbacksRegistered.current = true;
@@ -505,9 +519,13 @@ const AddBusinessScreen: React.FC = () => {
   // Navegar a las pantallas de reservaciones y promociones de manera segura
   const navigateToReservations = () => {
     try {
+      // Guardar configuración actual en el store para que esté disponible para la pantalla de reservaciones
+      store.setTempData('tempReservationSettings', reservationSettings);
+      
       navigation.navigate('Reservations', {
         businessId: 'new_business',
         businessName: name || 'Nuevo Negocio',
+        isNewBusiness: true
       } as any);
     } catch (error) {
       console.error('Error navegando a Reservations:', error);
@@ -520,6 +538,7 @@ const AddBusinessScreen: React.FC = () => {
       navigation.navigate('Promotions', {
         businessId: 'new_business',
         businessName: name || 'Nuevo Negocio',
+        isNewBusiness: true
       } as any);
     } catch (error) {
       console.error('Error navegando a Promotions:', error);
@@ -675,6 +694,21 @@ const AddBusinessScreen: React.FC = () => {
         } catch (menuError) {
           console.error("Error al guardar menú:", menuError);
           // Continuar con el resto del proceso aunque falle el menú
+        }
+      }
+
+      // Guardar configuración de reservaciones si está habilitado
+      if (acceptsReservations) {
+        try {
+          await firebaseService.reservations.updateAvailability({
+            businessId,
+            availableDays: reservationSettings.availableDays,
+            timeSlots: reservationSettings.timeSlots,
+            maxPartySizes: Array.from({ length: reservationSettings.maxGuestsPerTable }, (_, i) => i + 1)
+          });
+          console.log("Configuración de reservaciones guardada exitosamente");
+        } catch (reservationError) {
+          console.error("Error al guardar configuración de reservaciones:", reservationError);
         }
       }
       
@@ -1281,38 +1315,34 @@ const AddBusinessScreen: React.FC = () => {
             </View>
 
             <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>Opciones de Reservación</Text>
+              <Text style={styles.sectionTitle}>Opciones de Reservación y Promociones</Text>
               
               <View style={styles.toggleContainer}>
                 <Text style={styles.toggleLabel}>Permitir reservaciones</Text>
-                <TouchableOpacity 
-                  style={[
-                    styles.toggleButton,
-                    acceptsReservations ? styles.toggleButtonActive : styles.toggleButtonInactive
-                  ]}
-                  onPress={() => setAcceptsReservations(!acceptsReservations)}
-                >
-                  <View style={[
-                    styles.toggleKnob,
-                    acceptsReservations ? styles.toggleKnobActive : styles.toggleKnobInactive
-                  ]} />
-                </TouchableOpacity>
+                <Switch 
+                  value={acceptsReservations}
+                  onValueChange={(value) => setAcceptsReservations(value)}
+                  trackColor={{ false: '#E5E5EA', true: '#4CD964' }}
+                  thumbColor={Platform.OS === 'android' ? '#f4f3f4' : ''}
+                />
               </View>
               
-              <Text style={styles.toggleDescription}>
-                {acceptsReservations 
-                  ? "Tu negocio aparecerá como disponible para reservaciones. Los clientes podrán realizar reservas desde la app." 
-                  : "Tu negocio no recibirá reservaciones a través de la app."}
-              </Text>
-              
-              {acceptsReservations && (
+              {!acceptsReservations ? (
+                <Text style={styles.warningText}>
+                  Las reservaciones estarán deshabilitadas. Los clientes no podrán hacer reservas a través de la app.
+                </Text>
+              ) : (
                 <TouchableOpacity 
                   style={styles.advancedButton}
                   onPress={navigateToReservations}
                 >
                   <MaterialIcons name="event-available" size={24} color="#007AFF" />
                   <Text style={styles.advancedButtonText}>Configurar Reservaciones</Text>
-                  <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+                  <MaterialIcons 
+                    name="check-circle" 
+                    size={24} 
+                    color={store.getTempData('tempReservationSettings') ? "#34C759" : "#E5E5EA"} 
+                  />
                 </TouchableOpacity>
               )}
               
@@ -1321,8 +1351,12 @@ const AddBusinessScreen: React.FC = () => {
                 onPress={navigateToPromotions}
               >
                 <MaterialIcons name="local-offer" size={24} color="#007AFF" />
-                <Text style={styles.advancedButtonText}>Promociones</Text>
-                <MaterialIcons name="check-circle" size={24} color="#E5E5EA" />
+                <Text style={styles.advancedButtonText}>Gestionar Promociones</Text>
+                <MaterialIcons 
+                  name="check-circle" 
+                  size={24} 
+                  color={store.getTempData('tempPromotions') ? "#34C759" : "#E5E5EA"} 
+                />
               </TouchableOpacity>
             </View>
             
@@ -1551,6 +1585,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F5',
     borderRadius: 8,
   },
+  locationConfirmed: {
+    fontSize: 12,
+    color: '#34C759',
+    marginTop: 4,
+  },
   imagePicker: {
     height: 200,
     backgroundColor: '#F0F0F5',
@@ -1589,6 +1628,21 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginLeft: 12,
     flex: 1,
+  },
+  toggleContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  toggleLabel: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  warningText: {
+    marginBottom: 12,
+    color: '#FF3B30',
+    fontStyle: 'italic',
   },
   progressContainer: {
     marginBottom: 16,
@@ -1726,52 +1780,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: 'bold',
-  },
-  locationConfirmed: {
-    fontSize: 12,
-    color: '#34C759',
-    marginTop: 4,
-  },
-  toggleContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginVertical: 12,
-  },
-  toggleLabel: {
-    fontSize: 16,
-    color: '#333333',
-    flex: 1,
-  },
-  toggleButton: {
-    width: 50,
-    height: 30,
-    borderRadius: 15,
-    padding: 2,
-  },
-  toggleButtonActive: {
-    backgroundColor: '#34C759',
-  },
-  toggleButtonInactive: {
-    backgroundColor: '#E5E5EA',
-  },
-  toggleKnob: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: 'white',
-  },
-  toggleKnobActive: {
-    transform: [{ translateX: 20 }],
-  },
-  toggleKnobInactive: {
-    transform: [{ translateX: 0 }],
-  },
-  toggleDescription: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginBottom: 16,
-    fontStyle: 'italic',
   },
 });
 

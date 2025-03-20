@@ -39,6 +39,7 @@ export interface MenuItem {
 
 // Define Business interface
 export interface Business {
+  acceptsReservations: boolean;
   id: string;
   name: string;
   description: string;
@@ -189,7 +190,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       socialLinks: data.socialLinks || undefined,
       videos: normalizedVideos,
       menu: normalizedMenu,
-      menuUrl: data.menuUrl || undefined
+      menuUrl: data.menuUrl || undefined,
+      acceptsReservations: data.acceptsReservations === undefined ? false : data.acceptsReservations
     };
   };
   

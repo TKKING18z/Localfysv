@@ -13,7 +13,8 @@ import {
   Animated,
   Share,
   useWindowDimensions,
-  ScrollView
+  ScrollView,
+  RefreshControl
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -23,8 +24,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import { useLocation } from '../hooks/useLocation';
-import { useAuth } from '../context/AuthContext'; // Importar el contexto de autenticación
-import { firebaseService } from '../services/firebaseService'; // Add this import
+import { useAuth } from '../context/AuthContext';
+import { firebaseService } from '../services/firebaseService';
+import { Promotion } from '../types/businessTypes';
 
 // Components
 import BusinessHoursView from '../components/BusinessHoursView';
@@ -36,12 +38,6 @@ import MenuViewer from '../components/MenuViewer';
 import ReviewList from '../../components/reviews/ReviewList';
 import ReviewForm from '../../components/reviews/ReviewForm';
 import PromoCard from '../components/promotions/PromoCard';
-
-// Hooks
-import { useBusinessReviews } from '../../hooks/useReviews';
-
-// Tipos necesarios para resolver incompatibilidades
-type ReviewSortMethod = 'recent' | 'rating' | 'relevant';
 
 // Constants
 const HEADER_HEIGHT = 350;
@@ -56,30 +52,6 @@ const GRADIENT_COLORS = {
 type BusinessDetailRouteProp = RouteProp<RootStackParamList, 'BusinessDetail'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
-// Componentes más pequeños
-const LoadingState = () => (
-  <SafeAreaView style={styles.loadingContainer}>
-    <ActivityIndicator size="large" color="#007AFF" />
-    <Text style={styles.loadingText}>Cargando negocio...</Text>
-  </SafeAreaView>
-);
-
-const ErrorState = ({ message, onBack }: { message: string | null, onBack: () => void }) => (
-  <SafeAreaView style={styles.errorContainer}>
-    <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
-    <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
-    <Text style={styles.errorText}>{message || 'No se pudo cargar el negocio'}</Text>
-    <TouchableOpacity 
-      style={styles.backButton}
-      onPress={onBack}
-      accessibilityRole="button"
-      accessibilityLabel="Volver atrás"
-    >
-      <Text style={styles.backButtonText}>Volver</Text>
-    </TouchableOpacity>
-  </SafeAreaView>
-);
-
 // Componente principal optimizado
 const BusinessDetailScreen: React.FC = () => {
   const dimensions = useWindowDimensions();
@@ -88,80 +60,32 @@ const BusinessDetailScreen: React.FC = () => {
   const { businessId } = route.params;
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
-  
-  // Obtener información del usuario actual - CORREGIDO
-  const { user } = useAuth(); // Cambiar 'currentUser' a 'user' para coincidir con el AuthContext
+  const { user } = useAuth();
   
   // Estados principales
   const [business, setBusiness] = useState<Business | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingError, setLoadingError] = useState<string | null>(null);
   const [isFav, setIsFav] = useState(false);
   const [activeTab, setActiveTab] = useState('info');
   const [showReviewForm, setShowReviewForm] = useState(false);
-  const [promotions, setPromotions] = useState<any[]>([]);
+  const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loadingPromotions, setLoadingPromotions] = useState(false);
+  const [isBusinessOwner, setIsBusinessOwner] = useState(false);
   
   // Valores animados
   const scrollY = useRef(new Animated.Value(0)).current;
   const favoriteScale = useRef(new Animated.Value(1)).current;
   const tabBarOpacity = useRef(new Animated.Value(0)).current;
   const actionButtonsY = useRef(new Animated.Value(100)).current;
-  
-  // Hook para reseñas - adaptando los tipos para eliminar errores de tipado
-  const {
-    reviews,
-    loading: reviewsLoading,
-    error: _reviewsError, 
-    hasMore: hasMoreReviews,
-    stats: reviewsStats,
-    loadMore: loadMoreReviews,
-    filterByRating: originalFilterByRating,
-    activeFilter,
-    sortBy,
-    changeSortMethod: originalChangeSortMethod,
-    refreshReviews, 
-  } = useBusinessReviews(businessId);
 
-  // Adaptadores para resolver incompatibilidades de tipo
-  const filterByRating = useCallback((rating: number | null) => {
-    // Convertir number | null a ReviewFilterOption
-    const filter = rating === null ? 'all' : rating.toString() as '1' | '2' | '3' | '4' | '5';
-    originalFilterByRating(filter);
-  }, [originalFilterByRating]);
-
-  const changeSortMethod = useCallback((sort: ReviewSortMethod) => {
-    // Mapear ReviewSortMethod a ReviewSortOption
-    let mappedSort: 'recent' | 'highest' | 'lowest';
-    switch (sort) {
-      case 'rating':
-        mappedSort = 'highest'; 
-        break;
-      case 'relevant':
-        mappedSort = 'recent'; 
-        break;
-      default:
-        mappedSort = 'recent';
+  // Comprobar si el usuario es propietario del negocio
+  useEffect(() => {
+    if (user && business?.createdBy) {
+      setIsBusinessOwner(user.uid === business.createdBy);
     }
-    originalChangeSortMethod(mappedSort);
-  }, [originalChangeSortMethod]);
-  
-  // Manejadores de eventos para reseñas - IMPORTANTE: definidos antes de cualquier retorno condicional
-  const handleReviewReply = useCallback((_reviewId: string) => {
-    // Implementación futura
-  }, []);
-  
-  const handleReviewReport = useCallback((_reviewId: string) => {
-    // Implementación futura
-  }, []);
-  
-  const handleEditReview = useCallback((_review: any) => {
-    // Implementación futura
-  }, []);
-  
-  const handleDeleteReview = useCallback((_reviewId: string) => {
-    // Implementación futura
-  }, []);
+  }, [user, business]);
   
   // Animaciones derivadas (memoizadas)
   const headerAnimations = useMemo(() => ({
@@ -227,16 +151,39 @@ const BusinessDetailScreen: React.FC = () => {
     }
   }, [businessId, getBusinessById, isFavorite]);
 
+  // Cargar promociones
+  const loadPromotions = useCallback(async () => {
+    try {
+      setLoadingPromotions(true);
+      const result = await firebaseService.promotions.getByBusinessId(businessId);
+      if (result.success && result.data) {
+        setPromotions(result.data);
+      }
+    } catch (error) {
+      console.error('Error loading promotions:', error);
+    } finally {
+      setLoadingPromotions(false);
+    }
+  }, [businessId]);
+
   // Inicializar datos y animaciones
   useEffect(() => {
     fetchBusiness();
-  }, [fetchBusiness]);
+    loadPromotions();
+  }, [fetchBusiness, loadPromotions]);
 
   useEffect(() => {
     if (!loading && business) {
       startInitialAnimations();
     }
   }, [loading, business, startInitialAnimations]);
+
+  // Función para refrescar datos
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await Promise.all([fetchBusiness(), loadPromotions()]);
+    setRefreshing(false);
+  }, [fetchBusiness, loadPromotions]);
 
   // Manejadores de eventos optimizados con useCallback
   const handleFavoriteToggle = useCallback(() => {
@@ -308,6 +255,24 @@ const BusinessDetailScreen: React.FC = () => {
     });
   }, [business]);
 
+  const navigateToReservations = useCallback(() => {
+    if (!business) return;
+    
+    navigation.navigate('Reservations', {
+      businessId,
+      businessName: business.name,
+    });
+  }, [navigation, businessId, business]);
+
+  const navigateToPromotions = useCallback(() => {
+    if (!business) return;
+    
+    navigation.navigate('Promotions', {
+      businessId,
+      businessName: business.name,
+    });
+  }, [navigation, businessId, business]);
+
   // Funciones de utilidad - memoizadas para evitar recálculos
   const getBusinessImage = useMemo(() => {
     if (!business?.images || business.images.length === 0) return null;
@@ -364,9 +329,7 @@ const BusinessDetailScreen: React.FC = () => {
            category.includes('turisticos') ||
            category.includes('turística') ||
            category.includes('tour') ||
-           category.includes('aventura') ||
-           category.includes('lugares turísticos') ||
-           category.includes('viajes');
+           category.includes('aventura');
   }, [business]);
 
   const availableTabs = useMemo(() => {
@@ -383,6 +346,11 @@ const BusinessDetailScreen: React.FC = () => {
       
       tabs.push('promociones');
       tabs.push('reseñas');
+      
+      // Agregar tab de reservas si el negocio acepta reservaciones
+      if (business.acceptsReservations !== false) {
+        tabs.push('reservas');
+      }
     }
     
     return tabs;
@@ -408,56 +376,32 @@ const BusinessDetailScreen: React.FC = () => {
   // Distancia formateada
   const distance = business ? getFormattedDistance(business) : null;
 
-  // Mock user ID - en producción, usar el real
-  const currentUserId = user?.uid || "anonymousUser";
-  const currentUserName = user?.displayName || user?.email?.split('@')[0] || "Usuario";
-  const currentUserPhoto = user?.photoURL;
-
-  // Add this function before it's used in the useEffect below
-  // Load promotions function
-  const loadPromotions = useCallback(async () => {
-    if (!businessId) return;
-    
-    try {
-      setLoadingPromotions(true);
-      const result = await firebaseService.promotions.getByBusinessId(businessId);
-      if (result.success && result.data) {
-        setPromotions(result.data);
-      }
-    } catch (error) {
-      console.error('Error loading promotions:', error);
-    } finally {
-      setLoadingPromotions(false);
-    }
-  }, [businessId]);
-
-  // Load promotions when component mounts
-  useEffect(() => {
-    loadPromotions();
-  }, [loadPromotions]);
-
-  // Fix the navigation functions by using the correct route names as defined in RootStackParamList
-  const navigateToReservations = () => {
-    navigation.navigate('Reservations', {
-      businessId,
-      businessName: business?.name || ''
-    });
-  };
-
-  const navigateToPromotions = () => {
-    navigation.navigate('Promotions', {
-      businessId,
-      businessName: business?.name || ''
-    });
-  };
-
   // Estados renderizados
   if (loading) {
-    return <LoadingState />;
+    return (
+      <SafeAreaView style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando negocio...</Text>
+      </SafeAreaView>
+    );
   }
 
   if (loadingError || !business) {
-    return <ErrorState message={loadingError} onBack={() => navigation.goBack()} />;
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+        <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
+        <Text style={styles.errorText}>{loadingError || 'No se pudo cargar el negocio'}</Text>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+          accessibilityRole="button"
+          accessibilityLabel="Volver atrás"
+        >
+          <Text style={styles.backButtonText}>Volver</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
   }
 
   return (
@@ -514,6 +458,14 @@ const BusinessDetailScreen: React.FC = () => {
         scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}
         overScrollMode="never"
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={handleRefresh} 
+            tintColor="#007AFF"
+            colors={["#007AFF"]}
+          />
+        }
       >
         {/* Business Image Header con animación */}
         <Animated.View style={[styles.imageContainer, { height: headerAnimations.height }]}>
@@ -603,7 +555,7 @@ const BusinessDetailScreen: React.FC = () => {
             <View style={styles.ratingContainer}>
               <MaterialIcons name="star" size={16} color="#FFCC00" />
               <Text style={styles.ratingText}>
-                {reviewsStats?.averageRating?.toFixed(1) || (Math.random() * 2 + 3).toFixed(1)}
+                {(business as any).averageRating?.toFixed(1) || "Nuevo"}
               </Text>
             </View>
           </Animated.View>
@@ -671,7 +623,9 @@ const BusinessDetailScreen: React.FC = () => {
                     tab === 'info' ? 'info' :
                     tab === 'gallery' ? 'photo-library' :
                     tab === 'menu' ? (isTouristAttraction ? 'hiking' : 'restaurant-menu') :
-                    tab === 'videos' ? 'videocam' : 'rate-review'
+                    tab === 'videos' ? 'videocam' : 
+                    tab === 'promociones' ? 'local-offer' :
+                    tab === 'reservas' ? 'event-available' : 'rate-review'
                   } 
                   size={22} 
                   color={activeTab === tab ? "#FFFFFF" : "#8E8E93"} 
@@ -683,7 +637,9 @@ const BusinessDetailScreen: React.FC = () => {
                   {tab === 'info' ? 'Información' :
                    tab === 'gallery' ? 'Galería' :
                    tab === 'menu' ? (isTouristAttraction ? 'Planes' : 'Menú') :
-                   tab === 'videos' ? 'Videos' : 'Reseñas'}
+                   tab === 'videos' ? 'Videos' : 
+                   tab === 'promociones' ? 'Promos' :
+                   tab === 'reservas' ? 'Reservas' : 'Reseñas'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -862,7 +818,7 @@ const BusinessDetailScreen: React.FC = () => {
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Text style={styles.cardSectionTitle}>Promociones</Text>
-                {user?.uid === business?.createdBy && (
+                {isBusinessOwner && (
                   <TouchableOpacity 
                     style={styles.managementButton}
                     onPress={navigateToPromotions}
@@ -876,12 +832,16 @@ const BusinessDetailScreen: React.FC = () => {
               {loadingPromotions ? (
                 <ActivityIndicator size="large" color="#007AFF" style={{marginVertical: 20}} />
               ) : promotions.length > 0 ? (
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.promotionsContainer}>
-                    {promotions.map((promo) => (
-                      <PromoCard key={promo.id} promotion={promo} />
-                    ))}
-                  </View>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.promotionsScrollContent}
+                >
+                  {promotions.map((promo) => (
+                    <View key={promo.id} style={styles.promotionItemContainer}>
+                      <PromoCard promotion={promo} compact={true} />
+                    </View>
+                  ))}
                 </ScrollView>
               ) : (
                 <View style={styles.emptyStateContainer}>
@@ -889,53 +849,85 @@ const BusinessDetailScreen: React.FC = () => {
                   <Text style={styles.emptyStateText}>No hay promociones disponibles</Text>
                 </View>
               )}
-              
-              {/* Sistema de reservaciones mejorado */}
-              {((business as any).acceptsReservations !== false) ? (
-                <>
-                  {/* Si es propietario, mostrar botón de gestión */}
-                  {user?.uid === business?.createdBy ? (
-                    <TouchableOpacity 
-                      style={styles.managementReservationButton}
-                      onPress={navigateToReservations}
-                    >
-                      <LinearGradient
-                        colors={['#FF9500', '#FF2D55']}
-                        style={styles.reservationButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <MaterialIcons name="event-note" size={22} color="white" />
-                        <Text style={styles.reservationButtonText}>Gestionar Reservaciones</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  ) : (
-                    /* Si es cliente, mostrar botón para hacer reservación */
-                    <TouchableOpacity 
-                      style={styles.reservationButton}
-                      onPress={navigateToReservations}
-                    >
-                      <LinearGradient
-                        colors={['#007AFF', '#00C2FF']}
-                        style={styles.reservationButtonGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <MaterialIcons name="event-available" size={22} color="white" />
-                        <Text style={styles.reservationButtonText}>Hacer Reservación</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  )}
-                </>
-              ) : (
-                /* Si no acepta reservaciones, mostrar mensaje */
-                <View style={styles.noReservationsContainer}>
-                  <MaterialIcons name="event-busy" size={22} color="#8E8E93" />
-                  <Text style={styles.noReservationsText}>
-                    Este negocio no acepta reservaciones actualmente
-                  </Text>
-                </View>
+
+              {!isBusinessOwner && promotions.length > 0 && (
+                <TouchableOpacity 
+                  style={styles.viewAllButton}
+                  onPress={navigateToPromotions}
+                >
+                  <Text style={styles.viewAllButtonText}>Ver todas las promociones</Text>
+                  <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
+                </TouchableOpacity>
               )}
+            </View>
+          )}
+
+          {/* Contenido de la pestaña de Reservas */}
+          {activeTab === 'reservas' && (
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.cardSectionTitle}>Reservaciones</Text>
+                {isBusinessOwner && (
+                  <TouchableOpacity 
+                    style={styles.managementButton}
+                    onPress={navigateToReservations}
+                  >
+                    <MaterialIcons name="edit" size={20} color="#007AFF" />
+                    <Text style={styles.managementButtonText}>Gestionar</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              
+              <View style={styles.reservationInfoContainer}>
+                <MaterialIcons name="event-available" size={48} color="#007AFF" style={styles.reservationIcon} />
+                <Text style={styles.reservationTitle}>
+                  {isBusinessOwner 
+                    ? "Gestiona tus reservaciones"
+                    : "Reserva en " + business.name}
+                </Text>
+                <Text style={styles.reservationDescription}>
+                  {isBusinessOwner 
+                    ? "Administra todas las reservaciones de tu negocio, confirma o rechaza solicitudes y configura tu disponibilidad."
+                    : "Realiza una reservación en este negocio de manera fácil y rápida. Selecciona la fecha, hora y número de personas."}
+                </Text>
+                
+                <TouchableOpacity 
+                  style={styles.reservationButton}
+                  onPress={navigateToReservations}
+                >
+                  <LinearGradient
+                    colors={isBusinessOwner ? ['#FF9500', '#FF2D55'] : ['#007AFF', '#00C2FF']}
+                    style={styles.reservationButtonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    <MaterialIcons 
+                      name={isBusinessOwner ? "event-note" : "event-available"} 
+                      size={22} 
+                      color="white" 
+                    />
+                    <Text style={styles.reservationButtonText}>
+                      {isBusinessOwner ? "Gestionar Reservaciones" : "Hacer Reservación"}
+                    </Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          {/* Contenido de la pestaña de Reseñas */}
+          {activeTab === 'reseñas' && (
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Text style={styles.cardSectionTitle}>Reseñas</Text>
+              </View>
+              
+              <ReviewList 
+                businessId={businessId} // Add the required businessId prop
+                onAddReview={() => setShowReviewForm(true)}
+                isBusinessOwner={isBusinessOwner} // Changed from isOwner to isBusinessOwner
+                business={business} // Optional but can keep it
+              />
             </View>
           )}
         </View>
@@ -986,6 +978,26 @@ const BusinessDetailScreen: React.FC = () => {
               </LinearGradient>
             </TouchableOpacity>
           )}
+          
+          {business.acceptsReservations !== false && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={navigateToReservations}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Hacer reservación"
+            >
+              <LinearGradient
+                colors={GRADIENT_COLORS.primary}
+                style={styles.actionButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <MaterialIcons name="event-available" size={22} color="white" />
+                <Text style={styles.actionButtonText}>Reservar</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
         </Animated.View>
       )}
 
@@ -1008,22 +1020,17 @@ const BusinessDetailScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
             
-            {/* ReviewForm con manejo de éxito mejorado */}
+            {/* ReviewForm */}
             <ReviewForm
               businessId={businessId}
               businessName={business.name}
-              userId={currentUserId}
-              userName={currentUserName}
-              userPhotoURL={currentUserPhoto ?? undefined} // Ya corregido anteriormente
-              onSuccess={(reviewId) => {
-                console.log('Reseña añadida exitosamente:', reviewId);
-                console.log('Foto de perfil del usuario:', currentUserPhoto); // Añadir para depuración
+              userId={user?.uid || ""}
+              userName={user?.displayName || user?.email?.split('@')[0] || "Usuario"}
+              userPhotoURL={user?.photoURL || undefined}
+              onSuccess={() => {
                 setShowReviewForm(false);
-                
-                // Refrescar la lista de reseñas
-                setTimeout(() => {
-                  refreshReviews();
-                }, 500);
+                // Refrescar datos
+                handleRefresh();
               }}
               onCancel={() => setShowReviewForm(false)}
             />
@@ -1034,7 +1041,6 @@ const BusinessDetailScreen: React.FC = () => {
   );
 };
 
-// Estilos optimizados
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1431,10 +1437,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
     textAlign: 'center',
   },
-  reviewsContainer: {
-    marginTop: 16,
-    marginBottom: 24,
-  },
   actionButtonsContainer: {
     flexDirection: 'row',
     padding: 16,
@@ -1471,29 +1473,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
   },
-  addReviewButton: {
-    alignSelf: 'center',
-    marginTop: 20,
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  reviewButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-  },
-  addReviewButtonText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 8,
-  },
   reviewFormOverlay: {
     position: 'absolute',
     top: 0,
@@ -1502,8 +1481,6 @@ const styles = StyleSheet.create({
     bottom: 0,
     justifyContent: 'center',
     alignItems: 'center',
-    zIndex: 2000, // Increased z-index
-    elevation: 10, // For Android
   },
   reviewFormBackdrop: {
     position: 'absolute',
@@ -1511,14 +1488,14 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)', // Darker for better contrast
+    backgroundColor: 'rgba(0,0,0,0.6)',
   },
   reviewFormContainer: {
     width: '95%',
-    height: '90%', // Mayor altura para asegurar espacio suficiente
+    height: '90%',
     backgroundColor: 'white',
     borderRadius: 16,
-    padding: 0, // Quitamos el padding para que no interfiera con el ScrollView interno
+    padding: 0,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -1538,18 +1515,12 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333333',
   },
-  promotionsContainer: {
-    flexDirection: 'row',
-    paddingVertical: 8,
-  },
-  
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 12,
   },
-  
   managementButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1558,84 +1529,87 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 16,
   },
-  
   managementButtonText: {
     color: '#007AFF',
     fontWeight: '600',
     fontSize: 14,
     marginLeft: 4,
   },
-  
+  promotionsScrollContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  promotionItemContainer: {
+    marginHorizontal: 8,
+  },
   emptyStateContainer: {
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
   },
-  
   emptyStateText: {
     marginTop: 12,
     color: '#8E8E93',
     fontSize: 16,
     textAlign: 'center',
   },
-  
+  viewAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    paddingVertical: 8,
+  },
+  viewAllButtonText: {
+    color: '#007AFF',
+    fontWeight: '600',
+    fontSize: 16,
+    marginRight: 4,
+  },
+  reservationInfoContainer: {
+    alignItems: 'center',
+    padding: 16,
+  },
+  reservationIcon: {
+    marginBottom: 16,
+  },
+  reservationTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  reservationDescription: {
+    fontSize: 14,
+    color: '#666666',
+    textAlign: 'center',
+    marginBottom: 24,
+    lineHeight: 20,
+  },
   reservationButton: {
-    marginTop: 20,
-    alignSelf: 'center',
-    overflow: 'hidden',
+    width: '100%',
     borderRadius: 12,
-    width: '80%',
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.2,
     shadowRadius: 3,
     elevation: 4,
   },
-  
   reservationButtonGradient: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 14,
     paddingHorizontal: 20,
   },
-  
   reservationButtonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
   },
-  managementReservationButton: {
-    marginTop: 20,
-    alignSelf: 'center',
-    overflow: 'hidden',
-    borderRadius: 12,
-    width: '80%',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  
-  noReservationsContainer: {
-    marginTop: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    padding: 12,
-    backgroundColor: '#F0F0F5',
-    borderRadius: 8,
-  },
-  
-  noReservationsText: {
-    marginLeft: 8,
-    fontSize: 15,
-    color: '#8E8E93',
-    fontStyle: 'italic',
-  },
-  
 });
 
 export default BusinessDetailScreen;

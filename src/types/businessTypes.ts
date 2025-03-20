@@ -142,4 +142,7 @@ export interface Business {
   createdAt?: any;
   updatedAt?: any;
   createdBy: string;
+  averageRating?: number; // Added this property
+  reviewCount?: number; // Added this property // Marca como opcional con ?        // Marca como opcional con ?
+  businessId?: string;             // Para mantener compatibilidad con ReviewListProps
 }
