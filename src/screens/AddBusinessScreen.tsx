@@ -67,13 +67,6 @@ interface SocialLinks {
   [key: string]: string | undefined;
 }
 
-// Video item interface
-interface VideoItem {
-  id?: string;
-  url: string;
-  thumbnail?: string;
-}
-
 // Menu item interface
 interface MenuItem {
   id: string;
@@ -97,13 +90,10 @@ interface BusinessData {
   category: string;
   address?: string;
   phone?: string;
-  email?: string;
-  website?: string;
   location?: BusinessLocation | null;
   businessHours?: BusinessHours;
   paymentMethods?: string[];
   socialLinks?: SocialLinks;
-  videos?: VideoItem[];
   menu?: MenuItem[];
   menuUrl?: string;
   images?: Array<{id?: string, url: string, isMain?: boolean}>;
@@ -118,7 +108,6 @@ const CALLBACK_IDS = {
   BUSINESS_HOURS: 'businessHours_callback',
   PAYMENT_METHODS: 'paymentMethods_callback',
   SOCIAL_LINKS: 'socialLinks_callback',
-  VIDEO_MANAGER: 'videoManager_callback',
   MENU_EDITOR: 'menuEditor_callback',
   RESERVATION_SETTINGS: 'reservationSettings_callback'
 };
@@ -165,8 +154,6 @@ const AddBusinessScreen: React.FC = () => {
   const [category, setCategory] = useState('');
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const [website, setWebsite] = useState('');
   const [image, setImage] = useState<string | null>(null);
   
   // Advanced business details
@@ -174,7 +161,6 @@ const AddBusinessScreen: React.FC = () => {
   const [businessHours, setBusinessHours] = useState<BusinessHours | undefined>(undefined);
   const [paymentMethods, setPaymentMethods] = useState<string[]>([]);
   const [socialLinks, setSocialLinks] = useState<SocialLinks | undefined>(undefined);
-  const [videos, setVideos] = useState<VideoItem[]>([]);
   const [menu, setMenu] = useState<MenuItem[]>([]);
   const [menuUrl, setMenuUrl] = useState('');
   
@@ -210,9 +196,9 @@ const AddBusinessScreen: React.FC = () => {
   // Track form changes - Fix the infinite loop by using a flag
   useEffect(() => {
     // Only update if content actually changed (not just on initial render)
-    if (name || description || category || address || phone || email || website || image || 
+    if (name || description || category || address || phone || image || 
         location || businessHours || paymentMethods?.length || 
-        socialLinks || videos.length || menu.length || menuUrl) {
+        socialLinks || menu.length || menuUrl) {
       if (!hasUnsavedChanges) {
         setHasUnsavedChanges(true);
       }
@@ -220,8 +206,8 @@ const AddBusinessScreen: React.FC = () => {
       // Reset flag if no content
       setHasUnsavedChanges(false);
     }
-  }, [name, description, category, address, phone, email, website, image, 
-      location, businessHours, paymentMethods, socialLinks, videos, menu, menuUrl, hasUnsavedChanges]);
+  }, [name, description, category, address, phone, image, 
+      location, businessHours, paymentMethods, socialLinks, menu, menuUrl, hasUnsavedChanges]);
 
   // Handle back button to prevent accidental navigation away
   useFocusEffect(
@@ -270,11 +256,6 @@ const AddBusinessScreen: React.FC = () => {
       store.setCallback(CALLBACK_IDS.SOCIAL_LINKS, (links: SocialLinks) => {
         console.log('SocialLinks callback executed with data:', links);
         setSocialLinks(links);
-      });
-      
-      store.setCallback(CALLBACK_IDS.VIDEO_MANAGER, (newVideos: VideoItem[]) => {
-        console.log('VideoManager callback executed with data:', newVideos);
-        setVideos(newVideos);
       });
       
       store.setCallback(CALLBACK_IDS.MENU_EDITOR, (newMenu: MenuItem[], newMenuUrl: string) => {
@@ -489,19 +470,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  const navigateToVideoManager = () => {
-    try {
-      navigation.navigate('VideoManager' as keyof RootStackParamList, {
-        businessId: 'new_business', 
-        initialVideos: videos,
-        callbackId: CALLBACK_IDS.VIDEO_MANAGER
-      } as any);
-    } catch (error) {
-      console.error('Error navegando a VideoManager:', error);
-      Alert.alert('Error', 'No se pudo abrir la pantalla de videos. Intente nuevamente.');
-    }
-  };
-
   const navigateToMenuEditor = () => {
     try {
       navigation.navigate('MenuEditor' as keyof RootStackParamList, {
@@ -546,18 +514,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Validar correo electrónico
-  const validateEmail = (email: string) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return email === '' || emailRegex.test(email);
-  };
-
-  // Validar URL de sitio web
-  const validateWebsite = (website: string) => {
-    const urlRegex = /^(https?:\/\/)?(www\.)?[a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_+.~#?&//=]*)$/;
-    return website === '' || urlRegex.test(website);
-  };
-
   // Validar teléfono
   const validatePhone = (phone: string) => {
     const phoneRegex = /^[0-9+\-\s()]{7,20}$/;
@@ -585,16 +541,6 @@ const AddBusinessScreen: React.FC = () => {
     // Validar categoría
     if (!category.trim()) {
       newErrors.category = 'La categoría del negocio es obligatoria';
-    }
-    
-    // Validar email
-    if (email && !validateEmail(email)) {
-      newErrors.email = 'Por favor, ingrese un correo electrónico válido';
-    }
-    
-    // Validar sitio web
-    if (website && !validateWebsite(website)) {
-      newErrors.website = 'Por favor, ingrese un sitio web válido';
     }
     
     // Validar teléfono
@@ -653,13 +599,10 @@ const AddBusinessScreen: React.FC = () => {
         category,
         ...(address ? { address } : {}),
         ...(phone ? { phone } : {}),
-        ...(email ? { email } : {}),
-        ...(website ? { website } : {}),
         ...(location ? { location } : {}),
         ...(businessHours && Object.keys(businessHours).length > 0 ? { businessHours } : {}),
         ...(paymentMethods && paymentMethods.length > 0 ? { paymentMethods } : {}),
         ...(socialLinks && Object.keys(socialLinks).length > 0 ? { socialLinks } : {}),
-        ...(videos && videos.length > 0 ? { videos } : {}),
         ...(menu && menu.length > 0 ? { menu } : {}),
         ...(menuUrl ? { menuUrl } : {}),
         acceptsReservations,
@@ -950,42 +893,6 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
-  // Actualizar email con validación
-  const handleEmailChange = (text: string) => {
-    setEmail(text);
-    
-    if (text && !validateEmail(text)) {
-      setValidationErrors(prev => ({
-        ...prev,
-        email: 'Formato de email inválido'
-      }));
-    } else {
-      setValidationErrors(prev => {
-        const newErrors = {...prev};
-        delete newErrors.email;
-        return newErrors;
-      });
-    }
-  };
-
-  // Actualizar sitio web con validación
-  const handleWebsiteChange = (text: string) => {
-    setWebsite(text);
-    
-    if (text && !validateWebsite(text)) {
-      setValidationErrors(prev => ({
-        ...prev,
-        website: 'Formato de URL inválida'
-      }));
-    } else {
-      setValidationErrors(prev => {
-        const newErrors = {...prev};
-        delete newErrors.website;
-        return newErrors;
-      });
-    }
-  };
-
   // Actualizar teléfono con validación
   const handlePhoneChange = (text: string) => {
     // Limpiar caracteres no válidos
@@ -1204,44 +1111,6 @@ const AddBusinessScreen: React.FC = () => {
                   <Text style={styles.errorText}>{validationErrors.phone}</Text>
                 )}
               </View>
-              
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Correo Electrónico</Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    validationErrors.email ? styles.inputError : null
-                  ]}
-                  value={email}
-                  onChangeText={handleEmailChange}
-                  placeholder="contacto@minegocio.com"
-                  placeholderTextColor="#8E8E93"
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                />
-                {validationErrors.email && (
-                  <Text style={styles.errorText}>{validationErrors.email}</Text>
-                )}
-              </View>
-              
-              <View style={styles.formGroup}>
-                <Text style={styles.label}>Sitio Web</Text>
-                <TextInput
-                  style={[
-                    styles.input,
-                    validationErrors.website ? styles.inputError : null
-                  ]}
-                  value={website}
-                  onChangeText={handleWebsiteChange}
-                  placeholder="www.minegocio.com"
-                  placeholderTextColor="#8E8E93"
-                  autoCapitalize="none"
-                  keyboardType="url"
-                />
-                {validationErrors.website && (
-                  <Text style={styles.errorText}>{validationErrors.website}</Text>
-                )}
-              </View>
             </View>
             
             {/* Advanced Settings */}
@@ -1284,19 +1153,6 @@ const AddBusinessScreen: React.FC = () => {
                   name="check-circle" 
                   size={24} 
                   color={socialLinks && Object.keys(socialLinks).length > 0 ? "#34C759" : "#E5E5EA"} 
-                />
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.advancedButton}
-                onPress={navigateToVideoManager}
-              >
-                <MaterialIcons name="videocam" size={24} color="#007AFF" />
-                <Text style={styles.advancedButtonText}>Videos</Text>
-                <MaterialIcons 
-                  name="check-circle" 
-                  size={24} 
-                  color={videos.length > 0 ? "#34C759" : "#E5E5EA"} 
                 />
               </TouchableOpacity>
               
