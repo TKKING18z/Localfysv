@@ -12,6 +12,7 @@ export interface BusinessHours {
   friday?: DayHours;
   saturday?: DayHours;
   sunday?: DayHours;
+  [key: string]: DayHours | undefined; // Add this index signature
 }
 
 export interface DayHours {

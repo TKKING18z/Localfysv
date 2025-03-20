@@ -35,9 +35,9 @@ import EnhancedGallery from '../components/EnhancedGallery';
 import VideoPlayer from '../components/VideoPlayer';
 import SocialLinks from '../components/SocialLinks';
 import MenuViewer from '../components/MenuViewer';
-import ReviewList from '../../components/reviews/ReviewList';
 import ReviewForm from '../../components/reviews/ReviewForm';
 import PromoCard from '../components/promotions/PromoCard';
+import ReviewList from '../components/ReviewList'; // Use the component we updated
 
 // Constants
 const HEADER_HEIGHT = 350;
@@ -79,6 +79,12 @@ const BusinessDetailScreen: React.FC = () => {
   const favoriteScale = useRef(new Animated.Value(1)).current;
   const tabBarOpacity = useRef(new Animated.Value(0)).current;
   const actionButtonsY = useRef(new Animated.Value(100)).current;
+
+  // Additional state for reviews
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [loadingReviews, setLoadingReviews] = useState(false);
+  const [reviewActiveFilter, setReviewActiveFilter] = useState<number | null>(null);
+  const [reviewSortBy, setReviewSortBy] = useState<'recent' | 'rating' | 'relevant'>('recent');
 
   // Comprobar si el usuario es propietario del negocio
   useEffect(() => {
@@ -375,6 +381,84 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Distancia formateada
   const distance = business ? getFormattedDistance(business) : null;
+
+  // Load reviews when tab changes to 'reseñas'
+  useEffect(() => {
+    if (activeTab === 'reseñas') {
+      loadBusinessReviews();
+    }
+  }, [activeTab, businessId]);
+
+  // Function to load reviews
+  const loadBusinessReviews = useCallback(async () => {
+    try {
+      setLoadingReviews(true);
+      // Implementation depends on your firebaseService structure
+      const result = await firebaseService.reviews.getByBusinessId(businessId);
+      if (result.success && result.data) {
+        setReviews(result.data);
+      } else {
+        setReviews([]);
+      }
+    } catch (error) {
+      console.error('Error loading reviews:', error);
+      setReviews([]);
+    } finally {
+      setLoadingReviews(false);
+    }
+  }, [businessId]);
+
+  // Review action handlers
+  const handleReplyReview = (reviewId: string) => {
+    // Implement reply logic (could open a form, navigate, etc.)
+    console.log('Reply to review:', reviewId);
+  };
+
+  const handleReportReview = (reviewId: string) => {
+    // Implement report logic
+    Alert.alert(
+      'Reportar Reseña',
+      '¿Estás seguro de que quieres reportar esta reseña?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Reportar', style: 'destructive', onPress: () => console.log('Report review:', reviewId) }
+      ]
+    );
+  };
+
+  const handleEditReview = (review: any) => {
+    // Implement edit logic
+    console.log('Edit review:', review);
+    // Could open the review form with prefilled data
+  };
+
+  const handleDeleteReview = (reviewId: string) => {
+    // Implement delete logic
+    Alert.alert(
+      'Eliminar Reseña',
+      '¿Estás seguro de que quieres eliminar esta reseña?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { 
+          text: 'Eliminar', 
+          style: 'destructive', 
+          onPress: async () => {
+            try {
+              // Implementation depends on your service structure
+              const result = await firebaseService.reviews.delete(reviewId);
+              if (result.success) {
+                // Refresh reviews after deletion
+                loadBusinessReviews();
+              }
+            } catch (error) {
+              console.error('Error deleting review:', error);
+              Alert.alert('Error', 'No se pudo eliminar la reseña');
+            }
+          } 
+        }
+      ]
+    );
+  };
 
   // Estados renderizados
   if (loading) {
@@ -923,10 +1007,21 @@ const BusinessDetailScreen: React.FC = () => {
               </View>
               
               <ReviewList 
-                businessId={businessId} // Add the required businessId prop
+                businessId={businessId}
+                isBusinessOwner={isBusinessOwner}
+                business={business}
+                reviews={reviews}
+                currentUserId={user?.uid || ""}
+                loading={loadingReviews}
                 onAddReview={() => setShowReviewForm(true)}
-                isBusinessOwner={isBusinessOwner} // Changed from isOwner to isBusinessOwner
-                business={business} // Optional but can keep it
+                onReply={handleReplyReview}
+                onReport={handleReportReview}
+                onEditReview={handleEditReview}
+                onDeleteReview={handleDeleteReview}
+                activeFilter={reviewActiveFilter}
+                onFilterChange={setReviewActiveFilter}
+                sortBy={reviewSortBy}
+                onSortChange={setReviewSortBy}
               />
             </View>
           )}

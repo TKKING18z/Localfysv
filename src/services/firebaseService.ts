@@ -851,5 +851,38 @@ export const firebaseService = {
         return { success: false, error: handleFirebaseError(error, 'reservations/checkAvailability') };
       }
     }
+  },
+
+  reviews: {
+    getByBusinessId: async (businessId: string): Promise<FirebaseResponse<any[]>> => {
+      try {
+        const reviewsRef = firebase.firestore().collection('reviews')
+          .where('businessId', '==', businessId)
+          .orderBy('createdAt', 'desc');
+        
+        const snapshot = await reviewsRef.get();
+        const reviews = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        return { success: true, data: reviews };
+      } catch (error) {
+        console.error('Error fetching reviews:', error);
+        return { success: false, error: { message: 'Failed to fetch reviews' } };
+      }
+    },
+    
+    delete: async (reviewId: string): Promise<FirebaseResponse<void>> => {
+      try {
+        await firebase.firestore().collection('reviews').doc(reviewId).delete();
+        return { success: true };
+      } catch (error) {
+        console.error('Error deleting review:', error);
+        return { success: false, error: { message: 'Failed to delete review' } };
+      }
+    },
+    
+    // Add other review-related methods as needed
   }
 };

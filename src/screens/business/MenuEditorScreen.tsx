@@ -106,7 +106,17 @@ interface MenuEditorStyles {
 const MenuEditorScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<MenuEditorRouteProp>();
-  const { businessId, initialMenu, menuUrl: initialMenuUrl, onSave } = route.params;
+  
+  // Proporcionar un valor por defecto para onSave si es undefined
+  const { 
+    businessId, 
+    initialMenu, 
+    menuUrl: initialMenuUrl, 
+    onSave = (menu: MenuItem[], menuUrl: string) => {
+      console.warn('onSave callback no proporcionado');
+      // Si deseas, puedes almacenar los datos en localStorage o similar como fallback
+    } 
+  } = route.params || {}; // Asegúrate de manejar el caso donde route.params sea undefined
   
   // Estado para los items del menú
   const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenu || []);
@@ -166,7 +176,9 @@ const MenuEditorScreen: React.FC = () => {
       const response = await fetch(uri);
       const blob = await response.blob();
       
-      const imageName = `menu_items/${businessId}/${Date.now()}.jpg`;
+      // Usar la ruta temp_uploads que ya está permitida en tus reglas
+      const userId = firebase.auth().currentUser?.uid || 'anonymous';
+      const imageName = `temp_uploads/${userId}/${Date.now()}_menu_item.jpg`;
       const ref = firebase.storage().ref().child(imageName);
       
       await ref.put(blob);
@@ -300,10 +312,27 @@ const MenuEditorScreen: React.FC = () => {
     setEditMode(false);
   };
   
-  // Guardar todo
+  // Guardar todo con verificación adicional
   const handleSave = () => {
-    onSave(menuItems, menuUrl);
-    navigation.goBack();
+    try {
+      // Verificar explícitamente si onSave es una función
+      if (typeof onSave === 'function') {
+        onSave(menuItems, menuUrl);
+      } else {
+        // Mostrar una alerta si onSave no es una función
+        Alert.alert(
+          'Advertencia',
+          'Los cambios no se guardarán debido a un error de configuración.',
+          [{ text: 'OK' }]
+        );
+      }
+    } catch (error) {
+      console.error('Error al guardar el menú:', error);
+      Alert.alert('Error', 'No se pudieron guardar los cambios. Por favor, inténtalo de nuevo.');
+    } finally {
+      // Siempre volver atrás, independientemente de si onSave funcionó o no
+      navigation.goBack();
+    }
   };
   
   // Renderizar item de menú

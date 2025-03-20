@@ -5,7 +5,8 @@ import { Review, ReviewSortMethod } from '../../src/types';
 import { Review as ModelReview } from '../../models/reviewTypes';
 import { colors, spacing } from '../../theme';
 import StarRating from '../../components/reviews/StarRating';
-import { Business } from '../types/businessTypes'; // Add this import
+// Change the import to use Business from context instead of types/businessTypes
+import { Business } from '../context/BusinessContext';
 
 interface ReviewListProps {
   // Core props
@@ -13,7 +14,7 @@ interface ReviewListProps {
   isBusinessOwner: boolean;
   
   // Optional props
-  business?: Business;
+  business?: Business; // Now using Business from context
   reviews?: any[];
   currentUserId?: string;
   loading?: boolean;
