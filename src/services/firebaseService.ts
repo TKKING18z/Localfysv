@@ -536,7 +536,7 @@ export const firebaseService = {
     }
   },
 
-  // Nuevo servicio para reservas
+  // Servicio de reservaciones actualizado
   reservations: {
     getByBusinessId: async (businessId: string, status?: string): Promise<FirebaseResponse<Reservation[]>> => {
       try {
@@ -617,6 +617,30 @@ export const firebaseService = {
 
     create: async (data: Omit<Reservation, 'id'>): Promise<FirebaseResponse<{id: string}>> => {
       try {
+        // Validar que haya información básica
+        if (!data.businessId || !data.userId || 
+            !data.date || !data.time) {
+          return { 
+            success: false, 
+            error: { message: 'Datos incompletos para la reserva' } 
+          };
+        }
+
+        // Verificar disponibilidad
+        const isAvailable = await firebaseService.reservations.checkAvailability(
+          data.businessId,
+          data.date,
+          data.time,
+          data.partySize || 1
+        );
+
+        if (!isAvailable.success || !isAvailable.data) {
+          return { 
+            success: false, 
+            error: { message: 'Horario no disponible para reservación' } 
+          };
+        }
+
         const cleanedData = cleanDataForFirestore(data);
         const docRef = await firebase.firestore().collection('reservations').add({
           ...cleanedData,
@@ -674,13 +698,19 @@ export const firebaseService = {
           .get();
           
         if (!doc.exists) {
+          // No existe configuración, devolver valores predeterminados
           return { 
-            success: false, 
-            error: { message: 'No hay información de disponibilidad para este negocio' } 
+            success: true,
+            data: {
+              businessId,
+              availableDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
+              timeSlots: ['12:00', '13:00', '14:00', '15:00', '19:00', '20:00'],
+              maxPartySizes: [1, 2, 3, 4, 5, 6, 7, 8, 10, 12]
+            } 
           };
         }
         
-        // Convertir los datos correcti
+        // Convertir los datos
         const data = doc.data();
         
         // Verificar que los datos contienen las propiedades necesarias
@@ -708,17 +738,117 @@ export const firebaseService = {
       }
     },
     
-    saveAvailability: async (data: ReservationAvailability): Promise<FirebaseResponse<null>> => {
+    updateAvailability: async (availability: ReservationAvailability): Promise<FirebaseResponse<null>> => {
       try {
-        const cleanedData = cleanDataForFirestore(data);
+        const cleanedData = cleanDataForFirestore(availability);
         await firebase.firestore()
           .collection('reservation_availability')
-          .doc(data.businessId)
+          .doc(availability.businessId)
           .set(cleanedData, { merge: true });
-          
+        
         return { success: true };
       } catch (error) {
-        return { success: false, error: handleFirebaseError(error, 'reservations/saveAvailability') };
+        return { success: false, error: handleFirebaseError(error, 'reservations/updateAvailability') };
+      }
+    },
+    
+    checkAvailability: async (
+      businessId: string, 
+      date: firebase.firestore.Timestamp,
+      time: string,
+      partySize: number
+    ): Promise<FirebaseResponse<boolean>> => {
+      try {
+        // 1. Verificar configuración de disponibilidad
+        const availabilityResult = await firebaseService.reservations.getAvailability(businessId);
+        
+        if (!availabilityResult.success || !availabilityResult.data) {
+          return { success: false, error: availabilityResult.error };
+        }
+        
+        const availability = availabilityResult.data;
+        
+        // 2. Verificar día de la semana
+        const dateObj = date.toDate();
+        const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][dateObj.getDay()];
+        
+        if (!availability.availableDays.includes(dayOfWeek)) {
+          return { 
+            success: false, 
+            error: { 
+              message: 'Este día no está disponible para reservaciones',
+              code: 'reservation/day-unavailable'
+            } 
+          };
+        }
+        
+        // 3. Verificar fechas excluidas
+        if (availability.unavailableDates) {
+          const dateString = dateObj.toISOString().split('T')[0];
+          if (availability.unavailableDates.includes(dateString)) {
+            return { 
+              success: false, 
+              error: { 
+                message: 'Esta fecha no está disponible para reservaciones',
+                code: 'reservation/date-unavailable'
+              } 
+            };
+          }
+        }
+        
+        // 4. Verificar horario
+        // Si hay horarios especiales para esta fecha, usarlos
+        const dateString = dateObj.toISOString().split('T')[0];
+        const specialSchedule = availability.specialSchedules?.[dateString];
+        
+        const timeSlots = specialSchedule?.timeSlots || availability.timeSlots;
+        if (!timeSlots.includes(time)) {
+          return { 
+            success: false, 
+            error: { 
+              message: 'Este horario no está disponible',
+              code: 'reservation/time-unavailable'
+            } 
+          };
+        }
+        
+        // 5. Verificar capacidad para el tamaño del grupo
+        if (!availability.maxPartySizes.some(size => size >= partySize)) {
+          return { 
+            success: false, 
+            error: { 
+              message: 'No se admite este número de personas',
+              code: 'reservation/party-size-unavailable'
+            } 
+          };
+        }
+        
+        // 6. Verificar si ya hay muchas reservas para este horario
+        // Esto podría implementarse de muchas formas, esta es una muy simple:
+        const existingReservationsSnapshot = await firebase.firestore()
+          .collection('reservations')
+          .where('businessId', '==', businessId)
+          .where('date', '==', date)
+          .where('time', '==', time)
+          .where('status', 'in', ['pending', 'confirmed'])
+          .get();
+        
+        // Si hay más de N reservas, considerar como no disponible
+        // Este número dependerá de la naturaleza del negocio
+        if (existingReservationsSnapshot.size >= 3) {
+          return { 
+            success: false, 
+            error: { 
+              message: 'No hay disponibilidad para este horario',
+              code: 'reservation/time-full'
+            } 
+          };
+        }
+        
+        // Todo bien, horario disponible
+        return { success: true, data: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'reservations/checkAvailability') };
       }
     }
   }

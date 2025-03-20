@@ -13,19 +13,23 @@ import {
   Platform,
   ScrollView,
   Switch,
-  TextInput
+  TextInput,
+  SectionList
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { firebaseService } from '../../services/firebaseService';
+import { reservationService } from '../../../services/reservationService';
 import { RootStackParamList } from '../../navigation/AppNavigator';
-import { Reservation, Business, ReservationSettings } from '../../types/businessTypes';
+import { Reservation, ReservationSettings, DEFAULT_TIME_SLOTS, DEFAULT_AVAILABLE_DAYS } from '../../../models/reservationTypes';
 import ReservationCard from '../../components/reservations/ReservationCard';
 import ReservationForm from '../../components/reservations/ReservationForm';
+import ReservationDetailModal from '../../components/reservations/ReservationDetailModal';
 import { useAuth } from '../../context/AuthContext';
 import { useStore } from '../../context/StoreContext';
+import { useReservations, ReservationFilter } from '../../../hooks/useReservations';
+import firebase from 'firebase/compat/app';
 
 // Definir explícitamente los parámetros que espera esta pantalla
 type ReservationsScreenParams = {
@@ -38,8 +42,6 @@ type ReservationsScreenParams = {
 type ReservationsRouteProp = RouteProp<{ params: ReservationsScreenParams }, 'params'>;
 type NavigationProp = StackNavigationProp<RootStackParamList>;
 
-type FilterStatus = 'all' | 'pending' | 'confirmed' | 'canceled' | 'completed';
-
 const ReservationsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<ReservationsRouteProp>();
@@ -47,36 +49,54 @@ const ReservationsScreen: React.FC = () => {
   const { user } = useAuth();
   const store = useStore();
   
-  // Estados
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
-  const [showModal, setShowModal] = useState(false);
+  // Estados de UI
+  const [showReservationForm, setShowReservationForm] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const [isBusinessOwner, setIsBusinessOwner] = useState(false);
-  const [_, setBusiness] = useState<Business | null>(null);
+  const [newTimeSlot, setNewTimeSlot] = useState('');
+
+  // Configuración de reservaciones
   const [reservationSettings, setReservationSettings] = useState<ReservationSettings>({
     enabled: true,
     maxGuestsPerTable: 10,
-    timeSlots: ['12:00', '13:00', '14:00', '19:00', '20:00'],
-    availableDays: ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday']
+    timeSlots: DEFAULT_TIME_SLOTS,
+    availableDays: DEFAULT_AVAILABLE_DAYS
   });
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [newTimeSlot, setNewTimeSlot] = useState('');
+
+  // Check if this is a temporary business for setup
+  const isTempBusiness = businessId === 'new_business' || (businessId && businessId.toString().startsWith('temp_'));
   
+  // Usar hook personalizado para gestionar reservaciones
+  const {
+    reservations,
+    loading,
+    error,
+    refreshing,
+    filter,
+    setFilter,
+    refresh,
+    cancelReservation,
+    confirmReservation,
+    completeReservation,
+    getReservationsByDate
+  } = useReservations({
+    userId: isBusinessOwner ? undefined : user?.uid,
+    businessId: isBusinessOwner ? businessId : businessId,
+    initialFilter: ReservationFilter.ACTIVE
+  });
+
   // Initialize reservation settings from store if this is a new business
   useEffect(() => {
-    if (isNewBusiness) {
+    if (isTempBusiness) {
       const tempSettings = store.getTempData('tempReservationSettings');
       if (tempSettings) {
         setReservationSettings(tempSettings);
       }
     }
-  }, [isNewBusiness, store]);
+  }, [isTempBusiness, store]);
 
-  // Check if this is a temporary business for setup
-  const isTempBusiness = businessId.toString().startsWith('temp_');
-  
   // Comprobar si el usuario es el propietario del negocio
   useEffect(() => {
     const checkOwnership = async () => {
@@ -89,16 +109,18 @@ const ReservationsScreen: React.FC = () => {
       }
       
       try {
-        const businessData = await firebaseService.businesses.getById(businessId);
+        const businessData = await firebase.firestore()
+          .collection('businesses')
+          .doc(businessId)
+          .get();
         
-        if (businessData.success && businessData.data) {
-          const businessDetails: Business = businessData.data as unknown as Business;
-          setBusiness(businessDetails);
-          setIsBusinessOwner(businessDetails.createdBy === user.uid);
+        if (businessData.exists) {
+          const businessDoc = businessData.data();
+          setIsBusinessOwner(businessDoc?.createdBy === user.uid);
           
           // Cargar configuración de reservaciones si existe
-          if (businessDetails.reservationSettings) {
-            setReservationSettings(businessDetails.reservationSettings);
+          if (businessDoc?.reservationSettings) {
+            setReservationSettings(businessDoc.reservationSettings);
           }
         }
       } catch (error) {
@@ -108,185 +130,55 @@ const ReservationsScreen: React.FC = () => {
     
     checkOwnership();
   }, [businessId, user, isTempBusiness]);
-  
-  // Cargar reservaciones apropiadas según el rol del usuario
-  const loadReservations = useCallback(async () => {
-    try {
-      setLoading(true);
-      
-      // For temporary businesses, we don't need to load reservations
-      if (isTempBusiness) {
-        setReservations([]);
-        setLoading(false);
-        return;
-      }
-      
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-      
-      let result;
-      
-      if (isBusinessOwner) {
-        // Si es propietario, obtiene todas las reservas del negocio
-        result = await firebaseService.reservations.getByBusinessId(businessId);
-      } else {
-        // Si es cliente, solo obtiene sus propias reservas para este negocio
-        result = await firebaseService.reservations.getByUserAndBusinessId(
-          user.uid,
-          businessId
-        );
-      }
-      
-      if (result.success && result.data) {
-        setReservations(result.data);
-      } else {
-        console.error('Error cargando reservaciones:', result.error);
-      }
-    } catch (error) {
-      console.error('Error en loadReservations:', error);
-      Alert.alert('Error', 'Error inesperado al cargar reservaciones');
-    } finally {
-      setLoading(false);
-    }
-  }, [businessId, user, isBusinessOwner, isTempBusiness]);
-  
-  // Cargar al montar el componente o cuando cambie isBusinessOwner
-  useEffect(() => {
-    if (user) {
-      loadReservations();
-    }
-  }, [loadReservations, user, isBusinessOwner]);
-  
-  // Función de actualización (pull to refresh)
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadReservations();
-    setRefreshing(false);
-  }, [loadReservations]);
-  
-  // Cancelar reserva
-  const handleCancelReservation = useCallback((reservationId: string) => {
-    Alert.alert(
-      'Cancelar Reserva',
-      '¿Está seguro que desea cancelar esta reserva?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sí, cancelar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const result = await firebaseService.reservations.updateStatus(
-                reservationId,
-                'canceled'
-              );
-              
-              if (result.success) {
-                // Actualizar lista localmente para reflejar cambio
-                setReservations(prev => 
-                  prev.map(res => 
-                    res.id === reservationId 
-                      ? { ...res, status: 'canceled' }
-                      : res
-                  )
-                );
-                
-                Alert.alert('Éxito', 'Reserva cancelada correctamente');
-              } else {
-                throw new Error(result.error?.message);
-              }
-            } catch (error) {
-              console.error('Error al cancelar reserva:', error);
-              Alert.alert('Error', 'No se pudo cancelar la reserva');
-            }
-          }
-        }
-      ]
-    );
-  }, []);
-  
-  // Confirmar reserva
-  const handleConfirmReservation = useCallback((reservationId: string) => {
-    Alert.alert(
-      'Confirmar Reserva',
-      '¿Desea confirmar esta reserva?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sí, confirmar',
-          onPress: async () => {
-            try {
-              const result = await firebaseService.reservations.updateStatus(
-                reservationId,
-                'confirmed'
-              );
-              
-              if (result.success) {
-                // Actualizar lista localmente
-                setReservations(prev => 
-                  prev.map(res => 
-                    res.id === reservationId 
-                      ? { ...res, status: 'confirmed' }
-                      : res
-                  )
-                );
-                
-                Alert.alert('Éxito', 'Reserva confirmada correctamente');
-              } else {
-                throw new Error(result.error?.message);
-              }
-            } catch (error) {
-              console.error('Error al confirmar reserva:', error);
-              Alert.alert('Error', 'No se pudo confirmar la reserva');
-            }
-          }
-        }
-      ]
-    );
-  }, []);
 
-  // Marcar como completada
-  const handleCompleteReservation = useCallback((reservationId: string) => {
-    Alert.alert(
-      'Completar Reserva',
-      '¿Desea marcar esta reserva como completada?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sí, completar',
-          onPress: async () => {
-            try {
-              const result = await firebaseService.reservations.updateStatus(
-                reservationId,
-                'completed'
-              );
-              
-              if (result.success) {
-                // Actualizar lista localmente
-                setReservations(prev => 
-                  prev.map(res => 
-                    res.id === reservationId 
-                      ? { ...res, status: 'completed' }
-                      : res
-                  )
-                );
-                
-                Alert.alert('Éxito', 'Reserva marcada como completada');
-              } else {
-                throw new Error(result.error?.message);
-              }
-            } catch (error) {
-              console.error('Error al completar reserva:', error);
-              Alert.alert('Error', 'No se pudo actualizar la reserva');
-            }
-          }
+  // Preparar datos para la lista seccionada
+  const prepareDataForSectionList = useCallback(() => {
+    const reservationsByDate = getReservationsByDate();
+    const sections = Object.keys(reservationsByDate).map(date => {
+      // Convertir fecha de "YYYY-MM-DD" a un formato más legible
+      let displayDate;
+      try {
+        const dateObj = new Date(date);
+        const today = new Date();
+        const tomorrow = new Date();
+        tomorrow.setDate(today.getDate() + 1);
+        
+        // Verificar si es hoy, mañana o una fecha específica
+        if (dateObj.toDateString() === today.toDateString()) {
+          displayDate = "Hoy";
+        } else if (dateObj.toDateString() === tomorrow.toDateString()) {
+          displayDate = "Mañana";
+        } else {
+          displayDate = dateObj.toLocaleDateString('es-ES', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          });
+          // Capitalizar primera letra
+          displayDate = displayDate.charAt(0).toUpperCase() + displayDate.slice(1);
         }
-      ]
-    );
-  }, []);
-  
+      } catch (error) {
+        console.error('Error formateando fecha:', error);
+        displayDate = date; // Fallback al formato original
+      }
+      
+      return {
+        title: displayDate,
+        data: reservationsByDate[date]
+      };
+    });
+    
+    // Ordenar secciones por fecha (más recientes primero)
+    sections.sort((a, b) => {
+      const dateA = a.data[0]?.date.toDate() || new Date();
+      const dateB = b.data[0]?.date.toDate() || new Date();
+      return dateA.getTime() - dateB.getTime(); // Orden ascendente
+    });
+    
+    return sections;
+  }, [getReservationsByDate]);
+
   // Añadir un nuevo horario disponible
   const addTimeSlot = () => {
     if (!newTimeSlot.match(/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/)) {
@@ -350,195 +242,245 @@ const ReservationsScreen: React.FC = () => {
       const updateData = {
         acceptsReservations: true,
         reservationSettings: reservationSettings
-      } as unknown as Partial<Business>;
+      };
       
-      const result = await firebaseService.businesses.update(businessId, updateData);
+      // Use transaction for atomicity
+      await firebase.firestore().runTransaction(async (transaction) => {
+        const businessRef = firebase.firestore().collection('businesses').doc(businessId);
+        transaction.update(businessRef, updateData);
+      });
       
-      if (result.success) {
-        Alert.alert('Éxito', 'Configuración de reservaciones actualizada');
-        setShowSettingsModal(false);
-      } else {
-        Alert.alert('Error', 'No se pudo guardar la configuración');
-      }
+      Alert.alert('Éxito', 'Configuración de reservaciones actualizada');
+      setShowSettingsModal(false);
     } catch (error) {
       console.error('Error al guardar configuración:', error);
       Alert.alert('Error', 'No se pudo actualizar la configuración');
     }
   };
-  
-  // Deshabilitar reservaciones
-  const disableReservations = async () => {
+
+  // Manejar creación de reserva exitosa
+  const handleReservationSuccess = (reservationId: string) => {
+    setShowReservationForm(false);
+    refresh();
     Alert.alert(
-      'Deshabilitar Reservaciones',
-      '¿Está seguro que desea deshabilitar las reservaciones para su negocio?',
-      [
-        { text: 'No', style: 'cancel' },
-        {
-          text: 'Sí, deshabilitar',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const updateData = {
-                acceptsReservations: false
-              } as unknown as Partial<Business>;
-              
-              const result = await firebaseService.businesses.update(businessId, updateData);
-              
-              if (result.success) {
-                Alert.alert(
-                  'Reservaciones deshabilitadas',
-                  'Las reservaciones han sido deshabilitadas para tu negocio',
-                  [{ text: 'OK', onPress: () => navigation.goBack() }]
-                );
-              } else {
-                Alert.alert('Error', 'No se pudo actualizar la configuración');
-              }
-            } catch (error) {
-              console.error('Error al deshabilitar reservaciones:', error);
-              Alert.alert('Error', 'No se pudo actualizar la configuración');
-            }
-          }
-        }
-      ]
+      'Reserva Exitosa',
+      'Tu reserva ha sido creada con éxito. Recibirás una confirmación pronto.'
     );
   };
-  
-  // Filtrar reservaciones
-  const filteredReservations = reservations.filter(reservation => {
-    if (filterStatus === 'all') return true;
-    return reservation.status === filterStatus;
-  });
-  
-  // Renderizar reservación - adaptado según el rol
+
+  // Renderizar cada reservación
   const renderReservation = ({ item }: { item: Reservation }) => (
     <ReservationCard
       reservation={item}
       onCancelReservation={
         (item.status === 'pending' || item.status === 'confirmed') ? 
-          handleCancelReservation : undefined
+          cancelReservation : undefined
       }
       onPress={() => {
-        // Si es propietario, mostrar opciones adicionales
-        if (isBusinessOwner && item.status === 'pending') {
-          Alert.alert(
-            'Gestionar Reserva',
-            '¿Qué acción desea realizar?',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Confirmar reserva', onPress: () => handleConfirmReservation(item.id) },
-              { text: 'Rechazar reserva', onPress: () => handleCancelReservation(item.id) }
-            ]
-          );
-        } else if (isBusinessOwner && item.status === 'confirmed') {
-          Alert.alert(
-            'Gestionar Reserva',
-            '¿Qué acción desea realizar?',
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              { text: 'Marcar como completada', onPress: () => handleCompleteReservation(item.id) },
-              { text: 'Cancelar reserva', onPress: () => handleCancelReservation(item.id) }
-            ]
-          );
-        }
+        setSelectedReservation(item);
+        setShowDetailModal(true);
       }}
       isBusinessView={isBusinessOwner}
     />
   );
-  
+
+  // Renderizar cabecera de sección
+  const renderSectionHeader = ({ section }: { section: { title: string, data: Reservation[] } }) => (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{section.title}</Text>
+    </View>
+  );
+
+  // Estados de UI vacíos
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <MaterialIcons name="event-busy" size={64} color="#E1E1E1" />
+      <Text style={styles.emptyText}>
+        {isBusinessOwner 
+          ? "No hay reservaciones para mostrar" 
+          : "No tienes reservaciones en este negocio"}
+      </Text>
+      {!isBusinessOwner && (
+        <TouchableOpacity 
+          style={styles.makeReservationButton}
+          onPress={() => setShowReservationForm(true)}
+        >
+          <LinearGradient
+            colors={['#007AFF', '#00C2FF']}
+            style={styles.buttonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <MaterialIcons name="add" size={24} color="white" />
+            <Text style={styles.buttonText}>Hacer Reserva</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  // Renderizar filtros
+  const renderFilters = () => (
+    <View style={styles.filterContainer}>
+      <ScrollView 
+        horizontal 
+        showsHorizontalScrollIndicator={false} 
+        contentContainerStyle={styles.filterScrollContent}
+      >
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === ReservationFilter.ACTIVE && styles.filterButtonActive
+          ]}
+          onPress={() => setFilter(ReservationFilter.ACTIVE)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === ReservationFilter.ACTIVE && styles.filterButtonTextActive
+            ]}
+          >
+            Activas
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === ReservationFilter.PENDING && styles.filterButtonActive
+          ]}
+          onPress={() => setFilter(ReservationFilter.PENDING)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === ReservationFilter.PENDING && styles.filterButtonTextActive
+            ]}
+          >
+            Pendientes
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === ReservationFilter.CONFIRMED && styles.filterButtonActive
+          ]}
+          onPress={() => setFilter(ReservationFilter.CONFIRMED)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === ReservationFilter.CONFIRMED && styles.filterButtonTextActive
+            ]}
+          >
+            Confirmadas
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === ReservationFilter.INACTIVE && styles.filterButtonActive
+          ]}
+          onPress={() => setFilter(ReservationFilter.INACTIVE)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === ReservationFilter.INACTIVE && styles.filterButtonTextActive
+            ]}
+          >
+            Historial
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.filterButton,
+            filter === ReservationFilter.ALL && styles.filterButtonActive
+          ]}
+          onPress={() => setFilter(ReservationFilter.ALL)}
+        >
+          <Text
+            style={[
+              styles.filterButtonText,
+              filter === ReservationFilter.ALL && styles.filterButtonTextActive
+            ]}
+          >
+            Todas
+          </Text>
+        </TouchableOpacity>
+      </ScrollView>
+    </View>
+  );
+
+  // Renderización principal
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
-          <MaterialIcons name="arrow-back" size={24} color="black" />
+          <MaterialIcons name="arrow-back" size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>
           {isBusinessOwner ? `Reservaciones - ${businessName}` : `Mis Reservas en ${businessName}`}
         </Text>
         {isBusinessOwner ? (
           <TouchableOpacity onPress={() => setShowSettingsModal(true)}>
-            <MaterialIcons name="settings" size={24} color="black" />
+            <MaterialIcons name="settings" size={24} color="#333" />
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity onPress={() => setShowModal(true)}>
-            <MaterialIcons name="add" size={24} color="black" />
+          <TouchableOpacity onPress={() => setShowReservationForm(true)}>
+            <MaterialIcons name="add" size={24} color="#333" />
           </TouchableOpacity>
         )}
       </View>
       
-      <View style={styles.filterContainer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterScrollContent}>
-          {['all', 'pending', 'confirmed', 'canceled', 'completed'].map(status => (
-            <TouchableOpacity
-              key={status}
-              style={[
-                styles.filterButton,
-                filterStatus === status && styles.filterButtonActive
-              ]}
-              onPress={() => setFilterStatus(status as FilterStatus)}
-            >
-              <Text
-                style={[
-                  styles.filterButtonText,
-                  filterStatus === status && styles.filterButtonTextActive
-                ]}
-              >
-                {status === 'all' ? 'Todas' :
-                 status === 'pending' ? 'Pendientes' :
-                 status === 'confirmed' ? 'Confirmadas' :
-                 status === 'canceled' ? 'Canceladas' : 'Completadas'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
+      {/* Filtros */}
+      {renderFilters()}
       
-      {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0000ff" />
-          <Text style={styles.loadingText}>Cargando reservaciones...</Text>
-        </View>
-      ) : filteredReservations.length > 0 ? (
-        <FlatList
-          data={filteredReservations}
-          renderItem={renderReservation}
-          keyExtractor={item => item.id}
-          refreshControl={
-            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-          }
-          contentContainerStyle={styles.listContent}
-        />
-      ) : (
-        <View style={styles.emptyContainer}>
-          <MaterialIcons name="event-busy" size={64} color="#E1E1E1" />
-          <Text style={styles.emptyText}>
-            {isBusinessOwner 
-              ? "No hay reservaciones con este filtro" 
-              : "No tienes reservaciones en este negocio"}
+      {/* Add info banner for new businesses */}
+      {isTempBusiness && (
+        <View style={styles.infoBanner}>
+          <MaterialIcons name="info" size={20} color="#007AFF" />
+          <Text style={styles.infoBannerText}>
+            Configure las opciones de reservación para su nuevo negocio. Esta configuración se aplicará cuando se cree el negocio.
           </Text>
-          {!isBusinessOwner && (
-            <TouchableOpacity 
-              style={styles.makeReservationButton}
-              onPress={() => setShowModal(true)}
-            >
-              <LinearGradient
-                colors={['#007AFF', '#00C2FF']}
-                style={styles.buttonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <MaterialIcons name="add" size={24} color="white" />
-                <Text style={styles.buttonText}>Hacer Reserva</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
         </View>
       )}
       
+      {/* Lista de reservaciones */}
+      {loading && !refreshing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Cargando reservaciones...</Text>
+        </View>
+      ) : (
+        <SectionList
+          sections={prepareDataForSectionList()}
+          keyExtractor={(item) => item.id}
+          renderItem={renderReservation}
+          renderSectionHeader={renderSectionHeader}
+          ListEmptyComponent={renderEmptyState}
+          contentContainerStyle={reservations.length === 0 ? { flex: 1 } : styles.listContent}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={refresh} />
+          }
+          stickySectionHeadersEnabled={true}
+        />
+      )}
+      
       {/* Modal para hacer una reserva (vista de cliente) */}
-      <Modal visible={showModal} animationType="slide" transparent={false}>
+      <Modal 
+        visible={showReservationForm} 
+        animationType="slide" 
+        transparent={false}
+        onRequestClose={() => setShowReservationForm(false)}
+      >
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <TouchableOpacity onPress={() => setShowModal(false)}>
+            <TouchableOpacity onPress={() => setShowReservationForm(false)}>
               <MaterialIcons name="close" size={24} color="#333" />
             </TouchableOpacity>
             <Text style={styles.modalTitle}>Reservar en {businessName}</Text>
@@ -548,21 +490,33 @@ const ReservationsScreen: React.FC = () => {
           <ReservationForm
             businessId={businessId}
             businessName={businessName}
-            onSuccess={(_reservationId: string) => {
-              setShowModal(false);
-              loadReservations();
-              Alert.alert(
-                'Reserva Exitosa',
-                'Tu reserva ha sido creada con éxito. Recibirás una confirmación pronto.'
-              );
-            }}
-            onCancel={() => setShowModal(false)}
+            onSuccess={handleReservationSuccess}
+            onCancel={() => setShowReservationForm(false)}
           />
         </SafeAreaView>
       </Modal>
       
+      {/* Modal de detalle de reservación */}
+      <ReservationDetailModal
+        reservation={selectedReservation}
+        visible={showDetailModal}
+        onClose={() => {
+          setShowDetailModal(false);
+          setSelectedReservation(null);
+        }}
+        onCancelReservation={cancelReservation}
+        onConfirmReservation={isBusinessOwner ? confirmReservation : undefined}
+        onCompleteReservation={isBusinessOwner ? completeReservation : undefined}
+        isBusinessView={isBusinessOwner}
+      />
+      
       {/* Modal de configuración de reservas (vista de propietario) */}
-      <Modal visible={showSettingsModal} animationType="slide" transparent={false}>
+      <Modal 
+        visible={showSettingsModal} 
+        animationType="slide" 
+        transparent={false}
+        onRequestClose={() => setShowSettingsModal(false)}
+      >
         <SafeAreaView style={styles.modalContainer}>
           <View style={styles.modalHeader}>
             <TouchableOpacity onPress={() => setShowSettingsModal(false)}>
@@ -684,27 +638,10 @@ const ReservationsScreen: React.FC = () => {
               >
                 <Text style={styles.saveButtonText}>Guardar Configuración</Text>
               </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.disableReservationsButton}
-                onPress={disableReservations}
-              >
-                <Text style={styles.disableReservationsText}>Deshabilitar Reservaciones</Text>
-              </TouchableOpacity>
             </View>
           </ScrollView>
         </SafeAreaView>
       </Modal>
-      
-      {/* Add info banner for new businesses */}
-      {isTempBusiness && (
-        <View style={styles.infoBanner}>
-          <MaterialIcons name="info" size={20} color="#007AFF" />
-          <Text style={styles.infoBannerText}>
-            Configure las opciones de reservación para su nuevo negocio. Esta configuración se aplicará cuando se cree el negocio.
-          </Text>
-        </View>
-      )}
     </SafeAreaView>
   );
 };
@@ -712,74 +649,78 @@ const ReservationsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff'
+    backgroundColor: '#F5F7FF'
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#ddd'
+    borderBottomColor: '#E5E5EA',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: 'bold'
+    fontWeight: 'bold',
+    color: '#333333',
   },
   filterContainer: {
-    padding: 8,
+    backgroundColor: 'white',
+    paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
+    borderBottomColor: '#E5E5EA',
   },
   filterScrollContent: {
     paddingHorizontal: 8,
   },
   filterButton: {
     paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 16,
+    paddingHorizontal: 16,
+    borderRadius: 20,
     marginHorizontal: 4,
-    backgroundColor: '#f0f0f0'
+    backgroundColor: '#F0F0F5',
   },
   filterButtonActive: {
-    backgroundColor: '#007AFF'
+    backgroundColor: '#007AFF',
   },
   filterButtonText: {
     fontSize: 14,
-    color: '#333'
+    color: '#8E8E93',
+    fontWeight: '500',
   },
   filterButtonTextActive: {
     color: 'white',
-    fontWeight: 'bold'
+    fontWeight: 'bold',
   },
   listContent: {
-    padding: 16
+    padding: 16,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center'
+    alignItems: 'center',
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 16,
-    color: '#666'
+    color: '#8E8E93',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20
+    padding: 20,
   },
   emptyText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 16,
-    color: '#666',
+    color: '#8E8E93',
     textAlign: 'center',
-    marginBottom: 20
+    marginBottom: 20,
   },
   makeReservationButton: {
-    borderRadius: 8,
+    borderRadius: 12,
     overflow: 'hidden',
     width: '80%',
     marginTop: 20,
@@ -792,77 +733,109 @@ const styles = StyleSheet.create({
   buttonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    justifyContent: 'center',
+    paddingVertical: 16,
     paddingHorizontal: 24,
   },
   buttonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
-    marginLeft: 8
+    marginLeft: 8,
+  },
+  sectionHeader: {
+    backgroundColor: '#F5F7FF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
   },
   modalContainer: {
     flex: 1,
-    backgroundColor: 'white'
+    backgroundColor: '#F5F7FF',
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
+    backgroundColor: 'white',
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0'
+    borderBottomColor: '#E5E5EA',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333'
+    color: '#333333',
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    margin: 16,
+    alignItems: 'center',
+  },
+  infoBannerText: {
+    flex: 1,
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#007AFF',
   },
   settingsContainer: {
-    flex: 1,
     padding: 16,
   },
   settingSection: {
-    marginBottom: 24,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: 'white',
+    borderRadius: 12,
     padding: 16,
-    borderRadius: 8,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   settingSectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 12,
+    color: '#333333',
+    marginBottom: 16,
   },
   switchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    marginBottom: 8,
   },
   settingLabel: {
     fontSize: 16,
-    color: '#333',
+    color: '#333333',
   },
   warningText: {
     marginTop: 8,
     color: '#FF3B30',
     fontStyle: 'italic',
+    fontSize: 14,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    marginBottom: 8,
   },
   numberInput: {
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#ddd',
+    backgroundColor: '#F0F0F5',
     borderRadius: 8,
-    padding: 8,
+    padding: 10,
     width: 60,
     textAlign: 'center',
+    fontSize: 16,
   },
   inputRow: {
     flexDirection: 'row',
@@ -870,59 +843,59 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   textInput: {
-    backgroundColor: 'white',
-    borderWidth: 1,
-    borderColor: '#ddd',
+    backgroundColor: '#F0F0F5',
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     marginRight: 8,
+    fontSize: 16,
   },
   addButton: {
     backgroundColor: '#007AFF',
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
   },
   addButtonText: {
     color: 'white',
     fontWeight: 'bold',
+    fontSize: 14,
   },
   disabledButton: {
     backgroundColor: '#A2D1FF',
   },
   timeSlotList: {
-    marginTop: 8,
+    marginBottom: 8,
   },
   timeSlotItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: 'white',
+    backgroundColor: '#F0F0F5',
     padding: 12,
     borderRadius: 8,
     marginBottom: 8,
   },
   timeSlotText: {
     fontSize: 16,
+    color: '#333333',
   },
   dayItem: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    marginBottom: 4,
+    borderBottomColor: '#F0F0F5',
   },
   dayName: {
     fontSize: 16,
-    color: '#333',
+    color: '#333333',
   },
   checkbox: {
     width: 24,
     height: 24,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#E5E5EA',
     borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
@@ -932,51 +905,23 @@ const styles = StyleSheet.create({
     borderColor: '#007AFF',
   },
   buttonContainer: {
-    marginVertical: 24,
-    paddingBottom: 40, // Extra padding for scrolling past bottom tabs
+    marginBottom: 40,
   },
   saveButton: {
     backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 8,
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
-    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3,
-    elevation: 2,
+    elevation: 3,
   },
   saveButtonText: {
     color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
-  },
-  disableReservationsButton: {
-    backgroundColor: '#FF3B30',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  disableReservationsText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  infoBanner: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
-    padding: 12,
-    borderRadius: 8,
-    marginHorizontal: 16,
-    marginVertical: 8,
-    alignItems: 'center',
-  },
-  infoBannerText: {
-    flex: 1,
-    marginLeft: 8,
-    fontSize: 14,
-    color: '#007AFF',
   },
 });
 
