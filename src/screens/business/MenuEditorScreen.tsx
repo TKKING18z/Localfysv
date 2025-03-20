@@ -22,12 +22,14 @@ import { Image } from 'expo-image';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/storage';
 import { MenuItem } from '../../context/BusinessContext';
+import { useStore } from '../../context/StoreContext'; // Añadir esta importación
 
 interface RouteParams {
   businessId: string;
   initialMenu?: MenuItem[];
   menuUrl?: string;
-  onSave: (menu: MenuItem[], menuUrl: string) => void;
+  onSave?: (menu: MenuItem[], menuUrl: string) => void;
+  callbackId?: string; // Añadir parámetro opcional para el ID del callback
 }
 
 type MenuEditorRouteProp = RouteProp<{ params: RouteParams }, 'params'>;
@@ -106,17 +108,16 @@ interface MenuEditorStyles {
 const MenuEditorScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<MenuEditorRouteProp>();
+  const store = useStore(); // Obtener acceso al store
   
-  // Proporcionar un valor por defecto para onSave si es undefined
+  // Desestructurar los parámetros de la ruta, con el callbackId
   const { 
     businessId, 
     initialMenu, 
     menuUrl: initialMenuUrl, 
-    onSave = (menu: MenuItem[], menuUrl: string) => {
-      console.warn('onSave callback no proporcionado');
-      // Si deseas, puedes almacenar los datos en localStorage o similar como fallback
-    } 
-  } = route.params || {}; // Asegúrate de manejar el caso donde route.params sea undefined
+    onSave: directOnSave,
+    callbackId
+  } = route.params || {};
   
   // Estado para los items del menú
   const [menuItems, setMenuItems] = useState<MenuItem[]>(initialMenu || []);
@@ -315,22 +316,33 @@ const MenuEditorScreen: React.FC = () => {
   // Guardar todo con verificación adicional
   const handleSave = () => {
     try {
-      // Verificar explícitamente si onSave es una función
-      if (typeof onSave === 'function') {
-        onSave(menuItems, menuUrl);
-      } else {
-        // Mostrar una alerta si onSave no es una función
-        Alert.alert(
-          'Advertencia',
-          'Los cambios no se guardarán debido a un error de configuración.',
-          [{ text: 'OK' }]
-        );
+      // Verificar primero el callback directo
+      if (typeof directOnSave === 'function') {
+        directOnSave(menuItems, menuUrl);
+        navigation.goBack();
+        return;
       }
+      
+      // Si no hay callback directo, intentar usar el callbackId
+      if (callbackId) {
+        const callbackFromStore = store.getCallback(callbackId);
+        if (typeof callbackFromStore === 'function') {
+          callbackFromStore(menuItems, menuUrl);
+          navigation.goBack();
+          return;
+        }
+      }
+      
+      // Si no se encuentra ningún callback válido
+      console.warn('No se encontró un callback válido para guardar el menú');
+      Alert.alert(
+        'Advertencia',
+        'Los cambios no se guardarán debido a un error de configuración.',
+        [{ text: 'OK', onPress: () => navigation.goBack() }]
+      );
     } catch (error) {
       console.error('Error al guardar el menú:', error);
       Alert.alert('Error', 'No se pudieron guardar los cambios. Por favor, inténtalo de nuevo.');
-    } finally {
-      // Siempre volver atrás, independientemente de si onSave funcionó o no
       navigation.goBack();
     }
   };
