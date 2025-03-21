@@ -178,7 +178,7 @@ const BusinessHoursScreen: React.FC = () => {
   
   const getDayLabel = (day: keyof BusinessHours): string => {
     const foundDay = daysOfWeek.find(d => d.key === day);
-    return foundDay ? foundDay.label : day;
+    return foundDay ? foundDay.label : String(day);
   };
   
   const handleSave = () => {

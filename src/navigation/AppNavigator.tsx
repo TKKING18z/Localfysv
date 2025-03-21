@@ -32,6 +32,11 @@ import MyBusinessesScreen from '../screens/business/MyBusinessesScreen';
 import PromotionsScreen from '../screens/business/PromotionsScreen';
 import ReservationsScreen from '../screens/business/ReservationsScreen';
 
+// Importar pantallas de chat
+import ConversationsScreen from '../screens/chat/ConversationsScreen';
+import ChatScreen from '../screens/chat/ChatScreen';
+import { ChatProvider } from '../context/ChatContext';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -64,6 +69,9 @@ export type RootStackParamList = {
     businessId: string;
     businessName: string;
   };
+  // Rutas para el chat
+  Conversations: undefined;
+  Chat: { conversationId: string };
 };
 
 // Define tab navigator parameter list
@@ -195,80 +203,86 @@ const AppNavigator = () => {
 
   return (
     <NavigationContainer>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
-          <>
-            <Stack.Screen name="MainTabs" component={MainTabs} />
-            <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
-            
-            {/* Agregar las nuevas pantallas */}
-            <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
-            <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
-            <Stack.Screen name="Promotions" component={PromotionsScreen} />
-            <Stack.Screen name="Reservations" component={ReservationsScreen} />
-            
-            {/* New Business Detail Enhancement Screens */}
-            <Stack.Screen 
-              name="BusinessHours" 
-              component={BusinessHoursScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Horarios de Atención',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="PaymentMethods" 
-              component={PaymentMethodsScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Métodos de Pago',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="SocialLinks" 
-              component={SocialLinksScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Redes Sociales',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="MenuEditor" 
-              component={MenuEditorScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Editor de Menú',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="VideoManager" 
-              component={VideoManagerScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Gestionar Videos',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            
-            {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
-            <Stack.Screen name="Map" component={MapScreen} />
-            <Stack.Screen name="Favorites" component={FavoritesScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
-          </>
-        ) : (
-          <Stack.Screen name="Auth" component={AuthStack} />
-        )}
-      </Stack.Navigator>
+      <ChatProvider>
+        <Stack.Navigator screenOptions={{ headerShown: false }}>
+          {user ? (
+            <>
+              <Stack.Screen name="MainTabs" component={MainTabs} />
+              <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
+              
+              {/* Agregar las nuevas pantallas */}
+              <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
+              <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
+              <Stack.Screen name="Promotions" component={PromotionsScreen} />
+              <Stack.Screen name="Reservations" component={ReservationsScreen} />
+              
+              {/* New Business Detail Enhancement Screens */}
+              <Stack.Screen 
+                name="BusinessHours" 
+                component={BusinessHoursScreen}
+                options={{ 
+                  headerShown: true,
+                  title: 'Horarios de Atención',
+                  headerStyle: { backgroundColor: '#FFFFFF' },
+                  headerTintColor: '#007AFF'
+                }} 
+              />
+              <Stack.Screen 
+                name="PaymentMethods" 
+                component={PaymentMethodsScreen}
+                options={{ 
+                  headerShown: true,
+                  title: 'Métodos de Pago',
+                  headerStyle: { backgroundColor: '#FFFFFF' },
+                  headerTintColor: '#007AFF'
+                }} 
+              />
+              <Stack.Screen 
+                name="SocialLinks" 
+                component={SocialLinksScreen}
+                options={{ 
+                  headerShown: true,
+                  title: 'Redes Sociales',
+                  headerStyle: { backgroundColor: '#FFFFFF' },
+                  headerTintColor: '#007AFF'
+                }} 
+              />
+              <Stack.Screen 
+                name="MenuEditor" 
+                component={MenuEditorScreen}
+                options={{ 
+                  headerShown: true,
+                  title: 'Editor de Menú',
+                  headerStyle: { backgroundColor: '#FFFFFF' },
+                  headerTintColor: '#007AFF'
+                }} 
+              />
+              <Stack.Screen 
+                name="VideoManager" 
+                component={VideoManagerScreen}
+                options={{ 
+                  headerShown: true,
+                  title: 'Gestionar Videos',
+                  headerStyle: { backgroundColor: '#FFFFFF' },
+                  headerTintColor: '#007AFF'
+                }} 
+              />
+              
+              {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
+              <Stack.Screen name="Map" component={MapScreen} />
+              <Stack.Screen name="Favorites" component={FavoritesScreen} />
+              <Stack.Screen name="Profile" component={ProfileScreen} />
+              <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
+              
+              {/* Chat screens */}
+              <Stack.Screen name="Conversations" component={ConversationsScreen} />
+              <Stack.Screen name="Chat" component={ChatScreen} />
+            </>
+          ) : (
+            <Stack.Screen name="Auth" component={AuthStack} />
+          )}
+        </Stack.Navigator>
+      </ChatProvider>
     </NavigationContainer>
   );
 };

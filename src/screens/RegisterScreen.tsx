@@ -32,8 +32,8 @@ const { width } = Dimensions.get('window');
 const RegisterScreen: React.FC = () => {
   const navigation = useNavigation<RegisterScreenNavigationProp>();
   
-  // Usar el hook useAuth real en lugar del objeto placeholder
-  const { signUp, loading } = useAuth();
+  // Change to use signUp instead of register
+  const { signUp, isLoading } = useAuth();
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -113,7 +113,7 @@ const RegisterScreen: React.FC = () => {
     }
     
     try {
-      // Llamar a signUp con los datos del formulario
+      // Use signUp instead of register to allow passing the role parameter
       await signUp(email, password, name, role);
       Alert.alert('Éxito', 'Cuenta creada correctamente', [
         { text: 'OK', onPress: () => navigation.navigate('Login') }
@@ -281,7 +281,7 @@ const RegisterScreen: React.FC = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={handleRegister}
-              disabled={loading}
+              disabled={isLoading} // Change loading to isLoading
             >
               <LinearGradient
                 colors={['#007AFF', '#47A9FF']}
@@ -290,7 +290,7 @@ const RegisterScreen: React.FC = () => {
                 style={styles.registerButton}
               >
                 <Text style={styles.registerButtonText}>
-                  {loading ? 'Creando cuenta...' : 'Crear Cuenta'}
+                  {isLoading ? 'Creando cuenta...' : 'Crear Cuenta'} {/* Change loading to isLoading */}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>

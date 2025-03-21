@@ -27,6 +27,8 @@ import { useLocation } from '../hooks/useLocation';
 import { useAuth } from '../context/AuthContext';
 import { firebaseService } from '../services/firebaseService';
 import { Promotion } from '../types/businessTypes';
+// Add the import for ChatContext
+import { useChat } from '../context/ChatContext';
 
 // Components
 import BusinessHoursView from '../components/BusinessHoursView';
@@ -61,6 +63,8 @@ const BusinessDetailScreen: React.FC = () => {
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
   const { user } = useAuth();
+  // Add useChat hook
+  const { createConversation } = useChat();
   
   // Estados principales
   const [business, setBusiness] = useState<Business | null>(null);
@@ -289,6 +293,32 @@ const BusinessDetailScreen: React.FC = () => {
     }
     return business.images[0].url;
   }, [business?.images]);
+
+  // Add new function to handle chat navigation
+  const handleStartChat = useCallback(async () => {
+    if (!user || !business || !business.createdBy) {
+      Alert.alert('Error', 'No se puede iniciar chat en este momento');
+      return;
+    }
+    
+    try {
+      // Start or get existing conversation
+      const conversationId = await createConversation(
+        business.createdBy, 
+        business.name // Pass just the business name as the second parameter
+      );
+      
+      if (conversationId) {
+        // Navigate to chat screen
+        navigation.navigate('Chat', { conversationId });
+      } else {
+        Alert.alert('Error', 'No se pudo iniciar la conversación');
+      }
+    } catch (error) {
+      console.error('Error starting chat:', error);
+      Alert.alert('Error', 'No se pudo iniciar la conversación');
+    }
+  }, [user, business, businessId, navigation, createConversation, getBusinessImage]);
 
   const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';
@@ -1029,7 +1059,7 @@ const BusinessDetailScreen: React.FC = () => {
       </Animated.ScrollView>
       
       {/* Botones de acción con animación de entrada */}
-      {(business.phone || business.email) && (
+      {(business.phone || business.email || business.createdBy) && (
         <Animated.View style={[
           styles.actionButtonsContainer,
           { transform: [{ translateY: actionButtonsY }] }
@@ -1070,6 +1100,27 @@ const BusinessDetailScreen: React.FC = () => {
               >
                 <MaterialIcons name="email" size={22} color="white" />
                 <Text style={styles.actionButtonText}>Correo</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+          
+          {/* Add new Chat button */}
+          {business.createdBy && business.createdBy !== user?.uid && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={handleStartChat}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel="Chatear con el negocio"
+            >
+              <LinearGradient
+                colors={['#5856D6', '#AF52DE']}
+                style={styles.actionButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <MaterialIcons name="chat" size={22} color="white" />
+                <Text style={styles.actionButtonText}>Chatear</Text>
               </LinearGradient>
             </TouchableOpacity>
           )}

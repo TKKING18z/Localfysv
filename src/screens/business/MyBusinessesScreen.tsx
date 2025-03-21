@@ -21,6 +21,11 @@ import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { userService } from '../../services/authService'; // Import from authService
 
+// Define type with role property
+interface UserWithRole extends firebase.User {
+  role?: 'customer' | 'business_owner';
+}
+
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
 const MyBusinessesScreen: React.FC = () => {
@@ -39,8 +44,11 @@ const MyBusinessesScreen: React.FC = () => {
         return;
       }
       
+      // Add type assertion to access role property
+      const userWithRole = user as UserWithRole;
+      
       // Verificar que el usuario sea de tipo business_owner
-      if (user.role !== 'business_owner') {
+      if (userWithRole.role !== 'business_owner') {
         Alert.alert(
           'Acceso restringido',
           'Esta sección solo está disponible para propietarios de negocios.',

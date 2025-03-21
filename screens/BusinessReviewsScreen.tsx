@@ -16,6 +16,10 @@ const ensureDates = (review: AppReview): ModelReview => {
   } as ModelReview;
 };
 
+// Add type imports from useReviews
+type ReviewFilterOption = 'all' | '1' | '2' | '3' | '4' | '5';
+type ReviewSortOption = 'recent' | 'highest' | 'lowest';
+
 const BusinessReviewsScreen: React.FC<BusinessReviewsScreenProps> = ({ businessId, currentUserId, isOwner }) => {
   const { 
     reviews, loading, error, hasMore, loadMore, 
@@ -66,22 +70,22 @@ const BusinessReviewsScreen: React.FC<BusinessReviewsScreenProps> = ({ businessI
         </View>
       )}
       
-      {/* Filter controls */}
+      {/* Filter controls - FIX: Convert numbers to strings for type safety */}
       <View style={styles.filterContainer}>
         <Text>Filter: {activeFilter || 'All'}</Text>
         {[5, 4, 3, 2, 1].map(rating => (
-          <Text key={rating} onPress={() => filterByRating(rating)}>
+          <Text key={rating} onPress={() => filterByRating(rating.toString() as ReviewFilterOption)}>
             {rating} stars
           </Text>
         ))}
       </View>
       
-      {/* Sort controls */}
+      {/* Sort controls - FIX: Use correct sort options */}
       <View style={styles.sortContainer}>
         <Text>Sort by: {sortBy}</Text>
         <Text onPress={() => changeSortMethod('recent')}>Most Recent</Text>
-        <Text onPress={() => changeSortMethod('rating')}>Highest Rating</Text>
-        <Text onPress={() => changeSortMethod('relevant')}>Most Relevant</Text>
+        <Text onPress={() => changeSortMethod('highest')}>Highest Rating</Text>
+        <Text onPress={() => changeSortMethod('lowest')}>Lowest Rating</Text>
       </View>
     </View>
   );

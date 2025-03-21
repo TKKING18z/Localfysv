@@ -8,8 +8,10 @@ import { Alert } from 'react-native';
 interface AuthContextType {
   user: firebase.User | null;
   isLoading: boolean;
+  loading: boolean; // Add alias for loading
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, name: string) => Promise<boolean>;
+  signUp: (email: string, password: string, name: string, role?: string) => Promise<boolean>; // Add alias for register
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
@@ -114,6 +116,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
+  // Add signUp as an alias for register
+  const signUp = async (email: string, password: string, name: string, role?: string): Promise<boolean> => {
+    return register(email, password, name);
+  };
+
   // Función para cerrar sesión
   const logout = async (): Promise<void> => {
     try {
@@ -170,8 +177,10 @@ if (currentUser) {
     <AuthContext.Provider value={{
       user,
       isLoading,
+      loading: isLoading, // Add loading as alias for isLoading
       login,
       register,
+      signUp, // Add the new signUp alias
       logout,
       resetPassword,
       updateProfile
