@@ -7,7 +7,7 @@ import { BusinessProvider } from './src/context/BusinessContext';
 import { LocationProvider } from './src/context/LocationContext';
 import { AuthProvider } from './src/context/AuthContext'; 
 import { ThemeProvider } from './src/context/ThemeContext';
-import { StoreProvider } from './src/context/StoreContext'; // Importar el nuevo context
+import { StoreProvider } from './src/context/StoreContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
@@ -39,6 +39,8 @@ LogBox.ignoreLogs([
 // Inicializar Firebase si no está ya inicializado
 if (!firebase.apps.length) {
   firebase.initializeApp(firebaseConfig);
+} else {
+  firebase.app();
 }
 
 // Prevenir que la pantalla de splash se oculte automáticamente
@@ -55,6 +57,12 @@ export default function App() {
     try {
       // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
       await AsyncStorage.getItem('favorites'); // Solo verificamos que podemos acceder
+      
+      // Verificar si hay información de sesión de usuario
+      const userUid = await AsyncStorage.getItem('user_uid');
+      if (userUid) {
+        console.log('Found existing user session in AsyncStorage:', userUid);
+      }
       
       // Comprobar si la base de datos de Firebase está accesible
       await firebase.firestore().collection('test').doc('test').get();

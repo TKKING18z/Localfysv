@@ -4,7 +4,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
 import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet } from 'react-native';
-import firebase from 'firebase/compat/app';
+import { useAuth } from '../context/AuthContext';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -181,21 +181,10 @@ const AuthStack = () => (
 
 // Main App Navigator
 const AppNavigator = () => {
-  const [initializing, setInitializing] = useState(true);
-  const [user, setUser] = useState<firebase.User | null>(null);
+  // Usar el hook de autenticación en lugar de manejar el estado directamente
+  const { user, isLoading } = useAuth();
 
-  // Handle auth state changes
-  const onAuthStateChanged = (firebaseUser: firebase.User | null) => {
-    setUser(firebaseUser);
-    if (initializing) setInitializing(false);
-  };
-
-  useEffect(() => {
-    const subscriber = firebase.auth().onAuthStateChanged(onAuthStateChanged);
-    return subscriber; // unsubscribe on unmount
-  }, []);
-
-  if (initializing) {
+  if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />

@@ -1,4 +1,3 @@
-// src/screens/LoginScreen.tsx
 import React, { useState, useRef, useEffect } from 'react';
 import {
     View,
@@ -18,26 +17,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
 import { RootStackParamList } from '../types';
 import { LinearGradient } from 'expo-linear-gradient';
-
-// Firebase configuration object
-const firebaseConfig = {
-    apiKey: "AIzaSyC2S36sPSd2XEJmxxkqJ-lQUJc7ySL5Uvw",
-    authDomain: "testlocalfysv25.firebaseapp.com",
-    projectId: "testlocalfysv25",
-    storageBucket: "testlocalfysv25.firebasestorage.app",
-    messagingSenderId: "281205862532",
-    appId: "1:281205862532:web:aa25ca39606dda5db6d2d1",
-    measurementId: "G-Z7V3LK64ZL"
-};
-
-// Initialize Firebase
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
+import { useAuth } from '../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -45,18 +28,44 @@ const { width } = Dimensions.get('window');
 
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
+    // Usar el hook de autenticación en lugar de Firebase directamente
+    const { login, isLoading } = useAuth();
     
     // Form state
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [hidePassword, setHidePassword] = useState(true);
-    const [loading, setLoading] = useState(false);
+    const [rememberMe, setRememberMe] = useState(true); // Por defecto activado
     
     // Animation values
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const slideAnim = useRef(new Animated.Value(30)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const buttonAnim = useRef(new Animated.Value(1)).current;
+    
+    // Cargar credenciales guardadas
+    useEffect(() => {
+        const loadSavedCredentials = async () => {
+            try {
+                const savedEmail = await AsyncStorage.getItem('saved_email');
+                const savedPassword = await AsyncStorage.getItem('saved_password');
+                
+                if (savedEmail) {
+                    setEmail(savedEmail);
+                }
+                
+                if (savedPassword) {
+                    setPassword(savedPassword);
+                }
+                
+                console.log('Saved credentials loaded successfully');
+            } catch (error) {
+                console.error('Error loading saved credentials:', error);
+            }
+        };
+        
+        loadSavedCredentials();
+    }, []);
     
     useEffect(() => {
         // Entrance animations
@@ -95,11 +104,11 @@ const LoginScreen: React.FC = () => {
     };
 
     const navigateToRegister = () => {
-        navigation.navigate('Register');  // This is OK since Register is in the same Auth stack
+        navigation.navigate('Register');
     };
     
     const navigateToForgotPassword = () => {
-        navigation.navigate('ForgotPassword');  // This is OK since ForgotPassword is in the same Auth stack
+        navigation.navigate('ForgotPassword');
     };
 
     const handleLogin = async () => {
@@ -111,16 +120,37 @@ const LoginScreen: React.FC = () => {
         }
         
         console.log("Iniciando sesión para:", email);
-        setLoading(true);
-
+        
         try {
-            const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-            console.log("Login exitoso:", userCredential.user);
+            // Usar la función de login del contexto
+            const success = await login(email, password);
+            
+            if (success) {
+                console.log("Login exitoso");
+                
+                // Si "Recordarme" está activado, guardar credenciales
+                if (rememberMe) {
+                    try {
+                        await AsyncStorage.setItem('saved_email', email);
+                        await AsyncStorage.setItem('saved_password', password);
+                        console.log('Credentials saved successfully');
+                    } catch (saveError) {
+                        console.error('Error saving credentials:', saveError);
+                    }
+                } else {
+                    // Si no está activado, eliminar credenciales guardadas
+                    try {
+                        await AsyncStorage.removeItem('saved_email');
+                        await AsyncStorage.removeItem('saved_password');
+                        console.log('Credentials removed successfully');
+                    } catch (removeError) {
+                        console.error('Error removing credentials:', removeError);
+                    }
+                }
+            }
         } catch (error: any) {
             console.log("Error durante el login:", error);
             Alert.alert('Error', error.message);
-        } finally {
-            setLoading(false);
         }
     };
 
@@ -202,18 +232,32 @@ const LoginScreen: React.FC = () => {
                         </TouchableOpacity>
                     </View>
                     
-                    <TouchableOpacity
-                        style={styles.forgotPassword}
-                        onPress={navigateToForgotPassword}
-                    >
-                        <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
-                    </TouchableOpacity>
+                    <View style={styles.rememberContainer}>
+                        <TouchableOpacity 
+                            style={styles.rememberMeOption}
+                            onPress={() => setRememberMe(!rememberMe)}
+                        >
+                            <MaterialIcons 
+                                name={rememberMe ? "check-box" : "check-box-outline-blank"} 
+                                size={24} 
+                                color="#007AFF" 
+                            />
+                            <Text style={styles.rememberMeText}>Recordarme</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity
+                            style={styles.forgotPassword}
+                            onPress={navigateToForgotPassword}
+                        >
+                            <Text style={styles.forgotPasswordText}>¿Olvidaste tu contraseña?</Text>
+                        </TouchableOpacity>
+                    </View>
                     
                     <Animated.View style={{ transform: [{ scale: buttonAnim }] }}>
                         <TouchableOpacity
                             activeOpacity={0.8}
                             onPress={handleLogin}
-                            disabled={loading}
+                            disabled={isLoading}
                         >
                             <LinearGradient
                                 colors={['#007AFF', '#47A9FF']}
@@ -222,7 +266,7 @@ const LoginScreen: React.FC = () => {
                                 style={styles.loginButton}
                             >
                                 <Text style={styles.loginButtonText}>
-                                    {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+                                    {isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
                                 </Text>
                             </LinearGradient>
                         </TouchableOpacity>
@@ -353,10 +397,24 @@ const styles = StyleSheet.create({
     eyeIcon: {
         padding: 12,
     },
-    forgotPassword: {
-        alignSelf: 'flex-end',
+    rememberContainer: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
         marginBottom: 24,
         marginTop: 4,
+    },
+    rememberMeOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    rememberMeText: {
+        marginLeft: 8,
+        color: '#666666',
+        fontSize: 14,
+    },
+    forgotPassword: {
+        alignSelf: 'flex-end',
     },
     forgotPasswordText: {
         color: '#007AFF',
