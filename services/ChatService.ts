@@ -427,27 +427,58 @@ export const chatService = {
     onError: (error: Error) => void,
     limit = 50
   ): (() => void) => {
-    const unsubscribe = firebase.firestore()
-      .collection('conversations')
-      .doc(conversationId)
-      .collection('messages')
-      .orderBy('timestamp', 'desc')
-      .limit(limit)
-      .onSnapshot(
-        snapshot => {
-          const messages = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Message[];
-          onUpdate(messages);
-        },
-        error => {
-          console.error('Error listening to messages:', error);
-          onError(error);
-        }
-      );
-      
-    return unsubscribe;
+    console.log(`Configurando listener para mensajes de conversación: ${conversationId}`);
+    
+    try {
+      const unsubscribe = firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .orderBy('timestamp', 'desc')
+        .limit(limit)
+        .onSnapshot(
+          (snapshot) => {
+            console.log(`Listener de mensajes recibió actualización: ${snapshot.docs.length} mensajes`);
+            
+            if (snapshot.empty) {
+              console.log('No hay mensajes en esta conversación');
+              onUpdate([]);
+              return;
+            }
+            
+            const messages = snapshot.docs.map(doc => {
+              const data = doc.data();
+              console.log(`Mensaje procesado: ${doc.id} - Tipo: ${data.type || 'text'}`);
+              
+              // Asegurarse de que los campos obligatorios existan
+              return {
+                id: doc.id,
+                text: data.text || '',
+                senderId: data.senderId || '',
+                senderName: data.senderName || '',
+                senderPhoto: data.senderPhoto || '',
+                timestamp: data.timestamp || firebase.firestore.Timestamp.now(),
+                read: data.read || false,
+                type: data.type || 'text',
+                imageUrl: data.imageUrl || undefined
+              } as Message;
+            });
+            
+            onUpdate(messages);
+          },
+          (error) => {
+            console.error('Error en listener de mensajes:', error);
+            onError(error);
+          }
+        );
+        
+      return unsubscribe;
+    } catch (error) {
+      console.error('Error al configurar listener de mensajes:', error);
+      onError(error as Error);
+      // Retornar una función vacía como fallback
+      return () => {};
+    }
   },
 
   // Escuchar por cambios en todas las conversaciones de un usuario (para tiempo real)

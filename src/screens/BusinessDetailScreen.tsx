@@ -302,21 +302,27 @@ const BusinessDetailScreen: React.FC = () => {
     }
     
     try {
-      // Start or get existing conversation
+      console.log('Iniciando chat con:', business.name, 'ID:', business.createdBy);
+      
+      // Start or get existing conversation - asegurarse de pasar todos los parámetros necesarios
       const conversationId = await createConversation(
-        business.createdBy, 
-        business.name // Pass just the business name as the second parameter
+        business.createdBy,          // ID del propietario del negocio
+        business.name,               // Nombre del negocio/destinatario
+        businessId,                  // ID del negocio para referencia
+        getBusinessImage || ''       // Imagen del negocio (opcional)
       );
       
       if (conversationId) {
+        console.log('Conversación creada/obtenida con éxito, ID:', conversationId);
         // Navigate to chat screen
         navigation.navigate('Chat', { conversationId });
       } else {
+        console.error('No se obtuvo ID de conversación');
         Alert.alert('Error', 'No se pudo iniciar la conversación');
       }
     } catch (error) {
       console.error('Error starting chat:', error);
-      Alert.alert('Error', 'No se pudo iniciar la conversación');
+      Alert.alert('Error', 'No se pudo iniciar la conversación: ' + (error instanceof Error ? error.message : String(error)));
     }
   }, [user, business, businessId, navigation, createConversation, getBusinessImage]);
 
