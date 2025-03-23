@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface ChatInputProps {
   onSend: (text: string, imageUrl?: string) => Promise<boolean | void>; // Allow both return types
@@ -135,7 +136,12 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
           onPress={handleAttachImage}
           disabled={isLoading}
         >
-          <MaterialIcons name="photo-camera" size={24} color={isLoading ? "#C7C7CC" : "#007AFF"} />
+          <LinearGradient
+            colors={['#5AC8FA', '#4CD964']}
+            style={styles.attachButtonGradient}
+          >
+            <MaterialIcons name="photo-camera" size={22} color="#FFFFFF" />
+          </LinearGradient>
         </TouchableOpacity>
       )}
       
@@ -165,7 +171,12 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         {isLoading ? (
           <ActivityIndicator size="small" color="#FFF" />
         ) : (
-          <MaterialIcons name="send" size={24} color="#FFF" />
+          <LinearGradient
+            colors={['#007AFF', '#00C2FF']}
+            style={styles.sendButtonGradient}
+          >
+            <MaterialIcons name="send" size={22} color="#FFF" />
+          </LinearGradient>
         )}
       </TouchableOpacity>
     </View>
@@ -203,11 +214,25 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  attachButtonGradient: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   sendButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  sendButtonGradient: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
   },

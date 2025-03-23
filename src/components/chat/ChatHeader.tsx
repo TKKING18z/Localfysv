@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Conversation } from '../../../models/chatTypes';
 import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface ChatHeaderProps {
   conversation: Conversation | null;
@@ -46,99 +47,123 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   
   const otherParticipantName = conversation.participantNames[participantId] || 'Usuario';
   const otherParticipantPhoto = conversation.participantPhotos?.[participantId];
-  const businessName = businessMode ? undefined : conversation.businessName;
   
   return (
-    <View style={styles.container}>
-      <TouchableOpacity 
-        style={styles.backButton} 
-        onPress={handleBack}
+    <View style={styles.containerWrapper}>
+      <LinearGradient
+        colors={['#007AFF', '#00C2FF']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={styles.headerGradient}
       >
-        <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
-      </TouchableOpacity>
-      
-      <View style={styles.userInfo}>
-        {otherParticipantPhoto ? (
-          <Image source={{ uri: otherParticipantPhoto }} style={styles.avatar} />
-        ) : (
-          <View style={styles.defaultAvatar}>
-            <Text style={styles.avatarText}>{otherParticipantName[0]}</Text>
+        <View style={styles.container}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={handleBack}
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          
+          <View style={styles.userInfo}>
+            {otherParticipantPhoto ? (
+              <Image source={{ uri: otherParticipantPhoto }} style={styles.avatar} />
+            ) : (
+              <View style={styles.defaultAvatar}>
+                <Text style={styles.avatarText}>{otherParticipantName[0]}</Text>
+              </View>
+            )}
+            
+            <View style={styles.nameContainer}>
+              <Text style={styles.title} numberOfLines={1}>{otherParticipantName}</Text>
+            </View>
           </View>
-        )}
-        
-        <View style={styles.nameContainer}>
-          <Text style={styles.title} numberOfLines={1}>{otherParticipantName}</Text>
-          {businessName && (
-            <Text style={styles.subtitle} numberOfLines={1}>{businessName}</Text>
+          
+          {onInfoPress && (
+            <TouchableOpacity 
+              style={styles.infoButton} 
+              onPress={onInfoPress}
+            >
+              <MaterialIcons name="info-outline" size={24} color="#FFFFFF" />
+            </TouchableOpacity>
           )}
         </View>
-      </View>
-      
-      {onInfoPress && (
-        <TouchableOpacity 
-          style={styles.infoButton} 
-          onPress={onInfoPress}
-        >
-          <MaterialIcons name="info-outline" size={24} color="#007AFF" />
-        </TouchableOpacity>
-      )}
+      </LinearGradient>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
+  containerWrapper: {
+    overflow: 'hidden',
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  headerGradient: {
+    width: '100%',
+  },
   container: {
-    height: 60,
+    height: 70,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E9E9EB',
     paddingHorizontal: 16,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    marginRight: 8,
   },
   userInfo: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 8,
   },
   avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    marginRight: 8,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   defaultAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: '#007AFF',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.4)',
   },
   avatarText: {
-    color: 'white',
-    fontSize: 16,
+    color: '#007AFF',
+    fontSize: 20,
     fontWeight: 'bold',
   },
   nameContainer: {
     flex: 1,
   },
   title: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#000',
+    color: '#FFFFFF',
   },
   subtitle: {
-    fontSize: 12,
-    color: '#8E8E93',
+    fontSize: 13,
+    color: 'rgba(255, 255, 255, 0.9)',
+    marginTop: 2,
   },
   infoButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   placeholder: {
     width: 40,

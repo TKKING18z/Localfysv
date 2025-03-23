@@ -113,7 +113,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isMine, onImagePress
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    marginVertical: 4,
+    marginVertical: 6,
     paddingHorizontal: 12,
   },
   myMessageContainer: {
@@ -142,6 +142,11 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 18,
     maxWidth: MAX_BUBBLE_WIDTH,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 1,
   },
   myMessageBubble: {
     backgroundColor: '#007AFF',
@@ -149,7 +154,7 @@ const styles = StyleSheet.create({
     marginLeft: 40,
   },
   otherMessageBubble: {
-    backgroundColor: '#E9E9EB',
+    backgroundColor: '#FFFFFF',
     borderBottomLeftRadius: 4,
   },
   imageBubble: {
@@ -164,12 +169,13 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16,
+    lineHeight: 22,
   },
   myMessageText: {
     color: 'white',
   },
   otherMessageText: {
-    color: '#000',
+    color: '#333333',
   },
   messageImage: {
     width: 200,
@@ -197,14 +203,14 @@ const styles = StyleSheet.create({
   },
   systemMessageContainer: {
     alignItems: 'center',
-    marginVertical: 8,
+    marginVertical: 12,
   },
   systemMessageText: {
     fontSize: 12,
     color: '#8E8E93',
     fontStyle: 'italic',
     backgroundColor: 'rgba(142, 142, 147, 0.1)',
-    paddingVertical: 4,
+    paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 10,
   },

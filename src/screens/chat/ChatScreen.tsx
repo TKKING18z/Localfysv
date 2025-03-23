@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   FlatList,
@@ -17,6 +17,7 @@ import {
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialIcons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
@@ -273,7 +274,7 @@ const ChatScreen: React.FC = () => {
   }, []);
   
   // Ordenar mensajes por fecha
-  const sortedMessages = React.useMemo(() => {
+  const sortedMessages = useMemo(() => {
     return [...messages].sort((a, b) => {
       let dateA: Date;
       let dateB: Date;
@@ -310,7 +311,7 @@ const ChatScreen: React.FC = () => {
   
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
+      <StatusBar barStyle="light-content" backgroundColor="#007AFF" />
       
       {/* Header */}
       <ChatHeader 
@@ -368,10 +369,22 @@ const ChatScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
           ) : sortedMessages.length === 0 ? (
-            <View style={styles.centerContainer}>
-              <MaterialIcons name="chat" size={64} color="#E5E5EA" />
-              <Text style={styles.emptyText}>No hay mensajes</Text>
-              <Text style={styles.emptySubtext}>Sé el primero en enviar un mensaje</Text>
+            <View style={styles.emptyStateContainer}>
+              <LinearGradient
+                colors={['#F4F6FF', '#E8EEFF']}
+                style={styles.emptyStateGradient}
+              >
+                <MaterialIcons 
+                  name="chat-bubble-outline" 
+                  size={120} 
+                  color="#B9C5FF" 
+                  style={styles.emptyStateIcon}
+                />
+                <Text style={styles.emptyText}>No hay mensajes</Text>
+                <Text style={styles.emptySubtext}>
+                  Sé el primero en enviar un mensaje
+                </Text>
+              </LinearGradient>
             </View>
           ) : (
             <FlatList
@@ -429,7 +442,7 @@ const ChatScreen: React.FC = () => {
             style={styles.closeButton}
             onPress={() => setImageModalVisible(false)}
           >
-            <Text style={styles.closeButtonText}>×</Text>
+            <MaterialIcons name="close" size={28} color="white" />
           </TouchableOpacity>
           
           {selectedImage && (
@@ -448,7 +461,7 @@ const ChatScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#F5F7FF',
   },
   keyboardAvoidingView: {
     flex: 1,
@@ -456,6 +469,22 @@ const styles = StyleSheet.create({
   messagesContainer: {
     flexGrow: 1,
     paddingVertical: 16,
+    paddingHorizontal: 8,
+  },
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  emptyStateGradient: {
+    padding: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    width: '90%',
+  },
+  emptyStateIcon: {
+    marginBottom: 16,
   },
   modalContainer: {
     flex: 1,
@@ -540,10 +569,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   emptyText: {
-    marginTop: 16,
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#8E8E93',
+    color: '#333333',
+    marginTop: 8,
   },
   emptySubtext: {
     marginTop: 8,
@@ -556,15 +585,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 8,
+    marginTop: 16,
   },
   errorButtonText: {
     color: 'white',
     fontWeight: 'bold',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
 });
 
