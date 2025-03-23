@@ -318,6 +318,10 @@ const BusinessDetailScreen: React.FC = () => {
       
       console.log('Iniciando chat con propietario:', business.createdBy);
       
+      // ===== SOLUCIÓN CRÍTICA =====
+      // En lugar de usar checkOrCreateBusinessConversation, usamos el método del contexto
+      // que garantiza la sincronización correcta
+      
       // Obtener información del propietario
       const ownerDoc = await firebase.firestore()
         .collection('users')
@@ -331,28 +335,29 @@ const BusinessDetailScreen: React.FC = () => {
       const ownerData = ownerDoc.data();
       const ownerName = ownerData?.displayName || 'Propietario';
       
-      // Crear o recuperar conversación existente
-      const result = await chatService.checkOrCreateBusinessConversation(
-        user.uid,
-        user.displayName || 'Usuario',
+      // Usar createConversation del contexto para garantizar sincronización
+      const conversationId = await createConversation(
         business.createdBy,
         ownerName,
         business.id,
-        business.name
+        business.name,
+        "Hola, estoy interesado en su negocio." // Mensaje inicial opcional
       );
       
-      if (result.success && result.data) {
-        const conversationId = result.data.conversationId;
+      if (conversationId) {
+        // Forzar actualización de la lista de conversaciones antes de navegar
+        await refreshConversations();
         
-        // Navegar a la pantalla de chat
-        navigation.navigate('Chat', { conversationId });
+        // Navegar primero a la pantalla de conversaciones 
+        navigation.navigate('Conversations');
         
-        // Actualizar lista de conversaciones en background
+        // Usar un pequeño retraso para asegurar que ConversationsScreen se monte completamente
         setTimeout(() => {
-          refreshConversations();
-        }, 500);
+          // Luego navegar al chat específico
+          navigation.navigate('Chat', { conversationId });
+        }, 300);
       } else {
-        throw new Error(result.error?.message || 'Error al crear conversación');
+        throw new Error('No se pudo crear la conversación');
       }
     } catch (error) {
       console.error('Error iniciando chat:', error);
@@ -360,7 +365,7 @@ const BusinessDetailScreen: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user, business, navigation, refreshConversations]);
+  }, [user, business, navigation, createConversation, refreshConversations]);
 
   const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';

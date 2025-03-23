@@ -11,7 +11,7 @@ import {
   RefreshControl,
   Alert
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
@@ -43,6 +43,8 @@ const ConversationsScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>(contextConversations);
   const [unreadTotal, setUnreadTotal] = useState(contextUnreadTotal);
+  const [refreshing, setRefreshing] = useState(false);
+  const [manualRefresh, setManualRefresh] = useState(0); // Counter for force refresh
   
   // Ref para trackear Swipeable abiertos
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
@@ -53,11 +55,12 @@ const ConversationsScreen: React.FC = () => {
   const refreshConversations = useCallback(async () => {
     try {
       if (!user) {
-        console.error('refreshConversations: No hay usuario logueado');
+        console.error('[ConversationsScreen] refreshConversations: No hay usuario logueado');
         return;
       }
       
       setLoading(true);
+      setRefreshing(true);
       
       // Intentar obtener datos más recientes desde Firestore
       const conversationsRef = firebase.firestore()
@@ -68,7 +71,7 @@ const ConversationsScreen: React.FC = () => {
       const snapshot = await conversationsRef.get();
       
       if (snapshot.empty) {
-        console.log('No se encontraron conversaciones');
+        console.log('[ConversationsScreen] No se encontraron conversaciones');
         setConversations([]);
       } else {
         // Filtrar aquí también las conversaciones eliminadas
@@ -82,7 +85,7 @@ const ConversationsScreen: React.FC = () => {
             ...doc.data()
           })) as Conversation[];
         
-        console.log(`Actualizadas ${conversationsData.length} conversaciones (filtradas por eliminación)`);
+        console.log(`[ConversationsScreen] Actualizadas ${conversationsData.length} conversaciones (filtradas por eliminación)`);
         setConversations(conversationsData);
         
         // Actualizar contador de no leídos
@@ -92,13 +95,42 @@ const ConversationsScreen: React.FC = () => {
         
         setUnreadTotal(unreadTotal);
       }
+      
+      // Forzar la actualización del contexto también
+      contextRefreshConversations();
+      setError(null);
     } catch (error) {
-      console.error('Error actualizando conversaciones:', error);
+      console.error('[ConversationsScreen] Error actualizando conversaciones:', error);
       setError('No se pudieron cargar las conversaciones');
+      
+      Alert.alert(
+        'Error',
+        'No se pudieron cargar las conversaciones. Intente nuevamente.',
+        [
+          { text: 'Cancelar' },
+          { 
+            text: 'Reintentar', 
+            onPress: () => {
+              // Incrementar contador para forzar actualización
+              setManualRefresh(prev => prev + 1);
+            }
+          }
+        ]
+      );
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, [user]);
+  }, [user, contextRefreshConversations]);
+  
+  // Efecto para recargar cuando cambia el contador manual
+  useEffect(() => {
+    if (manualRefresh > 0) {
+      refreshConversations().catch(error => {
+        console.error('[ConversationsScreen] Error in manual refresh:', error);
+      });
+    }
+  }, [manualRefresh, refreshConversations]);
   
   // Update conversations when context conversations change
   useEffect(() => {
@@ -122,35 +154,83 @@ const ConversationsScreen: React.FC = () => {
   
   // Actualizar al montar y cuando vuelve a enfocarse con fuerza adicional
   useEffect(() => {
-    console.log('ConversationsScreen mounted - forcing refresh');
+    console.log('[ConversationsScreen] mounted - forcing refresh');
     
     // Limpiar estado y forzar recarga completa
     setConversations([]);
     refreshConversations();
     
-    const unsubscribeFocus = navigation.addListener('focus', () => {
-      console.log('ConversationsScreen focused - forcing complete refresh');
-      // Limpiar estado y forzar recarga completa en cada enfoque
-      setConversations([]);
-      refreshConversations();
-    });
-    
     return () => {
-      console.log('ConversationsScreen unmounting');
-      unsubscribeFocus();
+      console.log('[ConversationsScreen] unmounting');
     };
-  }, [refreshConversations, navigation]);
+  }, [refreshConversations]);
   
-  // Navegar a una conversación específica
-  const handleConversationPress = useCallback((conversationId: string) => {
-    console.log(`Navigating to conversation: ${conversationId}`);
-    setActiveConversationId(conversationId);
-    navigation.navigate('Chat', { conversationId });
-  }, [setActiveConversationId, navigation]);
+  // Add useFocusEffect to force refresh when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[ConversationsScreen] Screen focused - refreshing conversations');
+      
+      // SOLUCIÓN: Forzar una recarga completa para asegurar datos actualizados
+      const loadConversations = async () => {
+        setLoading(true);
+        try {
+          await refreshConversations();
+          console.log('[ConversationsScreen] Conversations refreshed successfully on focus');
+        } catch (error) {
+          console.error('[ConversationsScreen] Error refreshing conversations on focus:', error);
+        } finally {
+          setLoading(false);
+        }
+      };
+      
+      loadConversations();
+      
+      return () => {
+        console.log('[ConversationsScreen] Screen unfocused');
+      };
+    }, [refreshConversations])
+  );
   
-  // Volver a la pantalla anterior
+  // Navegar a una conversación específica con comprobación de validez
+  const handleConversationPress = useCallback(async (conversationId: string) => {
+    console.log(`[ConversationsScreen] Navigating to conversation: ${conversationId}`);
+    
+    try {
+      // Verificar que la conversación existe
+      const convExists = conversations.some(conv => conv.id === conversationId);
+      
+      if (!convExists) {
+        console.log(`[ConversationsScreen] Conversation ${conversationId} not found in local state, refreshing...`);
+        await refreshConversations();
+      }
+      
+      // Activar la conversación en el contexto
+      setActiveConversationId(conversationId);
+      
+      // Navegar a la pantalla de chat
+      navigation.navigate('Chat', { conversationId });
+    } catch (error) {
+      console.error('[ConversationsScreen] Error navigating to conversation:', error);
+      Alert.alert('Error', 'No se pudo abrir la conversación. Intente nuevamente.');
+    }
+  }, [conversations, setActiveConversationId, navigation, refreshConversations]);
+  
+  // Volver a la pantalla anterior - corregido para manejar diferentes contextos de navegación
   const handleBackPress = useCallback(() => {
-    navigation.navigate('Home');
+    // Check if we can go back in navigation history
+    const canGoBack = navigation.canGoBack();
+
+    if (canGoBack) {
+      // If we can go back, just go to the previous screen
+      navigation.goBack();
+    } else {
+      // If we can't go back (direct navigation to this screen)
+      // Try to reset to the main tab navigator
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'MainTabs' }],
+      });
+    }
   }, [navigation]);
   
   // Función para confirmar eliminación
@@ -174,18 +254,18 @@ const ConversationsScreen: React.FC = () => {
               const success = await deleteConversation(conversationId);
               
               if (!success) {
-                console.error(`Failed to delete conversation ${conversationId}`);
+                console.error(`[ConversationsScreen] Failed to delete conversation ${conversationId}`);
                 // Restaurar la conversación si falló y refrescar de Firestore
                 refreshConversations();
                 Alert.alert("Error", "No se pudo eliminar la conversación. Inténtalo de nuevo.");
               } else {
-                console.log(`Successfully deleted conversation ${conversationId}`);
+                console.log(`[ConversationsScreen] Successfully deleted conversation ${conversationId}`);
                 // Refrescar la lista para sincronizar con firestore (opcional)
                 // Esto asegura que la lista local siempre refleje el estado en el servidor
                 await refreshConversations();
               }
             } catch (error) {
-              console.error('Error al eliminar conversación:', error);
+              console.error('[ConversationsScreen] Error al eliminar conversación:', error);
               refreshConversations(); // Restaurar estado
               Alert.alert("Error", "Ocurrió un error inesperado. Inténtalo de nuevo.");
             } finally {
@@ -263,7 +343,7 @@ const ConversationsScreen: React.FC = () => {
       </View>
       
       {/* Contenido principal */}
-      {loading && conversations.length === 0 ? (
+      {(loading && conversations.length === 0) || refreshing ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
           <Text style={styles.loadingText}>Cargando conversaciones...</Text>
@@ -274,7 +354,7 @@ const ConversationsScreen: React.FC = () => {
           <Text style={styles.errorText}>{error}</Text>
           <TouchableOpacity 
             style={styles.retryButton}
-            onPress={refreshConversations}
+            onPress={() => setManualRefresh(prev => prev + 1)}
           >
             <Text style={styles.retryButtonText}>Reintentar</Text>
           </TouchableOpacity>
@@ -292,6 +372,7 @@ const ConversationsScreen: React.FC = () => {
         </View>
       ) : (
         <FlatList
+          key={`conversations-${conversations.length}-${manualRefresh}`}
           data={conversations}
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
@@ -315,7 +396,7 @@ const ConversationsScreen: React.FC = () => {
           )}
           refreshControl={
             <RefreshControl 
-              refreshing={loading} 
+              refreshing={refreshing} 
               onRefresh={refreshConversations}
               colors={['#007AFF']}
               tintColor="#007AFF"

@@ -211,6 +211,11 @@ const ChatScreen: React.FC = () => {
         markAsRead();
         console.log('Conversación marcada como leída (hook)');
       }
+      
+      // Forzar actualización de la lista de conversaciones
+      setTimeout(() => {
+        refreshConversations();
+      }, 500);
     } catch (error) {
       console.error('Error al marcar conversación como leída:', error);
     }

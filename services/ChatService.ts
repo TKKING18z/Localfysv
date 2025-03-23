@@ -753,7 +753,7 @@ export const chatService = {
     return unsubscribe;
   },
 
-  // Función adicional para verificar o crear una conversación entre usuario y propietario de negocio
+  // Verificar o crear una conversación entre usuario y propietario de negocio
   checkOrCreateBusinessConversation: async (
     userId: string,
     userName: string,
@@ -763,63 +763,113 @@ export const chatService = {
     businessName: string
   ): Promise<Result<{conversationId: string}>> => {
     try {
-      // Primero verificamos si ya existe la conversación
+      console.log('[ChatService] Checking for business conversation');
+      
+      if (!userId || !businessOwnerId || !businessId) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'Faltan datos requeridos para crear conversación', 
+            code: 'chat/missing-parameters' 
+          } 
+        };
+      }
+      
+      // Buscar conversación existente con más precisión
       const conversationsRef = firebase.firestore().collection('conversations');
-      const snapshot = await conversationsRef
+      
+      // Primero verificamos con ambos participantes y businessId para mayor precisión
+      let existingQuery = await conversationsRef
         .where('participants', 'array-contains', userId)
         .where('businessId', '==', businessId)
         .get();
       
-      // Verificar en los resultados si hay una conversación con los mismos participantes
-      const matchingDocs = snapshot.docs.filter(doc => {
-        const data = doc.data();
-        return data.participants && 
-               data.participants.includes(userId) && 
-               data.participants.includes(businessOwnerId);
-      });
+      let existingConversationId: string | null = null;
       
-      // Si existe una conversación con los participantes correctos, usarla
-      if (matchingDocs.length > 0) {
-        const existingConversationDoc = matchingDocs[0];
-        const existingConversationId = existingConversationDoc.id;
-        console.log(`Usando conversación existente: ${existingConversationId}`);
-        return { success: true, data: { conversationId: existingConversationId } };
+      // Verificar exactamente los mismos participantes
+      for (const doc of existingQuery.docs) {
+        const data = doc.data();
+        const participants = data.participants || [];
+        
+        // Verificar que ambos participantes estén presentes
+        if (participants.includes(userId) && participants.includes(businessOwnerId)) {
+          console.log(`[ChatService] Found existing conversation: ${doc.id}`);
+          existingConversationId = doc.id;
+          
+          // Actualizar nombre del negocio si ha cambiado
+          if (data.businessName !== businessName) {
+            await conversationsRef.doc(doc.id).update({
+              businessName,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            });
+          }
+          
+          break;
+        }
       }
       
-      // Si no existe, crear una nueva
-      console.log('Creando nueva conversación de negocio');
+      // Si no encontramos una conversación específica, crear una nueva
+      if (!existingConversationId) {
+        console.log('[ChatService] Creating new business conversation');
+        
+        const participants = [userId, businessOwnerId];
+        const participantNames: Record<string, string> = {
+          [userId]: userName,
+          [businessOwnerId]: businessOwnerName
+        };
+        
+        // Inicializar unreadCount
+        const unreadCount: Record<string, number> = {};
+        participants.forEach(p => {
+          unreadCount[p] = 0;
+        });
+        
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        // Crear nueva conversación con estructura más completa
+        const newConversationRef = conversationsRef.doc();
+        
+        await newConversationRef.set({
+          participants,
+          participantNames,
+          businessId,
+          businessName,
+          unreadCount,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          // Añadir campos adicionales para mejor experiencia
+          lastActivity: timestamp,
+          type: 'business'
+        });
+        
+        console.log(`[ChatService] Created new conversation: ${newConversationRef.id}`);
+        existingConversationId = newConversationRef.id;
+        
+        // Añadir mensaje de sistema para mejor contexto
+        const systemMessageRef = newConversationRef.collection('messages').doc();
+        await systemMessageRef.set({
+          id: systemMessageRef.id,
+          text: `Conversación iniciada con ${businessName}`,
+          senderId: 'system',
+          timestamp: timestamp,
+          read: true,
+          type: 'system'
+        });
+      }
       
-      // Preparar datos para la conversación
-      const participants = [userId, businessOwnerId];
-      const participantNames: Record<string, string> = {
-        [userId]: userName,
-        [businessOwnerId]: businessOwnerName
+      // Verificar que el ID existe antes de devolverlo
+      if (!existingConversationId) {
+        throw new Error('No se pudo crear o recuperar la conversación');
+      }
+      
+      return { 
+        success: true, 
+        data: { 
+          conversationId: existingConversationId 
+        } 
       };
-      
-      // Inicializar unreadCount
-      const unreadCount: Record<string, number> = {};
-      participants.forEach((p: string) => {
-        unreadCount[p] = 0;
-      });
-      
-      const timestamp = firebase.firestore.FieldValue.serverTimestamp();
-      
-      // Crear la nueva conversación
-      const newConversationRef = conversationsRef.doc();
-      await newConversationRef.set({
-        participants,
-        participantNames,
-        businessId,
-        businessName,
-        unreadCount,
-        createdAt: timestamp,
-        updatedAt: timestamp
-      });
-      
-      console.log(`Nueva conversación creada: ${newConversationRef.id}`);
-      return { success: true, data: { conversationId: newConversationRef.id } };
     } catch (error) {
-      console.error('Error al verificar/crear conversación de negocio:', error);
+      console.error('[ChatService] Error checking/creating business conversation:', error);
       return { 
         success: false, 
         error: { 
