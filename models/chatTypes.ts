@@ -25,6 +25,7 @@ export interface Conversation {
   businessId?: string; // ID del negocio relacionado (si aplica)
   businessName?: string; // Nombre del negocio relacionado
   unreadCount: Record<string, number>; // Conteo de mensajes no leídos por usuario
+  deletedFor?: Record<string, boolean>; // Mapeo de IDs de usuario a estado de eliminación (soft delete)
   createdAt: firebase.firestore.Timestamp | Date | string;
   updatedAt: firebase.firestore.Timestamp | Date | string;
 }

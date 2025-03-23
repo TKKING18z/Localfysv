@@ -21,23 +21,44 @@ export const chatService = {
         return { success: false, error: { message: 'ID de usuario requerido', code: 'chat/missing-user-id' }};
       }
 
+      console.log(`Fetching conversations for user ${userId}`);
+
+      // Obtener todas las conversaciones del usuario
       const snapshot = await firebase.firestore()
         .collection('conversations')
         .where('participants', 'array-contains', userId)
         .orderBy('updatedAt', 'desc')
         .get();
 
-      const conversations = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Conversation[];
+      console.log(`Retrieved ${snapshot.docs.length} conversations from Firestore`);
+
+      // Filtrar estrictamente conversaciones marcadas como eliminadas
+      const conversations = snapshot.docs
+        .filter(doc => {
+          const data = doc.data();
+          
+          // Comprobar si la conversación está marcada como eliminada para este usuario
+          const isDeleted = data.deletedFor && data.deletedFor[userId] === true;
+          
+          if (isDeleted) {
+            console.log(`Filtering out deleted conversation: ${doc.id}`);
+          }
+          
+          return !isDeleted;
+        })
+        .map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Conversation[];
+
+      console.log(`After filtering, ${conversations.length} conversations remain`);
 
       // Asegurar que cada conversación tenga las propiedades necesarias
       const validatedConversations = conversations.map(conv => {
         // Asegurar que existe unreadCount con valor por defecto
         if (!conv.unreadCount) {
           conv.unreadCount = {};
-          conv.participants.forEach(p => {
+          conv.participants.forEach((p: string) => {
             conv.unreadCount[p] = 0;
           });
         }
@@ -234,7 +255,7 @@ export const chatService = {
       
       // Actualizar contadores de no leídos para todos excepto el remitente
       const unreadCount: Record<string, number> = conversationData.unreadCount ? { ...conversationData.unreadCount } : {};
-      participants.forEach(participantId => {
+      participants.forEach((participantId: string) => {
         if (participantId !== senderId) {
           unreadCount[participantId] = (unreadCount[participantId] || 0) + 1;
         }
@@ -388,8 +409,8 @@ export const chatService = {
           
           // Verificar que contenga exactamente los mismos participantes (sin importar el orden)
           const hasSameParticipants = 
-            participants.every(p => docParticipants.includes(p)) && 
-            docParticipants.every(p => participants.includes(p));
+            participants.every((p: string) => docParticipants.includes(p)) && 
+            docParticipants.every((p: string) => participants.includes(p));
           
           if (hasSameParticipants) {
             existingConversationId = doc.id;
@@ -412,8 +433,8 @@ export const chatService = {
           const docParticipants = data.participants || [];
           // Verificar mismos participantes
           const hasSameParticipants = 
-            participants.every(p => docParticipants.includes(p)) && 
-            docParticipants.every(p => participants.includes(p));
+            participants.every((p: string) => docParticipants.includes(p)) && 
+            docParticipants.every((p: string) => participants.includes(p));
           
           if (hasSameParticipants) {
             existingConversationId = doc.id;
@@ -543,6 +564,79 @@ export const chatService = {
     }
   },
 
+  // Eliminar (marcar como eliminada) una conversación
+  deleteConversation: async (conversationId: string, userId: string): Promise<Result<void>> => {
+    try {
+      if (!conversationId || !userId) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de conversación y usuario requeridos', 
+            code: 'chat/missing-parameters' 
+          } 
+        };
+      }
+
+      // Verificar que la conversación existe
+      const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
+      const conversationDoc = await conversationRef.get();
+      
+      if (!conversationDoc.exists) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'La conversación no existe', 
+            code: 'chat/conversation-not-found' 
+          } 
+        };
+      }
+      
+      // Verificar que el usuario es parte de la conversación
+      const conversationData = conversationDoc.data();
+      if (!conversationData?.participants.includes(userId)) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'No tienes permiso para eliminar esta conversación', 
+            code: 'chat/unauthorized' 
+          } 
+        };
+      }
+      
+      console.log(`Marking conversation ${conversationId} as deleted for user ${userId}`);
+      
+      try {
+        // Usando la estrategia de marcado como eliminado ("soft delete")
+        // Esto funciona dentro de las restricciones de las reglas de seguridad
+        await conversationRef.update({
+          [`deletedFor.${userId}`]: true,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log(`Conversation ${conversationId} marked as deleted for user ${userId}`);
+        return { success: true };
+      } catch (updateError) {
+        console.error('Error marking conversation as deleted:', updateError);
+        return { 
+          success: false, 
+          error: { 
+            message: 'Error al marcar la conversación como eliminada',
+            code: 'chat/update-failed' 
+          } 
+        };
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      return { 
+        success: false, 
+        error: { 
+          message: error instanceof Error ? error.message : 'Error desconocido al eliminar conversación',
+          code: 'chat/delete-failed' 
+        } 
+      };
+    }
+  },
+
   // Escuchar por cambios en una conversación (para tiempo real)
   listenToConversation: (
     conversationId: string,
@@ -657,6 +751,83 @@ export const chatService = {
       );
       
     return unsubscribe;
+  },
+
+  // Función adicional para verificar o crear una conversación entre usuario y propietario de negocio
+  checkOrCreateBusinessConversation: async (
+    userId: string,
+    userName: string,
+    businessOwnerId: string,
+    businessOwnerName: string,
+    businessId: string,
+    businessName: string
+  ): Promise<Result<{conversationId: string}>> => {
+    try {
+      // Primero verificamos si ya existe la conversación
+      const conversationsRef = firebase.firestore().collection('conversations');
+      const snapshot = await conversationsRef
+        .where('participants', 'array-contains', userId)
+        .where('businessId', '==', businessId)
+        .get();
+      
+      // Verificar en los resultados si hay una conversación con los mismos participantes
+      const matchingDocs = snapshot.docs.filter(doc => {
+        const data = doc.data();
+        return data.participants && 
+               data.participants.includes(userId) && 
+               data.participants.includes(businessOwnerId);
+      });
+      
+      // Si existe una conversación con los participantes correctos, usarla
+      if (matchingDocs.length > 0) {
+        const existingConversationDoc = matchingDocs[0];
+        const existingConversationId = existingConversationDoc.id;
+        console.log(`Usando conversación existente: ${existingConversationId}`);
+        return { success: true, data: { conversationId: existingConversationId } };
+      }
+      
+      // Si no existe, crear una nueva
+      console.log('Creando nueva conversación de negocio');
+      
+      // Preparar datos para la conversación
+      const participants = [userId, businessOwnerId];
+      const participantNames: Record<string, string> = {
+        [userId]: userName,
+        [businessOwnerId]: businessOwnerName
+      };
+      
+      // Inicializar unreadCount
+      const unreadCount: Record<string, number> = {};
+      participants.forEach((p: string) => {
+        unreadCount[p] = 0;
+      });
+      
+      const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+      
+      // Crear la nueva conversación
+      const newConversationRef = conversationsRef.doc();
+      await newConversationRef.set({
+        participants,
+        participantNames,
+        businessId,
+        businessName,
+        unreadCount,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      });
+      
+      console.log(`Nueva conversación creada: ${newConversationRef.id}`);
+      return { success: true, data: { conversationId: newConversationRef.id } };
+    } catch (error) {
+      console.error('Error al verificar/crear conversación de negocio:', error);
+      return { 
+        success: false, 
+        error: { 
+          message: error instanceof Error ? error.message : 'Error desconocido',
+          code: 'chat/business-conversation-failed'
+        } 
+      };
+    }
   }
 };
 

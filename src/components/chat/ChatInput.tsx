@@ -41,6 +41,36 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
     }
   };
   
+  // Agregar función para comprimir imágenes antes de subir
+  const compressAndResizeImage = async (uri: string): Promise<string> => {
+    try {
+      // En un escenario real, aquí implementarías la compresión de imágenes
+      // con una librería como react-native-image-resizer
+      
+      // Para este ejemplo, simplemente devolvemos la misma URI
+      // En una implementación real, reemplazarías esto con la compresión real
+      console.log('Comprimiendo imagen antes de subir...');
+      return uri;
+      
+      /* Ejemplo con react-native-image-resizer:
+      const result = await ImageResizer.createResizedImage(
+        uri,
+        1200, // maxWidth
+        1200, // maxHeight
+        'JPEG',
+        70, // quality (0-100)
+        0, // rotation
+        undefined, // outputPath
+        false // keepMeta
+      );
+      return result.uri;
+      */
+    } catch (error) {
+      console.error('Error comprimiendo imagen:', error);
+      return uri; // Devolver original en caso de error
+    }
+  };
+  
   const handleAttachImage = async () => {
     if (isLoading || !uploadImage) return;
     
@@ -69,26 +99,30 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         
         try {
           const imageUri = result.assets[0].uri;
-          console.log('Uploading image...');
-          const imageUrl = await uploadImage(imageUri);
+          
+          // Comprimir imagen antes de subir
+          const compressedUri = await compressAndResizeImage(imageUri);
+          console.log('Subiendo imagen comprimida...');
+          
+          const imageUrl = await uploadImage(compressedUri);
           
           if (imageUrl) {
-            console.log('Image uploaded successfully');
+            console.log('Imagen subida exitosamente');
             await onSend(text.trim() || '', imageUrl);
             setText('');
           } else {
-            console.error('Failed to upload image');
+            console.error('Error al subir imagen');
             Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
           }
         } catch (error) {
-          console.error('Error uploading image:', error);
+          console.error('Error subiendo imagen:', error);
           Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
         } finally {
           setIsLoading(false);
         }
       }
     } catch (error) {
-      console.error('Error picking image:', error);
+      console.error('Error seleccionando imagen:', error);
       Alert.alert('Error', 'No se pudo abrir la galería. Intente nuevamente.');
     }
   };

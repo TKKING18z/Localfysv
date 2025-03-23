@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
 import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { useAuth } from '../context/AuthContext';
+import { useChat } from '../context/ChatContext'; // Añadir esta importación
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -118,7 +119,14 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
 
 // Bottom Tab Navigator
 function MainTabs() {
-  const { unreadTotal } = useChat();
+  // Add a try-catch to safely handle the useChat hook
+  let unreadTotal = 0;
+  try {
+    const chatContext = useChat();
+    unreadTotal = chatContext?.unreadTotal || 0;
+  } catch (error) {
+    console.log('Chat context not available:', error);
+  }
   
   return (
     <Tab.Navigator
@@ -129,8 +137,8 @@ function MainTabs() {
             return <MaterialIcons name={'home' as any} size={size} color={color} />;
           } else if (route.name === 'Conversations') {
             return (
-              <View>
-                <MaterialIcons name={'chat' as any} size={size} color={color} />
+              <View style={{ position: 'relative' }}>
+                <MaterialIcons name="chat" size={size} color={color} />
                 {unreadTotal > 0 && (
                   <View style={{
                     position: 'absolute',
@@ -138,17 +146,18 @@ function MainTabs() {
                     top: -6,
                     backgroundColor: '#FF3B30',
                     borderRadius: 10,
-                    width: 16,
+                    minWidth: 16,
                     height: 16,
                     justifyContent: 'center',
                     alignItems: 'center',
+                    paddingHorizontal: 4
                   }}>
                     <Text style={{
                       color: 'white',
                       fontSize: 10,
-                      fontWeight: 'bold',
+                      fontWeight: 'bold'
                     }}>
-                      {unreadTotal > 9 ? '9+' : unreadTotal}
+                      {unreadTotal > 99 ? '99+' : unreadTotal}
                     </Text>
                   </View>
                 )}

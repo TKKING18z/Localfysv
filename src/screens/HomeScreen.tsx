@@ -12,11 +12,12 @@ import {
   StatusBar,
   Alert
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
+import { useChat } from '../context/ChatContext';
 import BusinessCard from '../components/BusinessCard';
 import SkeletonBusinessCard from '../components/SkeletonBusinessCard';
 import { useLocation } from '../hooks/useLocation';
@@ -29,6 +30,7 @@ type ExtendedStackParamList = RootStackParamList & {
   AddBusiness: undefined;
   Favorites: undefined;
   Profile: undefined;
+  Conversations: undefined;
 };
 
 type NavigationProps = StackNavigationProp<ExtendedStackParamList>;
@@ -46,6 +48,9 @@ const HomeScreen: React.FC = () => {
     toggleFavorite,
     isFavorite
   } = useBusinesses();
+  
+  // Add ChatContext to get unread messages count
+  const { unreadTotal, refreshConversations } = useChat();
   
   const { userLocation, refreshLocation, getFormattedDistance } = useLocation();
 
@@ -242,6 +247,22 @@ const HomeScreen: React.FC = () => {
     </View>
   );
 
+  // Refresh data when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('HomeScreen focused - refreshing data');
+      
+      // Refresh chat data when returning from Conversations screen
+      refreshConversations().catch(err => {
+        console.error('Error refreshing conversations:', err);
+      });
+      
+      return () => {
+        // Cleanup if needed
+      };
+    }, [refreshConversations])
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FF" />
@@ -380,10 +401,19 @@ const HomeScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItem} 
-          onPress={() => navigation.navigate('Map')}
+          onPress={() => navigation.navigate('Conversations')}
         >
-          <MaterialIcons name="explore" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Explorar</Text>
+          <View>
+            <MaterialIcons name="chat" size={24} color="#8E8E93" />
+            {unreadTotal > 0 && (
+              <View style={styles.chatBadge}>
+                <Text style={styles.chatBadgeText}>
+                  {unreadTotal > 99 ? '99+' : unreadTotal}
+                </Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.navItemText}>Mensajes</Text>
         </TouchableOpacity>
         
         <TouchableOpacity 
@@ -650,6 +680,24 @@ const styles = StyleSheet.create({
   },
   sortButtonTextActive: {
     color: '#FFFFFF',
+  },
+  // Add styles for chat badge
+  chatBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -10,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  chatBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

@@ -16,6 +16,7 @@ interface ChatContextType {
   createConversation: (userId: string, userName: string, businessId?: string, businessName?: string, initialMessage?: string) => Promise<string | null>;
   markConversationAsRead: () => Promise<void>;
   refreshConversations: () => Promise<void>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -55,6 +56,30 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       setActiveMessages([]);
     }
   }, [activeConversationId, user]);
+
+  // Función para actualizar el contador de mensajes no leídos
+  const updateUnreadCount = useCallback(() => {
+    if (!user || !conversations.length) return;
+    
+    // Calcular el total de mensajes no leídos
+    const total = conversations.reduce((sum, conv) => {
+      return sum + (conv.unreadCount?.[user.uid] || 0);
+    }, 0);
+    
+    setUnreadTotal(total);
+    
+    // Actualizar el badge en el tab navigator de manera opcional
+    try {
+      // Aquí podrías agregar integración con notificaciones nativas si lo deseas
+    } catch (error) {
+      console.error('Error al actualizar badge:', error);
+    }
+  }, [user, conversations]);
+
+  // Agregar este efecto dentro del ChatProvider
+  useEffect(() => {
+    updateUnreadCount();
+  }, [updateUnreadCount, conversations]);
   
   // Función para cargar todas las conversaciones del usuario
   const loadConversations = useCallback(async () => {
@@ -71,10 +96,17 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       const result = await chatService.getUserConversations(user.uid);
       if (result.success && result.data) {
         console.log(`Loaded ${result.data.length} conversations`);
-        setConversations(result.data);
         
-        // Calcular total de no leídos
-        const total = result.data.reduce((sum, conv) => {
+        // Filtrar aquí también en caso de que el servicio no lo haga correctamente
+        const filteredConversations = result.data.filter(conv => 
+          !(conv.deletedFor && conv.deletedFor[user.uid] === true)
+        );
+        
+        console.log(`After additional filtering, ${filteredConversations.length} conversations remain`);
+        setConversations(filteredConversations);
+        
+        // Calcular total de no leídos basado en las conversaciones filtradas
+        const total = filteredConversations.reduce((sum, conv) => {
           return sum + (conv.unreadCount?.[user.uid] || 0);
         }, 0);
         
@@ -113,6 +145,13 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       // Cargar datos de la conversación
       const convResult = await chatService.getConversation(conversationId);
       if (convResult.success && convResult.data) {
+        // Verificar si está marcada como eliminada para este usuario
+        if (convResult.data.deletedFor && convResult.data.deletedFor[user.uid]) {
+          setError('Esta conversación ya no está disponible');
+          setLoading(false);
+          return;
+        }
+        
         setActiveConversation(convResult.data);
         
         // Configurar listener para mensajes
@@ -370,6 +409,56 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       console.error('Error marking conversation as read:', error);
     }
   }, [user, activeConversation, unreadTotal]);
+
+  // Eliminar conversación (soft delete)
+  const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
+    if (!user) {
+      console.error('Cannot delete conversation: no user logged in');
+      return false;
+    }
+    
+    try {
+      console.log(`Attempting to delete conversation: ${conversationId}`);
+      
+      // Guardar información de la conversación antes de marcarla como eliminada
+      const deletedConversation = conversations.find(conv => conv.id === conversationId);
+      if (!deletedConversation) {
+        console.error(`Conversation ${conversationId} not found in local state`);
+        return false;
+      }
+      
+      const result = await chatService.deleteConversation(conversationId, user.uid);
+      
+      if (result.success) {
+        console.log(`Successfully marked conversation ${conversationId} as deleted`);
+        
+        // Actualizar el estado local después de eliminar (soft delete)
+        setConversations(prevConversations => 
+          prevConversations.filter(conv => conv.id !== conversationId)
+        );
+        
+        // Actualizar el contador de no leídos
+        if (deletedConversation && deletedConversation.unreadCount?.[user.uid]) {
+          setUnreadTotal(prev => Math.max(0, prev - deletedConversation.unreadCount![user.uid]));
+        }
+        
+        // Si la conversación eliminada era la activa, limpiar el estado
+        if (activeConversationId === conversationId) {
+          _setActiveConversationId(null);
+          setActiveConversation(null);
+          setActiveMessages([]);
+        }
+        
+        return true;
+      } else {
+        console.error('Failed to delete conversation:', result.error);
+        return false;
+      }
+    } catch (error) {
+      console.error('Error deleting conversation:', error);
+      return false;
+    }
+  }, [user, conversations, activeConversationId]);
   
   const contextValue: ChatContextType = {
     conversations,
@@ -382,7 +471,8 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     sendMessage,
     createConversation,
     markConversationAsRead,
-    refreshConversations
+    refreshConversations,
+    deleteConversation
   };
   
   return (
