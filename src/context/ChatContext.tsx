@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useCallback } fr
 import { chatService } from '../../services/ChatService';
 import { useAuth } from './AuthContext';
 import { Conversation, Message } from '../../models/chatTypes';
+import firebase from 'firebase/compat/app'; // Add this import
 
 interface ChatContextType {
   conversations: Conversation[];
@@ -23,7 +24,8 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  // Rename the state setter to avoid recursion when we create our enhanced function
+  const [activeConversationId, _setActiveConversationId] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -128,26 +130,127 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   };
   
-  // Enviar un mensaje
+  // Mejorar la función setActiveConversationId
+  const setActiveConversationId = useCallback(async (id: string | null) => {
+    if (id) {
+      try {
+        setLoading(true);
+        
+        // Verificar que la conversación existe
+        const snapshot = await firebase.firestore()
+          .collection('conversations')
+          .doc(id)
+          .get();
+        
+        if (!snapshot.exists) {
+          console.error(`Conversación con ID ${id} no encontrada`);
+          setError(`La conversación no existe o fue eliminada`);
+          _setActiveConversationId(null);
+          setLoading(false);
+          return;
+        }
+        
+        // Establecer el ID de conversación activa
+        _setActiveConversationId(id);
+        
+        // Precargar la conversación
+        const conversationData = {
+          id,
+          ...snapshot.data()
+        } as Conversation;
+        setActiveConversation(conversationData);
+        
+        // Cargar mensajes
+        const messagesSnapshot = await firebase.firestore()
+          .collection('conversations')
+          .doc(id)
+          .collection('messages')
+          .orderBy('timestamp', 'desc')
+          .limit(20)
+          .get();
+        
+        const messages = messagesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        setActiveMessages(messages as Message[]);
+        setLoading(false);
+      } catch (error) {
+        console.error('Error al establecer conversación activa:', error);
+        setError('Error al cargar la conversación');
+        setLoading(false);
+      }
+    } else {
+      _setActiveConversationId(null);
+      setActiveConversation(null);
+      setActiveMessages([]);
+    }
+  }, []);
+  
+  // Improved sendMessage function that works even without activeConversation
   const sendMessage = async (text: string, imageUrl?: string): Promise<boolean> => {
-    if (!user || !activeConversation) return false;
+    if (!user) {
+      console.error('Cannot send message: Missing user');
+      return false;
+    }
+    
+    if (!activeConversation && !activeConversationId) {
+      console.error('Cannot send message: Missing active conversation and ID');
+      return false;
+    }
     
     try {
+      // Get the conversation ID (either from activeConversation or activeConversationId)
+      const conversationId = activeConversation?.id || activeConversationId;
+      
+      if (!conversationId) {
+        console.error('Cannot send message: Failed to determine conversationId');
+        return false;
+      }
+      
+      console.log(`Sending message in conversation ${conversationId}`);
+      console.log(`From user: ${user.uid}`);
+      console.log(`Message: "${text.substring(0, 20)}${text.length > 20 ? '...' : ''}"`);
+      
+      // Verify conversation exists before sending
+      const convDoc = await firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .get();
+      
+      if (!convDoc.exists) {
+        console.error(`Conversation ${conversationId} does not exist in Firestore`);
+        return false;
+      }
+      
+      // Get the conversation data if activeConversation is not available
+      const conversationData = activeConversation || (convDoc.data() as Conversation);
+      
+      const userName = user.displayName || 'Usuario';
+      const userPhoto = user.photoURL || '';
+      
       const result = await chatService.sendMessage(
-        activeConversation.id,
+        conversationId,
         user.uid,
         { 
           text, 
           imageUrl,
           type: imageUrl ? 'image' : 'text'
         },
-        user.displayName || '',
-        user.photoURL || ''
+        userName,
+        userPhoto
       );
+      
+      console.log('Send result:', result.success);
+      
+      if (!result.success) {
+        console.error('Error details:', result.error);
+      }
       
       return result.success;
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error in context sendMessage:', error);
       return false;
     }
   };
@@ -235,7 +338,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     loading,
     error,
     unreadTotal,
-    setActiveConversationId,
+    setActiveConversationId, // This is now our enhanced function
     sendMessage,
     createConversation,
     markConversationAsRead,

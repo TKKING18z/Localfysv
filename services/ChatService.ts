@@ -114,14 +114,53 @@ export const chatService = {
     senderPhoto?: string
   ): Promise<Result<Message>> => {
     try {
+      console.log(`ChatService: Sending message to conversation ${conversationId}`);
+      console.log(`From user: ${senderId}`);
+      
+      if (!conversationId) {
+        console.error('ChatService: Missing conversationId');
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de conversación no proporcionado',
+            code: 'chat/missing-conversation-id'
+          } 
+        };
+      }
+      
+      if (!senderId) {
+        console.error('ChatService: Missing senderId');
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de remitente no proporcionado',
+            code: 'chat/missing-sender-id'
+          } 
+        };
+      }
+      
       const timestamp = firebase.firestore.FieldValue.serverTimestamp();
       const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
+      
+      // Verificar que la conversación existe
+      const conversationDoc = await conversationRef.get();
+      if (!conversationDoc.exists) {
+        console.error('ChatService: Conversation does not exist');
+        return { 
+          success: false, 
+          error: { 
+            message: 'La conversación no existe',
+            code: 'chat/conversation-not-found'
+          } 
+        };
+      }
+
       const messageRef = conversationRef.collection('messages').doc();
 
       // Datos del mensaje
       const messageObj: any = {
         id: messageRef.id,
-        text: messageData.text,
+        text: messageData.text || '',
         senderId,
         senderName: senderName || '',
         senderPhoto: senderPhoto || '',
@@ -134,14 +173,20 @@ export const chatService = {
         messageObj.imageUrl = messageData.imageUrl;
       }
 
-      // Obtener la conversación para actualizar metadatos
-      const conversationDoc = await conversationRef.get();
-      if (!conversationDoc.exists) {
-        throw new Error('La conversación no existe');
-      }
-
       const conversationData = conversationDoc.data() as Conversation;
       const participants = conversationData.participants || [];
+      
+      // Verificar que el remitente es parte de la conversación
+      if (!participants.includes(senderId)) {
+        console.error('ChatService: Sender not part of conversation');
+        return { 
+          success: false, 
+          error: { 
+            message: 'El remitente no es parte de esta conversación',
+            code: 'chat/unauthorized-sender'
+          } 
+        };
+      }
       
       // Actualizar contadores de no leídos para todos excepto el remitente
       const unreadCount: Record<string, number> = conversationData.unreadCount ? { ...conversationData.unreadCount } : {};
@@ -152,31 +197,44 @@ export const chatService = {
       });
 
       // Actualizar transacción atomica
-      await firebase.firestore().runTransaction(async transaction => {
-        // Agregar mensaje
-        transaction.set(messageRef, messageObj);
-        
-        // Actualizar conversación
-        transaction.update(conversationRef, {
-          lastMessage: {
-            text: messageData.text,
-            senderId,
-            timestamp
-          },
-          unreadCount,
-          updatedAt: timestamp
+      try {
+        await firebase.firestore().runTransaction(async transaction => {
+          // Agregar mensaje
+          transaction.set(messageRef, messageObj);
+          
+          // Actualizar conversación
+          transaction.update(conversationRef, {
+            lastMessage: {
+              text: messageData.text || '',
+              senderId,
+              timestamp
+            },
+            unreadCount,
+            updatedAt: timestamp
+          });
         });
-      });
+        
+        console.log('ChatService: Message sent successfully');
+        
+        // Devolver el mensaje con timestamp actualizado para la interfaz
+        const message: Message = {
+          ...messageObj,
+          timestamp: firebase.firestore.Timestamp.now(),
+        };
 
-      // Devolver el mensaje con timestamp actualizado para la interfaz
-      const message: Message = {
-        ...messageObj,
-        timestamp: firebase.firestore.Timestamp.now(),
-      };
-
-      return { success: true, data: message };
+        return { success: true, data: message };
+      } catch (transactionError) {
+        console.error('ChatService: Transaction failed:', transactionError);
+        return { 
+          success: false, 
+          error: { 
+            message: 'Error al guardar el mensaje en la base de datos',
+            code: 'chat/transaction-failed'
+          } 
+        };
+      }
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('ChatService: Error sending message:', error);
       return { 
         success: false, 
         error: { 

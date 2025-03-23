@@ -56,16 +56,23 @@ export default function App() {
   const hydrateState = async () => {
     try {
       // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
-      await AsyncStorage.getItem('favorites'); // Solo verificamos que podemos acceder
+      await AsyncStorage.getItem('favorites');
       
       // Verificar si hay información de sesión de usuario
       const userUid = await AsyncStorage.getItem('user_uid');
       if (userUid) {
         console.log('Found existing user session in AsyncStorage:', userUid);
+        
+        // Solo verificar Firestore si hay un usuario autenticado
+        try {
+          await firebase.firestore().collection('businesses').limit(1).get();
+          console.log('Firestore connection successful');
+        } catch (firestoreError) {
+          console.warn('Firestore connection check failed:', firestoreError);
+        }
+      } else {
+        console.log('No session found, skipping Firestore check');
       }
-      
-      // Comprobar si la base de datos de Firebase está accesible
-      await firebase.firestore().collection('test').doc('test').get();
     } catch (error) {
       console.error('Error durante la hidratación del estado:', error);
     } finally {

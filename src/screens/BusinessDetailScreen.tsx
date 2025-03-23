@@ -29,6 +29,7 @@ import { firebaseService } from '../services/firebaseService';
 import { Promotion } from '../types/businessTypes';
 // Add the import for ChatContext
 import { useChat } from '../context/ChatContext';
+import firebase from 'firebase/compat/app';
 
 // Components
 import BusinessHoursView from '../components/BusinessHoursView';
@@ -77,6 +78,7 @@ const BusinessDetailScreen: React.FC = () => {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loadingPromotions, setLoadingPromotions] = useState(false);
   const [isBusinessOwner, setIsBusinessOwner] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // Add this state for loading indicator
   
   // Valores animados
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -302,19 +304,38 @@ const BusinessDetailScreen: React.FC = () => {
     }
     
     try {
+      // Mostrar indicador de carga
+      setIsLoading(true);
+      
+      // Verificar que el usuario tenga permisos para chatear
+      if (user.uid === business.createdBy) {
+        Alert.alert('Información', 'No puedes iniciar un chat contigo mismo como propietario');
+        setIsLoading(false);
+        return;
+      }
+      
       console.log('Iniciando chat con:', business.name, 'ID:', business.createdBy);
       
-      // Start or get existing conversation - asegurarse de pasar todos los parámetros necesarios
+      // Start or get existing conversation
       const conversationId = await createConversation(
-        business.createdBy,          // ID del propietario del negocio
-        business.name,               // Nombre del negocio/destinatario
-        businessId,                  // ID del negocio para referencia
-        getBusinessImage || ''       // Imagen del negocio (opcional)
+        business.createdBy,
+        business.name,
+        businessId,
+        getBusinessImage || ''
       );
       
       if (conversationId) {
         console.log('Conversación creada/obtenida con éxito, ID:', conversationId);
-        // Navigate to chat screen
+        
+        // Verificar que la conversación existe antes de navegar
+        const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
+        const conversationDoc = await conversationRef.get();
+        
+        if (!conversationDoc.exists) {
+          throw new Error('La conversación fue creada pero no se puede acceder a ella');
+        }
+        
+        // Navegar a la pantalla de chat
         navigation.navigate('Chat', { conversationId });
       } else {
         console.error('No se obtuvo ID de conversación');
@@ -322,7 +343,9 @@ const BusinessDetailScreen: React.FC = () => {
       }
     } catch (error) {
       console.error('Error starting chat:', error);
-      Alert.alert('Error', 'No se pudo iniciar la conversación: ' + (error instanceof Error ? error.message : String(error)));
+      Alert.alert('Error', 'No se pudo iniciar la conversación. Por favor intenta de nuevo más tarde.');
+    } finally {
+      setIsLoading(false);
     }
   }, [user, business, businessId, navigation, createConversation, getBusinessImage]);
 
@@ -1116,6 +1139,7 @@ const BusinessDetailScreen: React.FC = () => {
               style={styles.actionButton}
               onPress={handleStartChat}
               activeOpacity={0.8}
+              disabled={isLoading}
               accessibilityRole="button"
               accessibilityLabel="Chatear con el negocio"
             >
@@ -1125,8 +1149,14 @@ const BusinessDetailScreen: React.FC = () => {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <MaterialIcons name="chat" size={22} color="white" />
-                <Text style={styles.actionButtonText}>Chatear</Text>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <MaterialIcons name="chat" size={22} color="white" />
+                    <Text style={styles.actionButtonText}>Chatear</Text>
+                  </>
+                )}
               </LinearGradient>
             </TouchableOpacity>
           )}

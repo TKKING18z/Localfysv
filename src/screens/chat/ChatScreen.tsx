@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   FlatList,
@@ -15,8 +15,8 @@ import {
   Alert
 } from 'react-native';
 import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack'; // Add this import
-import { MaterialIcons } from '@expo/vector-icons'; // Add this import
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
@@ -28,12 +28,10 @@ import { useChat as useChatHook } from '../../hooks/useChat';
 import firebase from 'firebase/compat/app';
 
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
-// Add this type for proper navigation typing
 type ChatScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const ChatScreen: React.FC = () => {
   const route = useRoute<ChatScreenRouteProp>();
-  // Update the navigation hook with proper typing
   const navigation = useNavigation<ChatScreenNavigationProp>();
   const { user } = useAuth();
   const { 
@@ -48,12 +46,12 @@ const ChatScreen: React.FC = () => {
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [chatError, setChatError] = useState<string | null>(null);
   
-  // New state variables for improved loading states
+  // States for improved loading handling
   const [loadingTimeout, setLoadingTimeout] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true); // Add loading state
+  const [loading, setLoading] = useState(true);
   
-  // Usar el hook useChat para manejar mensajes en tiempo real
+  // Hook for real-time message handling
   const { 
     messages: hookMessages, 
     sendMessage: hookSendMessage, 
@@ -64,13 +62,13 @@ const ChatScreen: React.FC = () => {
     conversationId
   });
   
-  // Referencia para el FlatList para hacer scroll a nuevos mensajes
+  // Reference for scrolling to new messages
   const messagesListRef = useRef<FlatList>(null);
   
-  // Determinar qué conjunto de mensajes usar (del contexto o del hook)
+  // Determine which message set to use
   const messages = activeMessages.length > 0 ? activeMessages : hookMessages;
   
-  // Configurar timeout para detectar problemas de carga
+  // Timeout for detecting loading problems
   useEffect(() => {
     if (!conversationId) {
       console.error('ERROR: ID de conversación no proporcionado');
@@ -84,13 +82,12 @@ const ChatScreen: React.FC = () => {
 
     console.log(`Intentando cargar conversación con ID: ${conversationId}`);
 
-    // Update the timeout to also set loadingTimeout state
     const timeout = setTimeout(() => {
       console.log('TIMEOUT: La carga de la conversación está tardando demasiado');
       if (activeMessages.length === 0 && !activeConversation) {
         setLoadingTimeout(true);
       }
-    }, 15000); // 15 segundos
+    }, 15000);
 
     return () => clearTimeout(timeout);
   }, [conversationId, navigation, activeMessages.length, activeConversation]);
@@ -102,70 +99,78 @@ const ChatScreen: React.FC = () => {
     }
   }, [messages, activeConversation]);
 
-  // Agregar un efecto para verificar y cargar manualmente la conversación si es necesario
-  useEffect(() => {
-    const loadConversationManually = async () => {
-      if (!user || !conversationId) return;
-      if (activeConversation) return; // Ya está cargada
+  // Manual loading logic with a retry function
+  const loadConversationManually = useCallback(async () => {
+    if (!user || !conversationId) return;
+    if (activeConversation) return;
+    
+    try {
+      console.log('Cargando conversación manualmente desde ChatScreen');
+      const convResult = await firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .get();
       
-      try {
-        console.log('Cargando conversación manualmente desde ChatScreen');
-        const convResult = await firebase.firestore()
-          .collection('conversations')
-          .doc(conversationId)
-          .get();
-        
-        if (!convResult.exists) {
-          console.error(`ERROR: La conversación ${conversationId} no existe en Firestore`);
-          Alert.alert('Error', 'Esta conversación no existe o ha sido eliminada', [
-            { text: 'Volver', onPress: () => navigation.goBack() }
-          ]);
-          return;
-        }
-        
-        console.log('Datos de conversación recuperados manualmente:', convResult.data());
-        
-        // Intentar también cargar mensajes
-        const messagesResult = await firebase.firestore()
-          .collection('conversations')
-          .doc(conversationId)
-          .collection('messages')
-          .orderBy('timestamp', 'desc')
-          .limit(20)
-          .get();
-        
-        console.log(`Recuperados ${messagesResult.size} mensajes manualmente`);
-        
-        // Si estamos cargando manualmente, intentar marcar como leídos
-        try {
-          await firebase.firestore()
-            .collection('conversations')
-            .doc(conversationId)
-            .update({
-              [`unreadCount.${user.uid}`]: 0
-            });
-          console.log('Marcado como leído manualmente');
-        } catch (error) {
-          console.error('Error al marcar como leído manualmente:', error);
-        }
-      } catch (error) {
-        console.error('Error cargando conversación manualmente:', error);
-        Alert.alert('Error de conexión', 'No se pudo acceder a los datos de la conversación');
+      if (!convResult.exists) {
+        console.error(`ERROR: La conversación ${conversationId} no existe en Firestore`);
+        Alert.alert('Error', 'Esta conversación no existe o ha sido eliminada', [
+          { text: 'Volver', onPress: () => navigation.goBack() }
+        ]);
+        return;
       }
-    };
+      
+      console.log('Datos de conversación recuperados manualmente:', convResult.data());
+      
+      // Try to load messages as well
+      const messagesResult = await firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .collection('messages')
+        .orderBy('timestamp', 'desc')
+        .limit(20)
+        .get();
+      
+      console.log(`Recuperados ${messagesResult.size} mensajes manualmente`);
+      
+      // Mark as read if loading manually
+      try {
+        await firebase.firestore()
+          .collection('conversations')
+          .doc(conversationId)
+          .update({
+            [`unreadCount.${user.uid}`]: 0
+          });
+        console.log('Marcado como leído manualmente');
+      } catch (error) {
+        console.error('Error al marcar como leído manualmente:', error);
+      }
+    } catch (error) {
+      console.error('Error cargando conversación manualmente:', error);
+      Alert.alert('Error de conexión', 'No se pudo acceder a los datos de la conversación');
+    }
+  }, [conversationId, user, activeConversation, navigation]);
 
-    // Configuramos un tiempo de espera antes de intentar cargar manualmente
+  // Retry handler for timeout or errors
+  const handleRetry = useCallback(() => {
+    setLoading(true);
+    setLoadingTimeout(false);
+    setLoadError(null);
+    loadConversationManually();
+  }, [loadConversationManually]);
+
+  // Try manual loading after a timeout
+  useEffect(() => {
     const timer = setTimeout(() => {
       if (!activeConversation) {
         console.log('Timeout alcanzado, intentando carga manual');
         loadConversationManually();
       }
-    }, 5000); // Intentar después de 5 segundos
+    }, 5000);
 
     return () => clearTimeout(timer);
-  }, [conversationId, user, activeConversation]);
+  }, [conversationId, user, activeConversation, loadConversationManually]);
   
-  // Marcar como leído al abrir la conversación
+  // Mark as read when opening conversation
   useEffect(() => {
     console.log('ChatScreen montada con conversationId:', conversationId);
     
@@ -181,7 +186,7 @@ const ChatScreen: React.FC = () => {
       return;
     }
     
-    // Verificar si la conversación se cargó correctamente
+    // Check if conversation loaded correctly
     if (activeConversation) {
       console.log('Conversación activa cargada:', activeConversation.id);
       console.log('Participantes:', activeConversation.participants);
@@ -189,7 +194,7 @@ const ChatScreen: React.FC = () => {
       console.log('No hay conversación activa cargada aún, intentando cargar...');
     }
     
-    // Intentar marcar como leída al abrir
+    // Try to mark as read when opening
     try {
       if (activeConversation) {
         markConversationAsRead();
@@ -201,26 +206,52 @@ const ChatScreen: React.FC = () => {
     } catch (error) {
       console.error('Error al marcar conversación como leída:', error);
     }
-  }, [conversationId, user, activeConversation]);
+  }, [conversationId, user, activeConversation, markConversationAsRead, markAsRead]);
   
-  // Enviar mensaje usando el sistema disponible
-  const handleSendMessage = async (text: string, imageUrl?: string) => {
-    if (!user) return;
+  // Improved message sending function that handles missing activeConversation
+  const handleSendMessage = async (text: string, imageUrl?: string): Promise<boolean> => {
+    if (!user) {
+      console.error('Cannot send message: No user logged in');
+      return false;
+    }
     
-    if (contextSendMessage) {
-      await contextSendMessage(text, imageUrl);
-    } else if (hookSendMessage) {
-      await hookSendMessage(text, imageUrl);
+    if (!conversationId) {
+      console.error('Cannot send message: No conversationId');
+      return false;
+    }
+    
+    try {
+      console.log(`Attempting to send message: "${text.substring(0, 20)}${text.length > 20 ? '...' : ''}"`);
+      
+      let success = false;
+      
+      // IMPORTANT: Always prefer hookSendMessage if activeConversation isn't available in context
+      if (hookSendMessage) {
+        console.log('Sending via hook');
+        success = await hookSendMessage(text, imageUrl);
+      } else if (contextSendMessage && activeConversation) {
+        console.log('Sending via context');
+        success = await contextSendMessage(text, imageUrl);
+      } else {
+        console.error('No message sending function available or no active conversation');
+        return false;
+      }
+      
+      console.log(`Message send ${success ? 'succeeded' : 'failed'}`);
+      return success;
+    } catch (error) {
+      console.error('Error sending message:', error);
+      return false;
     }
   };
   
-  // Mostrar imagen a tamaño completo
+  // Show full-size image
   const handleImagePress = (imageUrl: string) => {
     setSelectedImage(imageUrl);
     setImageModalVisible(true);
   };
   
-  // Ordenar los mensajes por fecha (más recientes primero en la API, pero los mostramos al revés)
+  // Sort messages by date
   const sortedMessages = [...messages].sort((a, b) => {
     let dateA: Date;
     let dateB: Date;
@@ -244,13 +275,13 @@ const ChatScreen: React.FC = () => {
     return dateA.getTime() - dateB.getTime();
   });
   
-  // Obtener el ID del otro participante
+  // Get other participant ID
   const getOtherParticipantId = () => {
     if (!activeConversation || !user) return '';
     return activeConversation.participants.find(id => id !== user.uid) || '';
   };
   
-  // Obtener información del otro participante para el header
+  // Get other participant info for header
   const otherParticipantId = getOtherParticipantId();
   
   return (
@@ -263,14 +294,14 @@ const ChatScreen: React.FC = () => {
         participantId={otherParticipantId}
       />
       
-      {/* Contenido principal solo si no hay error */}
+      {/* Main content only if no error */}
       {!chatError && (
         <KeyboardAvoidingView
           style={styles.keyboardAvoidingView}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
-          {/* Componente de carga mejorado con estados de error y timeout */}
+          {/* Improved loading component with error and timeout states */}
           {loading ? (
             <View style={styles.centerContainer}>
               <ActivityIndicator size="large" color="#007AFF" />
@@ -282,9 +313,7 @@ const ChatScreen: React.FC = () => {
                   </Text>
                   <TouchableOpacity 
                     style={styles.retryButton}
-                    onPress={() => {
-                      navigation.navigate('Chat', { conversationId });
-                    }}
+                    onPress={handleRetry}
                   >
                     <Text style={styles.retryButtonText}>Reintentar</Text>
                   </TouchableOpacity>
@@ -303,9 +332,7 @@ const ChatScreen: React.FC = () => {
               <Text style={styles.errorText}>{loadError}</Text>
               <TouchableOpacity 
                 style={styles.retryButton}
-                onPress={() => {
-                  navigation.navigate('Chat', { conversationId });
-                }}
+                onPress={handleRetry}
               >
                 <Text style={styles.retryButtonText}>Reintentar</Text>
               </TouchableOpacity>
@@ -345,7 +372,7 @@ const ChatScreen: React.FC = () => {
             />
           )}
           
-          {/* Input para nuevos mensajes */}
+          {/* Input for new messages */}
           <ChatInput 
             onSend={handleSendMessage}
             uploadImage={uploadImage}
@@ -353,7 +380,7 @@ const ChatScreen: React.FC = () => {
         </KeyboardAvoidingView>
       )}
       
-      {/* Mostrar error si existe */}
+      {/* Show error if exists */}
       {chatError && (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>Error: {chatError}</Text>
@@ -366,7 +393,7 @@ const ChatScreen: React.FC = () => {
         </View>
       )}
       
-      {/* Modal para ver imágenes a pantalla completa */}
+      {/* Modal for viewing images at full screen */}
       <Modal
         visible={imageModalVisible}
         transparent={true}
@@ -400,7 +427,6 @@ const ChatScreen: React.FC = () => {
   );
 };
 
-// Combine existing styles with new styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -446,7 +472,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  // New styles for improved loading and error states
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -508,7 +533,6 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
   },
-  // Existing error styles maintained for compatibility
   errorButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 10,

@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 import { chatService } from '../../services/ChatService';
 import { Message, Conversation } from '../../models/chatTypes';
 
@@ -87,16 +89,41 @@ export function useChat({ userId, conversationId }: UseChatProps) {
     };
   }, [userId, conversationId]);
   
-  // Función para enviar mensaje
-  const sendMessage = async (text: string, imageUrl?: string) => {
-    if (!userId || !conversationId || !conversation) {
+  // Enhanced sendMessage function with better error handling
+  const sendMessage = async (text: string, imageUrl?: string): Promise<boolean> => {
+    if (!userId || !conversationId) {
+      console.error('Cannot send message in hook: Missing userId or conversationId');
+      console.log('UserId:', userId);
+      console.log('ConversationId:', conversationId);
       return false;
     }
     
     try {
-      // Obtener información del usuario para el mensaje
-      const userName = conversation.participantNames[userId] || 'Usuario';
-      const userPhoto = conversation.participantPhotos?.[userId] || '';
+      // Directly fetch conversation if we don't have it yet
+      let userNameToUse = 'Usuario';
+      let userPhotoToUse = '';
+      
+      if (!conversation) {
+        console.log('No conversation object available, fetching directly from Firebase');
+        try {
+          const convSnapshot = await firebase.firestore()
+            .collection('conversations')
+            .doc(conversationId)
+            .get();
+            
+          if (convSnapshot.exists) {
+            const data = convSnapshot.data();
+            userNameToUse = data?.participantNames?.[userId] || 'Usuario';
+            userPhotoToUse = data?.participantPhotos?.[userId] || '';
+          }
+        } catch (fetchError) {
+          console.error('Error fetching conversation for message:', fetchError);
+          // Continue with default values
+        }
+      } else {
+        userNameToUse = conversation.participantNames[userId] || 'Usuario';
+        userPhotoToUse = conversation.participantPhotos?.[userId] || '';
+      }
       
       const result = await chatService.sendMessage(
         conversationId,
@@ -106,13 +133,19 @@ export function useChat({ userId, conversationId }: UseChatProps) {
           imageUrl,
           type: imageUrl ? 'image' : 'text'
         },
-        userName,
-        userPhoto
+        userNameToUse,
+        userPhotoToUse
       );
+      
+      console.log('Hook send result:', result.success);
+      
+      if (!result.success) {
+        console.error('Hook error details:', result.error);
+      }
       
       return result.success;
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error in hook sendMessage:', error);
       return false;
     }
   };

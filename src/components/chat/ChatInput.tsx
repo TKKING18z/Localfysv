@@ -1,11 +1,11 @@
 import React, { useState, useRef } from 'react';
 import { 
   View, 
+  Text,
   TextInput, 
   TouchableOpacity, 
   StyleSheet, 
   Platform, 
-  KeyboardAvoidingView,
   ActivityIndicator,
   Alert
 } from 'react-native';
@@ -13,7 +13,7 @@ import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 interface ChatInputProps {
-  onSend: (text: string, imageUrl?: string) => void;
+  onSend: (text: string, imageUrl?: string) => Promise<boolean | void>; // Allow both return types
   uploadImage?: (uri: string) => Promise<string | null>;
   disabled?: boolean;
 }
@@ -23,33 +23,39 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
   
-  const handleSend = () => {
-    if (text.trim().length === 0 || isLoading || disabled) return;
+  const handleSend = async () => {
+    if (text.trim().length === 0 || isLoading) return;
     
-    onSend(text.trim());
+    setIsLoading(true);
+    const trimmedText = text.trim();
     setText('');
+    
+    try {
+      await onSend(trimmedText);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      // Don't restore text on error - this can cause issues
+    } finally {
+      setIsLoading(false);
+    }
   };
   
   const handleAttachImage = async () => {
-    if (isLoading || disabled || !uploadImage) return;
+    if (isLoading || !uploadImage) return;
     
     try {
-      // Pedir permisos
       if (Platform.OS !== 'web') {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
         if (status !== 'granted') {
           Alert.alert(
             'Permiso denegado',
             'Se necesita acceso a la galería para adjuntar imágenes.',
-            [
-              { text: 'OK' }
-            ]
+            [{ text: 'OK' }]
           );
           return;
         }
       }
       
-      // Abrir selector de imágenes
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -57,7 +63,6 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         quality: 0.8,
       });
       
-      // Manejar la selección de imagen
       if (!result.canceled && result.assets && result.assets.length > 0) {
         setIsLoading(true);
         
@@ -66,8 +71,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
           const imageUrl = await uploadImage(imageUri);
           
           if (imageUrl) {
-            // Enviar mensaje con imagen
-            onSend(text.trim() || 'Imagen', imageUrl);
+            await onSend(text.trim() || 'Imagen', imageUrl);
             setText('');
           } else {
             Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
@@ -85,57 +89,47 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
     }
   };
   
-  const handleFocus = () => {
-    // Podría usarse para marcar la conversación como leída
-  };
-  
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-    >
-      <View style={styles.container}>
-        {uploadImage && (
-          <TouchableOpacity 
-            style={[styles.attachButton, (isLoading || disabled) && styles.disabledButton]} 
-            onPress={handleAttachImage}
-            disabled={isLoading || disabled}
-          >
-            <MaterialIcons name="photo-camera" size={24} color={isLoading || disabled ? "#C7C7CC" : "#007AFF"} />
-          </TouchableOpacity>
-        )}
-        
-        <View style={styles.inputContainer}>
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            value={text}
-            onChangeText={setText}
-            placeholder="Escribe un mensaje..."
-            placeholderTextColor="#8E8E93"
-            multiline
-            maxLength={500}
-            onFocus={handleFocus}
-            editable={!disabled}
-          />
-        </View>
-        
+    <View style={styles.container}>
+      {uploadImage && (
         <TouchableOpacity 
-          style={[
-            styles.sendButton, 
-            (text.trim().length === 0 || isLoading || disabled) && styles.disabledButton
-          ]} 
-          onPress={handleSend}
-          disabled={text.trim().length === 0 || isLoading || disabled}
+          style={[styles.attachButton, isLoading && styles.disabledButton]} 
+          onPress={handleAttachImage}
+          disabled={isLoading}
         >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#FFF" />
-          ) : (
-            <MaterialIcons name="send" size={24} color="#FFF" />
-          )}
+          <MaterialIcons name="photo-camera" size={24} color={isLoading ? "#C7C7CC" : "#007AFF"} />
         </TouchableOpacity>
+      )}
+      
+      <View style={styles.inputContainer}>
+        <TextInput
+          ref={inputRef}
+          style={styles.input}
+          value={text}
+          onChangeText={setText}
+          placeholder="Escribe un mensaje..."
+          placeholderTextColor="#8E8E93"
+          multiline
+          maxLength={500}
+          autoFocus={false}
+        />
       </View>
-    </KeyboardAvoidingView>
+      
+      <TouchableOpacity 
+        style={[
+          styles.sendButton, 
+          (text.trim().length === 0 || isLoading) && styles.disabledButton
+        ]} 
+        onPress={handleSend}
+        disabled={text.trim().length === 0 || isLoading}
+      >
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#FFF" />
+        ) : (
+          <MaterialIcons name="send" size={24} color="#FFF" />
+        )}
+      </TouchableOpacity>
+    </View>
   );
 };
 
