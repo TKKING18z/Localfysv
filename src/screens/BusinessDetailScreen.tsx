@@ -318,14 +318,14 @@ const BusinessDetailScreen: React.FC = () => {
       
       console.log('Iniciando chat con propietario:', business.createdBy);
       
-      // ===== SOLUCIÓN CRÍTICA =====
-      // En lugar de usar checkOrCreateBusinessConversation, usamos el método del contexto
-      // que garantiza la sincronización correcta
+      // SOLUCIÓN CRÍTICA: Orden correcto de usuarios
+      const currentUserId = user.uid;
+      const businessOwnerId = business.createdBy;
       
       // Obtener información del propietario
       const ownerDoc = await firebase.firestore()
         .collection('users')
-        .doc(business.createdBy)
+        .doc(businessOwnerId)
         .get();
       
       if (!ownerDoc.exists) {
@@ -335,29 +335,60 @@ const BusinessDetailScreen: React.FC = () => {
       const ownerData = ownerDoc.data();
       const ownerName = ownerData?.displayName || 'Propietario';
       
-      // Usar createConversation del contexto para garantizar sincronización
-      const conversationId = await createConversation(
-        business.createdBy,
+      // SOLUCIÓN CRÍTICA: Log para depuración
+      console.log('Attempting to create chat between', {
+        currentUserId,
+        userName: user.displayName || 'Usuario',
+        businessOwnerId,
+        ownerName,
+        businessId: business.id,
+        businessName: business.name
+      });
+      
+      // Usar checkOrCreateBusinessConversation para garantizar conversación bilateral
+      const result = await chatService.checkOrCreateBusinessConversation(
+        currentUserId,
+        user.displayName || 'Usuario',
+        businessOwnerId,
         ownerName,
         business.id,
-        business.name,
-        "Hola, estoy interesado en su negocio." // Mensaje inicial opcional
+        business.name
       );
       
-      if (conversationId) {
-        // Forzar actualización de la lista de conversaciones antes de navegar
+      if (result.success && result.data) {
+        const conversationId = result.data.conversationId;
+        
+        // SOLUCIÓN CRÍTICA: Verificar que la conversación existe correctamente
+        const verifyConversation = await firebase.firestore()
+          .collection('conversations')
+          .doc(conversationId)
+          .get();
+          
+        if (!verifyConversation.exists) {
+          throw new Error('La conversación no se creó correctamente');
+        }
+        
+        // SOLUCIÓN CRÍTICA: Verificar que contiene al usuario actual
+        const conversationData = verifyConversation.data();
+        if (!conversationData?.participants.includes(currentUserId)) {
+          console.error('La conversación no incluye al usuario actual', conversationData);
+          throw new Error('Error en la creación de la conversación: usuario no incluido');
+        }
+        
+        // SOLUCIÓN CRÍTICA: Forzar actualización de listado
         await refreshConversations();
         
-        // Navegar primero a la pantalla de conversaciones 
+        // SOLUCIÓN CRÍTICA: Cambio en navegación para asegurar la actualización
+        // Primero navegar a Conversations para asegurar que se carga la lista actual
         navigation.navigate('Conversations');
         
-        // Usar un pequeño retraso para asegurar que ConversationsScreen se monte completamente
+        // Esperar a que la pantalla de conversaciones se monte
         setTimeout(() => {
-          // Luego navegar al chat específico
+          // Después de un breve retraso, navegar al chat
           navigation.navigate('Chat', { conversationId });
-        }, 300);
+        }, 500);
       } else {
-        throw new Error('No se pudo crear la conversación');
+        throw new Error(result.error?.message || 'Error al crear conversación');
       }
     } catch (error) {
       console.error('Error iniciando chat:', error);
@@ -365,7 +396,7 @@ const BusinessDetailScreen: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [user, business, navigation, createConversation, refreshConversations]);
+  }, [user, business, navigation, refreshConversations]);
 
   const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';

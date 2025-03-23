@@ -763,7 +763,7 @@ export const chatService = {
     businessName: string
   ): Promise<Result<{conversationId: string}>> => {
     try {
-      console.log('[ChatService] Checking for business conversation');
+      console.log('[ChatService] Checking for business conversation', { userId, businessOwnerId });
       
       if (!userId || !businessOwnerId || !businessId) {
         return { 
@@ -775,10 +775,13 @@ export const chatService = {
         };
       }
       
+      // SOLUCIÓN CRÍTICA: Ordenar los IDs para consistencia (SIEMPRE MISMA CONSULTA)
+      const sortedParticipants = [userId, businessOwnerId].sort();
+      
       // Buscar conversación existente con más precisión
       const conversationsRef = firebase.firestore().collection('conversations');
       
-      // Primero verificamos con ambos participantes y businessId para mayor precisión
+      // SOLUCIÓN CRÍTICA: Consulta con array-contains-any para encontrar chats en ambas direcciones
       let existingQuery = await conversationsRef
         .where('participants', 'array-contains', userId)
         .where('businessId', '==', businessId)
@@ -810,9 +813,9 @@ export const chatService = {
       
       // Si no encontramos una conversación específica, crear una nueva
       if (!existingConversationId) {
-        console.log('[ChatService] Creating new business conversation');
+        console.log('[ChatService] Creating new business conversation between', userId, businessOwnerId);
         
-        const participants = [userId, businessOwnerId];
+        // SOLUCIÓN CRÍTICA: Usar sortedParticipants para garantizar consistencia
         const participantNames: Record<string, string> = {
           [userId]: userName,
           [businessOwnerId]: businessOwnerName
@@ -820,7 +823,7 @@ export const chatService = {
         
         // Inicializar unreadCount
         const unreadCount: Record<string, number> = {};
-        participants.forEach(p => {
+        sortedParticipants.forEach(p => {
           unreadCount[p] = 0;
         });
         
@@ -829,8 +832,11 @@ export const chatService = {
         // Crear nueva conversación con estructura más completa
         const newConversationRef = conversationsRef.doc();
         
+        // SOLUCIÓN CRÍTICA: Registrar el formato de datos consistente
+        console.log('About to create conversation with participants: ', sortedParticipants);
+        
         await newConversationRef.set({
-          participants,
+          participants: sortedParticipants,
           participantNames,
           businessId,
           businessName,

@@ -101,12 +101,26 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         conversationsUnsubscribeRef.current = null;
       }
       
+      // SOLUCIÓN CRÍTICA: Usar una consulta más robusta
+      // array-contains garantiza que el usuario actual está en participants
       const unsubscribe = db.collection('conversations')
         .where('participants', 'array-contains', user.uid)
         .orderBy('updatedAt', 'desc')
         .onSnapshot(
           (snapshot) => {
             try {
+              // SOLUCIÓN CRÍTICA: Registrar cada actualización para depuración
+              console.log(`[ChatContext] Snapshot update with ${snapshot.docChanges().length} changes`);
+              snapshot.docChanges().forEach(change => {
+                if (change.type === 'added') {
+                  console.log(`[ChatContext] New conversation added: ${change.doc.id}`);
+                } else if (change.type === 'modified') {
+                  console.log(`[ChatContext] Conversation modified: ${change.doc.id}`);
+                } else if (change.type === 'removed') {
+                  console.log(`[ChatContext] Conversation removed: ${change.doc.id}`);
+                }
+              });
+              
               if (snapshot.empty) {
                 console.log('[ChatContext] No conversations found in real-time update');
                 setConversations([]);
@@ -119,7 +133,10 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
               const conversationsData = snapshot.docs
                 .filter(doc => {
                   const data = doc.data();
-                  return !(data.deletedFor && data.deletedFor[user.uid] === true);
+                  // SOLUCIÓN CRÍTICA: Verificación doble de participantes
+                  const isParticipant = data.participants && data.participants.includes(user.uid);
+                  const isDeleted = data.deletedFor && data.deletedFor[user.uid] === true;
+                  return isParticipant && !isDeleted;
                 })
                 .map(doc => ({
                   id: doc.id,
@@ -132,6 +149,9 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
               }, 0);
               
               console.log(`[ChatContext] Real-time update: ${conversationsData.length} conversations, ${totalUnread} unread`);
+              
+              // SOLUCIÓN CRÍTICA: Verificar IDs para depuración
+              console.log('[ChatContext] Conversation IDs:', conversationsData.map(c => c.id).join(', '));
               
               setConversations(conversationsData);
               setUnreadTotal(totalUnread);

@@ -168,27 +168,48 @@ const ConversationsScreen: React.FC = () => {
   // Add useFocusEffect to force refresh when screen is focused
   useFocusEffect(
     useCallback(() => {
-      console.log('[ConversationsScreen] Screen focused - refreshing conversations');
+      console.log('[ConversationsScreen] Screen focused - forcing full refresh');
       
-      // SOLUCIÓN: Forzar una recarga completa para asegurar datos actualizados
-      const loadConversations = async () => {
-        setLoading(true);
+      // SOLUCIÓN CRÍTICA: Función que realiza una carga completa
+      const forceFreshLoad = async () => {
         try {
-          await refreshConversations();
-          console.log('[ConversationsScreen] Conversations refreshed successfully on focus');
+          setRefreshing(true);
+          
+          if (!user) {
+            console.error('No hay usuario para cargar conversaciones');
+            return;
+          }
+          
+          // SOLUCIÓN CRÍTICA: Consulta directa a Firestore para evitar problemas de caché
+          const snapshot = await firebase.firestore()
+            .collection('conversations')
+            .where('participants', 'array-contains', user.uid)
+            .orderBy('updatedAt', 'desc')
+            .get();
+          
+          console.log(`[ConversationsScreen] Forzando carga completa. Encontradas ${snapshot.docs.length} conversaciones en Firestore`);
+          
+          // Si no hay conversaciones en el estado pero sí en Firestore, forzar refresco
+          if (conversations.length === 0 && snapshot.docs.length > 0) {
+            console.log('[ConversationsScreen] Detectada discrepancia, forzando actualización');
+            await refreshConversations();
+          } else {
+            // Siempre hacer un refresco para asegurar
+            await refreshConversations();
+          }
         } catch (error) {
-          console.error('[ConversationsScreen] Error refreshing conversations on focus:', error);
+          console.error('[ConversationsScreen] Error en carga forzada:', error);
         } finally {
-          setLoading(false);
+          setRefreshing(false);
         }
       };
       
-      loadConversations();
+      forceFreshLoad();
       
       return () => {
         console.log('[ConversationsScreen] Screen unfocused');
       };
-    }, [refreshConversations])
+    }, [user, refreshConversations, conversations])
   );
   
   // Navegar a una conversación específica con comprobación de validez
