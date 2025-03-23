@@ -46,10 +46,10 @@ export type RootStackParamList = {
   MainTabs: undefined;  // No params needed for tab navigator
   BusinessDetail: { businessId: string };
   // Business enhancement screens
-  BusinessHours: { initialHours?: any; onSave: (hours: any) => void };
-  PaymentMethods: { initialMethods?: string[]; onSave: (methods: string[]) => void };
-  SocialLinks: { initialLinks?: any; onSave: (links: any) => void };
-  MenuEditor: { businessId: string; initialMenu?: any[]; menuUrl?: string; onSave: (menu: any[], menuUrl: string) => void };
+  BusinessHours: { initialHours?: any; callbackId?: string };
+  PaymentMethods: { initialMethods?: string[]; callbackId?: string };
+  SocialLinks: { initialLinks?: any; callbackId?: string };
+  MenuEditor: { businessId: string; initialMenu?: any[]; menuUrl?: string; callbackId?: string };
   VideoManager: { businessId: string; initialVideos?: any[]; onSave: (videos: any[]) => void };
   // Individual screens that can be accessed directly
   Home: undefined;
@@ -64,10 +64,12 @@ export type RootStackParamList = {
   Promotions: {
     businessId: string;
     businessName: string;
+    isNewBusiness?: boolean;
   };
   Reservations: {
     businessId: string;
     businessName: string;
+    isNewBusiness?: boolean;
   };
   // Rutas para el chat
   Conversations: undefined;
@@ -77,7 +79,7 @@ export type RootStackParamList = {
 // Define tab navigator parameter list
 export type MainTabParamList = {
   Home: undefined;
-  Map: undefined;
+  Conversations: undefined;
   AddBusiness: undefined;
   Favorites: undefined;
   Profile: undefined;
@@ -116,6 +118,8 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
 
 // Bottom Tab Navigator
 function MainTabs() {
+  const { unreadTotal } = useChat();
+  
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -123,8 +127,33 @@ function MainTabs() {
           // Use explicit type assertion to fix the error
           if (route.name === 'Home') {
             return <MaterialIcons name={'home' as any} size={size} color={color} />;
-          } else if (route.name === 'Map') {
-            return <MaterialIcons name={'explore' as any} size={size} color={color} />;
+          } else if (route.name === 'Conversations') {
+            return (
+              <View>
+                <MaterialIcons name={'chat' as any} size={size} color={color} />
+                {unreadTotal > 0 && (
+                  <View style={{
+                    position: 'absolute',
+                    right: -6,
+                    top: -6,
+                    backgroundColor: '#FF3B30',
+                    borderRadius: 10,
+                    width: 16,
+                    height: 16,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                  }}>
+                    <Text style={{
+                      color: 'white',
+                      fontSize: 10,
+                      fontWeight: 'bold',
+                    }}>
+                      {unreadTotal > 9 ? '9+' : unreadTotal}
+                    </Text>
+                  </View>
+                )}
+              </View>
+            );
           } else if (route.name === 'AddBusiness') {
             return null; // Custom button will handle this
           } else if (route.name === 'Favorites') {
@@ -155,7 +184,7 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Map" component={MapScreen} />
+      <Tab.Screen name="Conversations" component={ConversationsScreen} />
       <Tab.Screen 
         name="AddBusiness" 
         component={AddBusinessScreen} 

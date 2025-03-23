@@ -16,6 +16,11 @@ export const chatService = {
   // Obtener conversaciones de un usuario
   getUserConversations: async (userId: string): Promise<Result<Conversation[]>> => {
     try {
+      if (!userId) {
+        console.error('getUserConversations: missing userId');
+        return { success: false, error: { message: 'ID de usuario requerido', code: 'chat/missing-user-id' }};
+      }
+
       const snapshot = await firebase.firestore()
         .collection('conversations')
         .where('participants', 'array-contains', userId)
@@ -27,7 +32,25 @@ export const chatService = {
         ...doc.data()
       })) as Conversation[];
 
-      return { success: true, data: conversations };
+      // Asegurar que cada conversación tenga las propiedades necesarias
+      const validatedConversations = conversations.map(conv => {
+        // Asegurar que existe unreadCount con valor por defecto
+        if (!conv.unreadCount) {
+          conv.unreadCount = {};
+          conv.participants.forEach(p => {
+            conv.unreadCount[p] = 0;
+          });
+        }
+
+        // Asegurar que todos los participantes tienen un nombre
+        if (!conv.participantNames) {
+          conv.participantNames = {};
+        }
+
+        return conv;
+      });
+
+      return { success: true, data: validatedConversations };
     } catch (error) {
       console.error('Error getting conversations:', error);
       return { 
@@ -43,6 +66,11 @@ export const chatService = {
   // Obtener una conversación específica
   getConversation: async (conversationId: string): Promise<Result<Conversation>> => {
     try {
+      if (!conversationId) {
+        console.error('getConversation: missing conversationId');
+        return { success: false, error: { message: 'ID de conversación requerido', code: 'chat/missing-conversation-id' }};
+      }
+
       const doc = await firebase.firestore()
         .collection('conversations')
         .doc(conversationId)
@@ -62,6 +90,11 @@ export const chatService = {
         id: doc.id,
         ...doc.data()
       } as Conversation;
+
+      // Validar datos mínimos
+      if (!conversation.participants || conversation.participants.length < 2) {
+        console.warn(`Conversation ${conversationId} has invalid participants data`);
+      }
 
       return { success: true, data: conversation };
     } catch (error) {
@@ -115,7 +148,6 @@ export const chatService = {
   ): Promise<Result<Message>> => {
     try {
       console.log(`ChatService: Sending message to conversation ${conversationId}`);
-      console.log(`From user: ${senderId}`);
       
       if (!conversationId) {
         console.error('ChatService: Missing conversationId');
@@ -139,11 +171,10 @@ export const chatService = {
         };
       }
       
-      const timestamp = firebase.firestore.FieldValue.serverTimestamp();
-      const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
-      
       // Verificar que la conversación existe
+      const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
       const conversationDoc = await conversationRef.get();
+      
       if (!conversationDoc.exists) {
         console.error('ChatService: Conversation does not exist');
         return { 
@@ -155,6 +186,34 @@ export const chatService = {
         };
       }
 
+      const conversationData = conversationDoc.data() as Conversation;
+      const participants = conversationData.participants || [];
+      
+      // Verificar que el remitente es parte de la conversación
+      if (!participants.includes(senderId)) {
+        console.error('ChatService: Sender not part of conversation');
+        return { 
+          success: false, 
+          error: { 
+            message: 'El remitente no es parte de esta conversación',
+            code: 'chat/unauthorized-sender'
+          } 
+        };
+      }
+      
+      // Verificar si el mensaje tiene contenido
+      if (!messageData.text && !messageData.imageUrl) {
+        console.error('ChatService: Message has no content');
+        return { 
+          success: false, 
+          error: { 
+            message: 'El mensaje no tiene contenido',
+            code: 'chat/empty-message'
+          } 
+        };
+      }
+
+      const timestamp = firebase.firestore.FieldValue.serverTimestamp();
       const messageRef = conversationRef.collection('messages').doc();
 
       // Datos del mensaje
@@ -171,21 +230,6 @@ export const chatService = {
 
       if (messageData.imageUrl) {
         messageObj.imageUrl = messageData.imageUrl;
-      }
-
-      const conversationData = conversationDoc.data() as Conversation;
-      const participants = conversationData.participants || [];
-      
-      // Verificar que el remitente es parte de la conversación
-      if (!participants.includes(senderId)) {
-        console.error('ChatService: Sender not part of conversation');
-        return { 
-          success: false, 
-          error: { 
-            message: 'El remitente no es parte de esta conversación',
-            code: 'chat/unauthorized-sender'
-          } 
-        };
       }
       
       // Actualizar contadores de no leídos para todos excepto el remitente
@@ -205,7 +249,7 @@ export const chatService = {
           // Actualizar conversación
           transaction.update(conversationRef, {
             lastMessage: {
-              text: messageData.text || '',
+              text: messageData.text || (messageData.imageUrl ? '[Imagen]' : ''),
               senderId,
               timestamp
             },
@@ -248,8 +292,30 @@ export const chatService = {
   // Marcar mensajes como leídos
   markMessagesAsRead: async (conversationId: string, userId: string): Promise<Result<void>> => {
     try {
+      if (!conversationId || !userId) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de conversación y usuario requeridos',
+            code: 'chat/missing-parameters'
+          } 
+        };
+      }
+
       const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
       
+      // Verificar que la conversación existe
+      const conversationDoc = await conversationRef.get();
+      if (!conversationDoc.exists) {
+        return { 
+          success: false, 
+          error: { 
+            message: 'La conversación no existe',
+            code: 'chat/conversation-not-found'
+          } 
+        };
+      }
+
       // Obtener los mensajes no leídos enviados por otros
       const snapshot = await conversationRef
         .collection('messages')
@@ -305,60 +371,86 @@ export const chatService = {
       const sender = participants[0]; // El primer participante es quien crea la conversación
       
       // Verificar si ya existe una conversación entre estos participantes
-      let existingConversation: firebase.firestore.QuerySnapshot;
+      let existingConversationId: string | null = null;
       
       if (businessId) {
-        // Si es relacionado con un negocio, buscar conversación existente con mismo businessId
-        existingConversation = await firebase.firestore()
+        // Buscar conversación existente con mismo businessId y participantes
+        const existingQuery = await firebase.firestore()
           .collection('conversations')
           .where('participants', 'array-contains', sender)
           .where('businessId', '==', businessId)
           .get();
+        
+        // Verificar exactamente los mismos participantes
+        existingQuery.docs.forEach(doc => {
+          const data = doc.data();
+          const docParticipants = data.participants || [];
+          
+          // Verificar que contenga exactamente los mismos participantes (sin importar el orden)
+          const hasSameParticipants = 
+            participants.every(p => docParticipants.includes(p)) && 
+            docParticipants.every(p => participants.includes(p));
+          
+          if (hasSameParticipants) {
+            existingConversationId = doc.id;
+          }
+        });
       } else {
-        // Si no hay businessId, simplemente buscar por participantes exactos
-        // Esto es una simplificación, en la vida real necesitaríamos una lógica más robusta
-        existingConversation = await firebase.firestore()
+        // Buscar conversación sin businessId entre los mismos participantes
+        const existingQuery = await firebase.firestore()
           .collection('conversations')
           .where('participants', 'array-contains', sender)
           .get();
-          
-        // Filtrar manualmente para encontrar una conversación con los mismos participantes exactos
-        const docs = existingConversation.docs.filter(doc => {
-          const convoData = doc.data();
-          const participantsArray = convoData.participants || [];
-          return participants.every((p: string) => participantsArray.includes(p)) &&
-                 participantsArray.every((p: string) => participants.includes(p));
-        });
         
-        if (docs.length > 0) {
-          const conversationId = docs[0].id;
-          
-          // Si hay un mensaje inicial, enviarlo
-          if (initialMessage) {
-            const messageResult = await chatService.sendMessage(
-              conversationId,
-              sender,
-              { text: initialMessage },
-              participantNames[sender],
-              participantPhotos?.[sender]
-            );
-            
-            if (messageResult.success && messageResult.data) {
-              return { 
-                success: true, 
-                data: { 
-                  conversationId,
-                  messageId: messageResult.data.id
-                } 
-              };
-            }
+        existingQuery.docs.forEach(doc => {
+          const data = doc.data();
+          // Solo considerar si no tiene businessId
+          if (data.businessId) {
+            return;
           }
           
-          return { success: true, data: { conversationId } };
+          const docParticipants = data.participants || [];
+          // Verificar mismos participantes
+          const hasSameParticipants = 
+            participants.every(p => docParticipants.includes(p)) && 
+            docParticipants.every(p => participants.includes(p));
+          
+          if (hasSameParticipants) {
+            existingConversationId = doc.id;
+          }
+        });
+      }
+      
+      // Si ya existe, usar esa conversación
+      if (existingConversationId) {
+        console.log(`Using existing conversation: ${existingConversationId}`);
+        
+        // Si hay un mensaje inicial, enviarlo
+        if (initialMessage) {
+          const messageResult = await chatService.sendMessage(
+            existingConversationId,
+            sender,
+            { text: initialMessage },
+            participantNames[sender],
+            participantPhotos?.[sender]
+          );
+          
+          if (messageResult.success && messageResult.data) {
+            return { 
+              success: true, 
+              data: { 
+                conversationId: existingConversationId,
+                messageId: messageResult.data.id
+              } 
+            };
+          }
         }
+        
+        return { success: true, data: { conversationId: existingConversationId } };
       }
       
       // Si no existe, crear nueva conversación
+      console.log('Creating new conversation');
       const timestamp = firebase.firestore.FieldValue.serverTimestamp();
       
       // Inicializar contador de no leídos
@@ -390,6 +482,7 @@ export const chatService = {
       }
       
       await conversationRef.set(conversationData);
+      console.log(`Created new conversation with ID: ${conversationRef.id}`);
       
       // Si hay un mensaje inicial, enviarlo
       if (initialMessage) {

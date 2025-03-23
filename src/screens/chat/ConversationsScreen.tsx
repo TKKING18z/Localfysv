@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   SafeAreaView,
   StatusBar,
-  RefreshControl
+  RefreshControl,
+  Alert
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -28,35 +29,48 @@ const ConversationsScreen: React.FC = () => {
     loading, 
     error, 
     refreshConversations, 
-    setActiveConversationId 
+    setActiveConversationId,
+    unreadTotal
   } = useChat();
   
   // Actualizar al montar y cuando vuelve a enfocarse
   useEffect(() => {
+    console.log('ConversationsScreen mounted');
     refreshConversations();
     
     const unsubscribeFocus = navigation.addListener('focus', () => {
+      console.log('ConversationsScreen focused - refreshing conversations');
       refreshConversations();
     });
     
-    return unsubscribeFocus;
+    return () => {
+      console.log('ConversationsScreen unmounting');
+      unsubscribeFocus();
+    };
   }, [refreshConversations, navigation]);
   
   // Navegar a una conversación específica
-  const handleConversationPress = (conversationId: string) => {
+  const handleConversationPress = useCallback((conversationId: string) => {
+    console.log(`Navigating to conversation: ${conversationId}`);
     setActiveConversationId(conversationId);
     navigation.navigate('Chat', { conversationId });
-  };
+  }, [setActiveConversationId, navigation]);
   
   // Volver a la pantalla anterior
-  const handleBackPress = () => {
-    navigation.goBack();
-  };
+  const handleBackPress = useCallback(() => {
+    navigation.navigate('Home');
+  }, [navigation]);
   
   if (!user) {
     return (
       <SafeAreaView style={styles.centerContainer}>
         <Text style={styles.errorText}>Debe iniciar sesión para ver los mensajes</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={() => navigation.navigate('Home')}
+        >
+          <Text style={styles.retryButtonText}>Volver al inicio</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -73,7 +87,10 @@ const ConversationsScreen: React.FC = () => {
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Mensajes</Text>
+        <Text style={styles.headerTitle}>
+          Mensajes
+          {unreadTotal > 0 && <Text style={styles.unreadBadgeText}> ({unreadTotal})</Text>}
+        </Text>
         <View style={styles.placeholder} />
       </View>
       
@@ -100,6 +117,9 @@ const ConversationsScreen: React.FC = () => {
           <Text style={styles.emptyText}>No tienes conversaciones</Text>
           <Text style={styles.emptySubtext}>
             Tus mensajes con negocios y otros usuarios aparecerán aquí
+          </Text>
+          <Text style={styles.emptySubtext}>
+            Para iniciar una conversación, visita un negocio y pulsa el botón "Chatear"
           </Text>
         </View>
       ) : (
@@ -149,6 +169,10 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#000',
+  },
+  unreadBadgeText: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
   },
   placeholder: {
     width: 40,

@@ -38,7 +38,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
-        <Text style={styles.title}>Cargando...</Text>
+        <Text style={styles.title}>Cargando conversación...</Text>
         <View style={styles.placeholder} />
       </View>
     );

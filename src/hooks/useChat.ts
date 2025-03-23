@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { chatService } from '../../services/ChatService';
@@ -17,13 +17,22 @@ export function useChat({ userId, conversationId }: UseChatProps) {
   
   // Cargar la conversación y configurar listeners
   useEffect(() => {
-    if (!userId || !conversationId) {
+    if (!userId) {
+      console.error('useChat hook: missing userId');
+      setError('Se requiere un ID de usuario');
+      setLoading(false);
+      return;
+    }
+    
+    if (!conversationId) {
+      // No hay conversationId, esto podría ser normal, así que no mostramos error
       setConversation(null);
       setMessages([]);
       setLoading(false);
       return;
     }
     
+    console.log(`useChat hook: Loading conversation ${conversationId} for user ${userId}`);
     setLoading(true);
     setError(null);
     
@@ -40,15 +49,24 @@ export function useChat({ userId, conversationId }: UseChatProps) {
           return;
         }
         
+        console.log(`Conversation loaded: ${conversationId}`);
         setConversation(convResult.data);
         
-        // Marcar mensajes como leídos
-        await chatService.markMessagesAsRead(conversationId, userId);
+        // Marcar mensajes como leídos - esto lo hacemos aquí y también en ChatScreen
+        // para asegurarnos de que los mensajes se marcan como leídos
+        try {
+          await chatService.markMessagesAsRead(conversationId, userId);
+          console.log('Messages marked as read from useChat hook');
+        } catch (readError) {
+          console.error('Failed to mark messages as read:', readError);
+          // No interrumpimos el flujo por este error
+        }
         
         // Escuchar cambios en la conversación
         unsubscribeConversation = chatService.listenToConversation(
           conversationId,
           (updatedConversation) => {
+            console.log('Conversation update received');
             setConversation(updatedConversation);
           },
           (error) => {
@@ -60,6 +78,7 @@ export function useChat({ userId, conversationId }: UseChatProps) {
         unsubscribeMessages = chatService.listenToMessages(
           conversationId,
           (updatedMessages) => {
+            console.log(`${updatedMessages.length} messages received`);
             setMessages(updatedMessages);
           },
           (error) => {
@@ -79,6 +98,7 @@ export function useChat({ userId, conversationId }: UseChatProps) {
     
     // Limpiar suscripciones
     return () => {
+      console.log('Cleaning up chat subscriptions');
       if (unsubscribeConversation) {
         unsubscribeConversation();
       }
@@ -89,17 +109,24 @@ export function useChat({ userId, conversationId }: UseChatProps) {
     };
   }, [userId, conversationId]);
   
-  // Enhanced sendMessage function with better error handling
-  const sendMessage = async (text: string, imageUrl?: string): Promise<boolean> => {
+  // Función sendMessage mejorada
+  const sendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
     if (!userId || !conversationId) {
       console.error('Cannot send message in hook: Missing userId or conversationId');
-      console.log('UserId:', userId);
-      console.log('ConversationId:', conversationId);
       return false;
     }
     
     try {
-      // Directly fetch conversation if we don't have it yet
+      // Verificar si hay contenido
+      const trimmedText = text.trim();
+      if (!trimmedText && !imageUrl) {
+        console.error('Cannot send empty message');
+        return false;
+      }
+      
+      console.log(`Sending message: "${trimmedText.substring(0, 20)}${trimmedText.length > 20 ? '...' : ''}"${imageUrl ? ' with image' : ''}`);
+      
+      // Si no tenemos la conversación cargada, intentamos obtener los datos mínimos necesarios
       let userNameToUse = 'Usuario';
       let userPhotoToUse = '';
       
@@ -125,11 +152,12 @@ export function useChat({ userId, conversationId }: UseChatProps) {
         userPhotoToUse = conversation.participantPhotos?.[userId] || '';
       }
       
+      // Enviar el mensaje
       const result = await chatService.sendMessage(
         conversationId,
         userId,
         {
-          text,
+          text: trimmedText,
           imageUrl,
           type: imageUrl ? 'image' : 'text'
         },
@@ -137,49 +165,57 @@ export function useChat({ userId, conversationId }: UseChatProps) {
         userPhotoToUse
       );
       
-      console.log('Hook send result:', result.success);
-      
       if (!result.success) {
         console.error('Hook error details:', result.error);
+        return false;
       }
       
-      return result.success;
+      console.log('Message sent successfully');
+      return true;
     } catch (error) {
       console.error('Error in hook sendMessage:', error);
       return false;
     }
-  };
+  }, [userId, conversationId, conversation]);
   
   // Función para marcar como leído
-  const markAsRead = async () => {
+  const markAsRead = useCallback(async () => {
     if (!userId || !conversationId) {
+      console.log('Cannot mark as read: missing userId or conversationId');
       return;
     }
     
     try {
+      console.log(`Marking conversation ${conversationId} as read for user ${userId}`);
       await chatService.markMessagesAsRead(conversationId, userId);
+      console.log('Successfully marked as read');
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
-  };
+  }, [userId, conversationId]);
   
-  // Función para subir imagen
-  const uploadImage = async (uri: string) => {
+  // Función para subir imagen mejorada
+  const uploadImage = useCallback(async (uri: string) => {
     if (!conversationId) {
+      console.error('Cannot upload image: missing conversationId');
       return null;
     }
     
     try {
+      console.log(`Uploading image for conversation ${conversationId}`);
       const result = await chatService.uploadMessageImage(uri, conversationId);
       if (result.success && result.data) {
+        console.log('Image uploaded successfully');
         return result.data;
       }
+      
+      console.error('Failed to upload image:', result.error);
       return null;
     } catch (error) {
       console.error('Error uploading image:', error);
       return null;
     }
-  };
+  }, [conversationId]);
   
   return { 
     conversation, 

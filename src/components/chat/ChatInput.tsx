@@ -1,7 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { 
   View, 
-  Text,
   TextInput, 
   TouchableOpacity, 
   StyleSheet, 
@@ -31,10 +30,12 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
     setText('');
     
     try {
+      console.log('Sending message:', trimmedText.substring(0, 20));
       await onSend(trimmedText);
     } catch (error) {
       console.error('Error sending message:', error);
-      // Don't restore text on error - this can cause issues
+      // Opcionalmente restaurar el texto en caso de error
+      // setText(trimmedText);
     } finally {
       setIsLoading(false);
     }
@@ -68,12 +69,15 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         
         try {
           const imageUri = result.assets[0].uri;
+          console.log('Uploading image...');
           const imageUrl = await uploadImage(imageUri);
           
           if (imageUrl) {
-            await onSend(text.trim() || 'Imagen', imageUrl);
+            console.log('Image uploaded successfully');
+            await onSend(text.trim() || '', imageUrl);
             setText('');
           } else {
+            console.error('Failed to upload image');
             Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
           }
         } catch (error) {
@@ -112,16 +116,17 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
           multiline
           maxLength={500}
           autoFocus={false}
+          editable={!disabled && !isLoading}
         />
       </View>
       
       <TouchableOpacity 
         style={[
           styles.sendButton, 
-          (text.trim().length === 0 || isLoading) && styles.disabledButton
+          (text.trim().length === 0 || isLoading || disabled) && styles.disabledButton
         ]} 
         onPress={handleSend}
-        disabled={text.trim().length === 0 || isLoading}
+        disabled={text.trim().length === 0 || isLoading || disabled}
       >
         {isLoading ? (
           <ActivityIndicator size="small" color="#FFF" />

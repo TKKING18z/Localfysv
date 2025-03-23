@@ -84,12 +84,18 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isMine, onImagePress
             {message.text && <Text style={styles.messageText}>{message.text}</Text>}
           </TouchableOpacity>
         ) : (
-          <Text style={styles.messageText}>{message.text}</Text>
+          <Text style={[
+            styles.messageText,
+            isMine ? styles.myMessageText : styles.otherMessageText
+          ]}>{message.text}</Text>
         )}
         
         {/* Hora y estado */}
         <View style={styles.messageFooter}>
-          <Text style={styles.timeText}>{getFormattedTime()}</Text>
+          <Text style={[
+            styles.timeText,
+            isMine ? styles.myTimeText : styles.otherTimeText
+          ]}>{getFormattedTime()}</Text>
           {isMine && (
             <MaterialIcons 
               name={message.read ? "done-all" : "done"} 
@@ -158,6 +164,11 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16,
+  },
+  myMessageText: {
+    color: 'white',
+  },
+  otherMessageText: {
     color: '#000',
   },
   messageImage: {
@@ -174,6 +185,11 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 10,
+  },
+  myTimeText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+  },
+  otherTimeText: {
     color: '#8E8E93',
   },
   statusIcon: {
