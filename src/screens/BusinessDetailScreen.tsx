@@ -318,14 +318,10 @@ const BusinessDetailScreen: React.FC = () => {
       
       console.log('Iniciando chat con propietario:', business.createdBy);
       
-      // SOLUCIÓN CRÍTICA: Orden correcto de usuarios
-      const currentUserId = user.uid;
-      const businessOwnerId = business.createdBy;
-      
       // Obtener información del propietario
       const ownerDoc = await firebase.firestore()
         .collection('users')
-        .doc(businessOwnerId)
+        .doc(business.createdBy)
         .get();
       
       if (!ownerDoc.exists) {
@@ -335,21 +331,11 @@ const BusinessDetailScreen: React.FC = () => {
       const ownerData = ownerDoc.data();
       const ownerName = ownerData?.displayName || 'Propietario';
       
-      // SOLUCIÓN CRÍTICA: Log para depuración
-      console.log('Attempting to create chat between', {
-        currentUserId,
-        userName: user.displayName || 'Usuario',
-        businessOwnerId,
-        ownerName,
-        businessId: business.id,
-        businessName: business.name
-      });
-      
-      // Usar checkOrCreateBusinessConversation para garantizar conversación bilateral
+      // Crear o recuperar conversación existente
       const result = await chatService.checkOrCreateBusinessConversation(
-        currentUserId,
+        user.uid,
         user.displayName || 'Usuario',
-        businessOwnerId,
+        business.createdBy,
         ownerName,
         business.id,
         business.name
@@ -358,34 +344,12 @@ const BusinessDetailScreen: React.FC = () => {
       if (result.success && result.data) {
         const conversationId = result.data.conversationId;
         
-        // SOLUCIÓN CRÍTICA: Verificar que la conversación existe correctamente
-        const verifyConversation = await firebase.firestore()
-          .collection('conversations')
-          .doc(conversationId)
-          .get();
-          
-        if (!verifyConversation.exists) {
-          throw new Error('La conversación no se creó correctamente');
-        }
+        // Navegar a la pantalla de chat
+        navigation.navigate('Chat', { conversationId });
         
-        // SOLUCIÓN CRÍTICA: Verificar que contiene al usuario actual
-        const conversationData = verifyConversation.data();
-        if (!conversationData?.participants.includes(currentUserId)) {
-          console.error('La conversación no incluye al usuario actual', conversationData);
-          throw new Error('Error en la creación de la conversación: usuario no incluido');
-        }
-        
-        // SOLUCIÓN CRÍTICA: Forzar actualización de listado
-        await refreshConversations();
-        
-        // SOLUCIÓN CRÍTICA: Cambio en navegación para asegurar la actualización
-        // Primero navegar a Conversations para asegurar que se carga la lista actual
-        navigation.navigate('Conversations');
-        
-        // Esperar a que la pantalla de conversaciones se monte
+        // Actualizar lista de conversaciones en background
         setTimeout(() => {
-          // Después de un breve retraso, navegar al chat
-          navigation.navigate('Chat', { conversationId });
+          refreshConversations();
         }, 500);
       } else {
         throw new Error(result.error?.message || 'Error al crear conversación');

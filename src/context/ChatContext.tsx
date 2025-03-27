@@ -1,11 +1,8 @@
-// src/context/ChatContext.tsx
-import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { chatService } from '../../services/ChatService';
 import { useAuth } from './AuthContext';
 import { Conversation, Message } from '../../models/chatTypes';
 import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
 
 interface ChatContextType {
   conversations: Conversation[];
@@ -28,466 +25,300 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const { user } = useAuth();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
+  // Rename the state setter to avoid recursion when we create our enhanced function
   const [activeConversationId, _setActiveConversationId] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   
-  // Referencias para cancelar suscripciones
-  const conversationsUnsubscribeRef = useRef<(() => void) | null>(null);
-  const messagesUnsubscribeRef = useRef<(() => void) | null>(null);
-  
-  // Clave para caché de conversaciones
-  const getCacheKey = useCallback(() => {
-    return user ? `conversations_${user.uid}` : null;
-  }, [user]);
-  
-  // Inicializar Firebase Firestore
-  const db = firebase.firestore();
-  
-  // Cargar conversaciones desde caché
-  const loadConversationsFromCache = useCallback(async () => {
-    try {
-      const cacheKey = getCacheKey();
-      if (!cacheKey) return false;
-      
-      const cachedData = await AsyncStorage.getItem(cacheKey);
-      if (cachedData) {
-        const parsedData = JSON.parse(cachedData);
-        if (parsedData && parsedData.conversations && Array.isArray(parsedData.conversations)) {
-          console.log(`[ChatContext] Loaded ${parsedData.conversations.length} conversations from cache`);
-          setConversations(parsedData.conversations);
-          setUnreadTotal(parsedData.unreadTotal || 0);
-          return true;
-        }
-      }
-      return false;
-    } catch (error) {
-      console.error('[ChatContext] Error loading from cache:', error);
-      return false;
-    }
-  }, [getCacheKey]);
-  
-  // Guardar conversaciones en caché
-  const saveConversationsToCache = useCallback(async (conversationsData: Conversation[], unread: number) => {
-    try {
-      const cacheKey = getCacheKey();
-      if (!cacheKey) return;
-      
-      const dataToCache = {
-        timestamp: Date.now(),
-        conversations: conversationsData,
-        unreadTotal: unread
-      };
-      
-      await AsyncStorage.setItem(cacheKey, JSON.stringify(dataToCache));
-      console.log(`[ChatContext] Saved ${conversationsData.length} conversations to cache`);
-    } catch (error) {
-      console.error('[ChatContext] Error saving to cache:', error);
-    }
-  }, [getCacheKey]);
-  
-  // Configurar listener de tiempo real para conversaciones
-  const setupConversationsListener = useCallback(() => {
-    if (!user) return null;
-    
-    try {
-      console.log('[ChatContext] Setting up real-time listener for conversations');
-      
-      // Cancelar listener anterior si existe
-      if (conversationsUnsubscribeRef.current) {
-        conversationsUnsubscribeRef.current();
-        conversationsUnsubscribeRef.current = null;
-      }
-      
-      // SOLUCIÓN CRÍTICA: Usar una consulta más robusta
-      // array-contains garantiza que el usuario actual está en participants
-      const unsubscribe = db.collection('conversations')
-        .where('participants', 'array-contains', user.uid)
-        .orderBy('updatedAt', 'desc')
-        .onSnapshot(
-          (snapshot) => {
-            try {
-              // SOLUCIÓN CRÍTICA: Registrar cada actualización para depuración
-              console.log(`[ChatContext] Snapshot update with ${snapshot.docChanges().length} changes`);
-              snapshot.docChanges().forEach(change => {
-                if (change.type === 'added') {
-                  console.log(`[ChatContext] New conversation added: ${change.doc.id}`);
-                } else if (change.type === 'modified') {
-                  console.log(`[ChatContext] Conversation modified: ${change.doc.id}`);
-                } else if (change.type === 'removed') {
-                  console.log(`[ChatContext] Conversation removed: ${change.doc.id}`);
-                }
-              });
-              
-              if (snapshot.empty) {
-                console.log('[ChatContext] No conversations found in real-time update');
-                setConversations([]);
-                setUnreadTotal(0);
-                saveConversationsToCache([], 0);
-                return;
-              }
-              
-              // Filtrar conversaciones eliminadas
-              const conversationsData = snapshot.docs
-                .filter(doc => {
-                  const data = doc.data();
-                  // SOLUCIÓN CRÍTICA: Verificación doble de participantes
-                  const isParticipant = data.participants && data.participants.includes(user.uid);
-                  const isDeleted = data.deletedFor && data.deletedFor[user.uid] === true;
-                  return isParticipant && !isDeleted;
-                })
-                .map(doc => ({
-                  id: doc.id,
-                  ...doc.data()
-                })) as Conversation[];
-              
-              // Calcular total de no leídos
-              const totalUnread = conversationsData.reduce((sum, conv) => {
-                return sum + (conv.unreadCount?.[user.uid] || 0);
-              }, 0);
-              
-              console.log(`[ChatContext] Real-time update: ${conversationsData.length} conversations, ${totalUnread} unread`);
-              
-              // SOLUCIÓN CRÍTICA: Verificar IDs para depuración
-              console.log('[ChatContext] Conversation IDs:', conversationsData.map(c => c.id).join(', '));
-              
-              setConversations(conversationsData);
-              setUnreadTotal(totalUnread);
-              
-              // Guardar en caché para acceso rápido
-              saveConversationsToCache(conversationsData, totalUnread);
-            } catch (error) {
-              console.error('[ChatContext] Error processing conversations snapshot:', error);
-            }
-          },
-          (error) => {
-            console.error('[ChatContext] Error in conversations listener:', error);
-            setError('Error al escuchar actualizaciones de conversaciones');
-          }
-        );
-      
-      conversationsUnsubscribeRef.current = unsubscribe;
-      return unsubscribe;
-    } catch (error) {
-      console.error('[ChatContext] Error setting up conversations listener:', error);
-      return null;
-    }
-  }, [user, db, saveConversationsToCache]);
-  
-  // Función de actualización manual forzada
-  const refreshConversations = useCallback(async () => {
-    if (!user) {
-      console.error('[ChatContext] Cannot refresh conversations: no user logged in');
-      return;
-    }
-    
-    console.log('[ChatContext] Manually refreshing conversations');
-    setLoading(true);
-    
-    try {
-      // Obtener datos actualizados directamente de Firestore
-      const snapshot = await db.collection('conversations')
-        .where('participants', 'array-contains', user.uid)
-        .orderBy('updatedAt', 'desc')
-        .get();
-      
-      if (snapshot.empty) {
-        console.log('[ChatContext] No conversations found');
-        setConversations([]);
-        setUnreadTotal(0);
-        saveConversationsToCache([], 0);
-      } else {
-        // Filtrar conversaciones eliminadas
-        const conversationsData = snapshot.docs
-          .filter(doc => {
-            const data = doc.data();
-            return !(data.deletedFor && data.deletedFor[user.uid] === true);
-          })
-          .map(doc => ({
-            id: doc.id,
-            ...doc.data()
-          })) as Conversation[];
-        
-        // Calcular total de no leídos
-        const totalUnread = conversationsData.reduce((sum, conv) => {
-          return sum + (conv.unreadCount?.[user.uid] || 0);
-        }, 0);
-        
-        console.log(`[ChatContext] Loaded ${conversationsData.length} conversations, ${totalUnread} unread`);
-        
-        setConversations(conversationsData);
-        setUnreadTotal(totalUnread);
-        
-        // Guardar en caché
-        saveConversationsToCache(conversationsData, totalUnread);
-      }
-    } catch (error) {
-      console.error('[ChatContext] Error refreshing conversations:', error);
-      setError('Error al actualizar conversaciones');
-    } finally {
-      setLoading(false);
-    }
-  }, [user, db, saveConversationsToCache]);
-  
-  // Inicializar data cuando cambia el usuario
+  // Cargar conversaciones iniciales
   useEffect(() => {
     if (user) {
-      console.log('[ChatContext] User logged in, initializing chat data');
-      setLoading(true);
-      
-      const initializeData = async () => {
-        const loadedFromCache = await loadConversationsFromCache();
-        
-        // Configurar listener para actualizaciones en tiempo real
-        setupConversationsListener();
-        
-        // Si no se cargó de caché, o para actualizaciones, cargar de Firebase
-        if (!loadedFromCache) {
-          refreshConversations();
-        } else {
-          setLoading(false);
-        }
-      };
-      
-      initializeData();
+      console.log('Loading initial conversations for user:', user.uid);
+      loadConversations();
     } else {
-      // Limpiar estado cuando el usuario cierra sesión
-      console.log('[ChatContext] User logged out, clearing chat data');
+      console.log('No user logged in, resetting conversations');
       setConversations([]);
       setActiveConversation(null);
       setActiveMessages([]);
-      setActiveConversationId(null);
       setUnreadTotal(0);
-      
-      // Cancelar suscripciones
-      if (conversationsUnsubscribeRef.current) {
-        conversationsUnsubscribeRef.current();
-        conversationsUnsubscribeRef.current = null;
-      }
-      
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-        messagesUnsubscribeRef.current = null;
-      }
     }
-    
-    // Limpiar al desmontar
-    return () => {
-      if (conversationsUnsubscribeRef.current) {
-        conversationsUnsubscribeRef.current();
-      }
-      
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-      }
-    };
-  }, [user, loadConversationsFromCache, setupConversationsListener, refreshConversations]);
+  }, [user]);
   
-  // Configurar listener para mensajes de conversación activa
-  const setupMessagesListener = useCallback((conversationId: string) => {
-    if (!user || !conversationId) return null;
-    
-    try {
-      console.log(`[ChatContext] Setting up messages listener for conversation ${conversationId}`);
-      
-      // Cancelar listener anterior si existe
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-        messagesUnsubscribeRef.current = null;
-      }
-      
-      const unsubscribe = db.collection('conversations')
-        .doc(conversationId)
-        .collection('messages')
-        .orderBy('timestamp', 'asc')
-        .limit(100)
-        .onSnapshot(
-          (snapshot) => {
-            try {
-              if (snapshot.empty) {
-                console.log('[ChatContext] No messages found');
-                setActiveMessages([]);
-                return;
-              }
-              
-              const messagesData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-              })) as Message[];
-              
-              console.log(`[ChatContext] Loaded ${messagesData.length} messages`);
-              setActiveMessages(messagesData);
-            } catch (error) {
-              console.error('[ChatContext] Error processing messages snapshot:', error);
-            }
-          },
-          (error) => {
-            console.error('[ChatContext] Error in messages listener:', error);
-          }
-        );
-      
-      messagesUnsubscribeRef.current = unsubscribe;
-      return unsubscribe;
-    } catch (error) {
-      console.error('[ChatContext] Error setting up messages listener:', error);
-      return null;
-    }
-  }, [user, db]);
-  
-  // Función mejorada para establecer conversación activa
-  const setActiveConversationId = useCallback(async (id: string | null) => {
-    if (activeConversationId === id) return; // Evitar recarga innecesaria
-    
-    // Limpiar estado anterior
-    if (!id) {
-      _setActiveConversationId(null);
+  // Cargar conversación activa cuando cambia el ID
+  useEffect(() => {
+    if (activeConversationId && user) {
+      console.log(`Loading active conversation: ${activeConversationId}`);
+      loadActiveConversation(activeConversationId);
+    } else {
       setActiveConversation(null);
       setActiveMessages([]);
-      
-      // Cancelar listener de mensajes
-      if (messagesUnsubscribeRef.current) {
-        messagesUnsubscribeRef.current();
-        messagesUnsubscribeRef.current = null;
-      }
-      
+    }
+  }, [activeConversationId, user]);
+
+  // Función para actualizar el contador de mensajes no leídos
+  const updateUnreadCount = useCallback(() => {
+    if (!user || !conversations.length) return;
+    
+    // Calcular el total de mensajes no leídos
+    const total = conversations.reduce((sum, conv) => {
+      return sum + (conv.unreadCount?.[user.uid] || 0);
+    }, 0);
+    
+    setUnreadTotal(total);
+    
+    // Actualizar el badge en el tab navigator de manera opcional
+    try {
+      // Aquí podrías agregar integración con notificaciones nativas si lo deseas
+    } catch (error) {
+      console.error('Error al actualizar badge:', error);
+    }
+  }, [user, conversations]);
+
+  // Agregar este efecto dentro del ChatProvider
+  useEffect(() => {
+    updateUnreadCount();
+  }, [updateUnreadCount, conversations]);
+  
+  // Función para cargar todas las conversaciones del usuario
+  const loadConversations = useCallback(async () => {
+    if (!user) {
+      console.error('Cannot load conversations: no user logged in');
       return;
     }
     
-    console.log(`[ChatContext] Setting active conversation to ${id}`);
     setLoading(true);
+    setError(null);
     
     try {
-      // Obtener datos de la conversación
-      const docSnapshot = await db.collection('conversations').doc(id).get();
+      console.log('Fetching conversations from service');
+      const result = await chatService.getUserConversations(user.uid);
+      if (result.success && result.data) {
+        console.log(`Loaded ${result.data.length} conversations`);
+        
+        // Filtrar aquí también en caso de que el servicio no lo haga correctamente
+        const filteredConversations = result.data.filter(conv => 
+          !(conv.deletedFor && conv.deletedFor[user.uid] === true)
+        );
+        
+        console.log(`After additional filtering, ${filteredConversations.length} conversations remain`);
+        setConversations(filteredConversations);
+        
+        // Calcular total de no leídos basado en las conversaciones filtradas
+        const total = filteredConversations.reduce((sum, conv) => {
+          return sum + (conv.unreadCount?.[user.uid] || 0);
+        }, 0);
+        
+        console.log(`Total unread messages: ${total}`);
+        setUnreadTotal(total);
+      } else {
+        console.error('Failed to load conversations:', result.error);
+        setError(result.error?.message || 'Error al cargar conversaciones');
+      }
+    } catch (error) {
+      console.error('Unexpected error loading conversations:', error);
+      setError('Error inesperado al cargar conversaciones');
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+  
+  // Refrescar conversaciones
+  const refreshConversations = useCallback(async () => {
+    console.log('Refreshing conversations');
+    await loadConversations();
+  }, [loadConversations]);
+  
+  // Cargar una conversación específica
+  const loadActiveConversation = useCallback(async (conversationId: string) => {
+    if (!user) {
+      console.error('Cannot load active conversation: no user logged in');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log(`Loading conversation data for ${conversationId}`);
+      // Cargar datos de la conversación
+      const convResult = await chatService.getConversation(conversationId);
+      if (convResult.success && convResult.data) {
+        // Verificar si está marcada como eliminada para este usuario
+        if (convResult.data.deletedFor && convResult.data.deletedFor[user.uid]) {
+          setError('Esta conversación ya no está disponible');
+          setLoading(false);
+          return;
+        }
+        
+        setActiveConversation(convResult.data);
+        
+        // Configurar listener para mensajes
+        const unsubscribe = chatService.listenToMessages(
+          conversationId,
+          (messages) => {
+            console.log(`Received ${messages.length} messages update`);
+            setActiveMessages(messages);
+          },
+          (error) => {
+            console.error('Error en listener de mensajes:', error);
+          },
+          50 // Obtener más mensajes para historial
+        );
+        
+        // Marcar mensajes como leídos
+        await markConversationAsRead();
+        
+        // Devolver función para cancelar suscripción
+        return unsubscribe;
+      } else {
+        console.error('Failed to load conversation:', convResult.error);
+        setError(convResult.error?.message || 'Error al cargar conversación');
+      }
+    } catch (error) {
+      console.error('Unexpected error loading conversation:', error);
+      setError('Error inesperado al cargar conversación');
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+  
+  // Función mejorada setActiveConversationId
+  const setActiveConversationId = useCallback(async (id: string | null) => {
+    if (!id) {
+      console.log('Clearing active conversation');
+      _setActiveConversationId(null);
+      setActiveConversation(null);
+      setActiveMessages([]);
+      return;
+    }
+    
+    try {
+      console.log(`Setting active conversation to ${id}`);
+      setLoading(true);
       
-      if (!docSnapshot.exists) {
-        console.error(`[ChatContext] Conversation ${id} not found`);
-        setError('La conversación no existe o fue eliminada');
+      // Comprobar que la conversación existe
+      const snapshot = await firebase.firestore()
+        .collection('conversations')
+        .doc(id)
+        .get();
+      
+      if (!snapshot.exists) {
+        console.error(`Conversation with ID ${id} not found`);
+        setError(`La conversación no existe o fue eliminada`);
         _setActiveConversationId(null);
-        setActiveConversation(null);
         setLoading(false);
         return;
       }
       
-      // Actualizar ID y datos
+      // Establecer el ID de conversación activa
       _setActiveConversationId(id);
       
+      // Precargar los datos
       const conversationData = {
         id,
-        ...docSnapshot.data()
+        ...snapshot.data()
       } as Conversation;
-      
       setActiveConversation(conversationData);
       
-      // Configurar listener para mensajes
-      setupMessagesListener(id);
+      // Cargar mensajes iniciales
+      const messagesSnapshot = await firebase.firestore()
+        .collection('conversations')
+        .doc(id)
+        .collection('messages')
+        .orderBy('timestamp', 'desc')
+        .limit(20)
+        .get();
       
-      // Marcar como leído
-      await markMessagesAsRead(id);
+      if (!messagesSnapshot.empty) {
+        const messages = messagesSnapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        })) as Message[];
+        
+        setActiveMessages(messages);
+      } else {
+        setActiveMessages([]);
+      }
+      
+      setLoading(false);
     } catch (error) {
-      console.error('[ChatContext] Error setting active conversation:', error);
+      console.error('Error setting active conversation:', error);
       setError('Error al cargar la conversación');
-    } finally {
+      _setActiveConversationId(null);
       setLoading(false);
     }
-  }, [activeConversationId, db, setupMessagesListener]);
+  }, []);
   
-  // Marcar mensajes como leídos
-  const markMessagesAsRead = useCallback(async (conversationId?: string) => {
-    const idToUse = conversationId || activeConversationId;
-    
-    if (!user || !idToUse) {
-      console.log('[ChatContext] Cannot mark as read: missing user or conversation ID');
-      return;
-    }
-    
-    try {
-      console.log(`[ChatContext] Marking conversation ${idToUse} as read`);
-      await chatService.markMessagesAsRead(idToUse, user.uid);
-      
-      // Actualizar conteo de no leídos localmente sin esperar a la actualización en tiempo real
-      setConversations(prev => 
-        prev.map(conv => 
-          conv.id === idToUse 
-            ? { 
-                ...conv, 
-                unreadCount: { 
-                  ...conv.unreadCount, 
-                  [user.uid]: 0 
-                } 
-              }
-            : conv
-        )
-      );
-      
-      // Recalcular total
-      setUnreadTotal(prev => {
-        const conversation = conversations.find(c => c.id === idToUse);
-        const count = conversation?.unreadCount?.[user.uid] || 0;
-        return Math.max(0, prev - count);
-      });
-      
-      console.log('[ChatContext] Successfully marked as read');
-    } catch (error) {
-      console.error('[ChatContext] Error marking conversation as read:', error);
-    }
-  }, [user, activeConversationId, conversations]);
-  
-  // Función para marcar la conversación activa como leída
-  const markConversationAsRead = useCallback(async () => {
-    await markMessagesAsRead();
-  }, [markMessagesAsRead]);
-  
-  // Función mejorada para enviar mensajes
+  // Función de envío de mensajes mejorada
   const sendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
     if (!user) {
-      console.error('[ChatContext] Cannot send message: No user logged in');
+      console.error('Cannot send message: Missing user');
       return false;
     }
     
-    if (!activeConversationId) {
-      console.error('[ChatContext] Cannot send message: No active conversation');
+    if (!activeConversation && !activeConversationId) {
+      console.error('Cannot send message: Missing active conversation and ID');
       return false;
     }
     
     try {
-      const trimmedText = text.trim();
+      // Obtener el ID de la conversación activa
+      const conversationId = activeConversation?.id || activeConversationId;
       
-      if (!trimmedText && !imageUrl) {
-        console.error('[ChatContext] Cannot send empty message');
+      if (!conversationId) {
+        console.error('Cannot determine conversation ID for sending message');
         return false;
       }
       
-      console.log(`[ChatContext] Sending message in conversation ${activeConversationId}`);
+      console.log(`Sending message in conversation ${conversationId}`);
       
+      // Verificar que la conversación existe
+      const convDoc = await firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .get();
+      
+      if (!convDoc.exists) {
+        console.error(`Conversation ${conversationId} does not exist`);
+        return false;
+      }
+      
+      // Obtener datos de la conversación si no está disponible
+      const conversationData = activeConversation || (convDoc.data() as Conversation);
+      
+      // Preparar datos del remitente
+      const userName = user.displayName || 'Usuario';
+      const userPhoto = user.photoURL || '';
+      
+      // Enviar el mensaje usando el servicio
       const result = await chatService.sendMessage(
-        activeConversationId,
+        conversationId,
         user.uid,
         { 
-          text: trimmedText, 
+          text: text.trim(), 
           imageUrl,
           type: imageUrl ? 'image' : 'text'
         },
-        user.displayName || 'Usuario',
-        user.photoURL || ''
+        userName,
+        userPhoto
       );
       
       if (!result.success) {
-        console.error('[ChatContext] Error sending message:', result.error);
+        console.error('Error sending message:', result.error);
         return false;
       }
       
-      console.log('[ChatContext] Message sent successfully');
+      console.log('Message sent successfully');
       return true;
     } catch (error) {
-      console.error('[ChatContext] Error sending message:', error);
+      console.error('Unexpected error sending message:', error);
       return false;
     }
-  }, [user, activeConversationId]);
+  }, [user, activeConversation, activeConversationId]);
   
-  // Función para crear una nueva conversación
+  // Crear una nueva conversación
   const createConversation = useCallback(async (
     recipientId: string,
     recipientName: string,
@@ -496,12 +327,12 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     initialMessage?: string
   ): Promise<string | null> => {
     if (!user) {
-      console.error('[ChatContext] Cannot create conversation: no user logged in');
+      console.error('Cannot create conversation: no user logged in');
       return null;
     }
     
     try {
-      console.log(`[ChatContext] Creating conversation with ${recipientName} (${recipientId})`);
+      console.log(`Creating conversation with ${recipientName} (${recipientId})`);
       
       // Preparar participantes
       const participants = [user.uid, recipientId];
@@ -516,7 +347,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         participantPhotos[user.uid] = user.photoURL;
       }
       
-      // Crear la conversación
+      // Crear la conversación usando el servicio
       const result = await chatService.createConversation(
         participants,
         participantNames,
@@ -527,48 +358,91 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       );
       
       if (result.success && result.data) {
-        console.log(`[ChatContext] Conversation created with ID: ${result.data.conversationId}`);
+        console.log(`Conversation created with ID: ${result.data.conversationId}`);
         
-        // IMPORTANTE: Forzar actualización inmediata de la lista de conversaciones
+        // Refrescar la lista de conversaciones
         await refreshConversations();
         
         return result.data.conversationId;
       } else {
-        console.error('[ChatContext] Failed to create conversation:', result.error);
+        console.error('Failed to create conversation:', result.error);
         return null;
       }
     } catch (error) {
-      console.error('[ChatContext] Error creating conversation:', error);
+      console.error('Unexpected error creating conversation:', error);
       return null;
     }
   }, [user, refreshConversations]);
   
-  // Función para eliminar una conversación
+  // Marcar conversación como leída
+  const markConversationAsRead = useCallback(async () => {
+    if (!user || !activeConversation) {
+      console.log('Cannot mark as read: missing user or active conversation');
+      return;
+    }
+    
+    try {
+      console.log(`Marking conversation ${activeConversation.id} as read`);
+      await chatService.markMessagesAsRead(activeConversation.id, user.uid);
+      
+      // Actualizar total de no leídos
+      const updatedUnreadTotal = unreadTotal - (activeConversation.unreadCount?.[user.uid] || 0);
+      setUnreadTotal(Math.max(0, updatedUnreadTotal));
+      
+      // Actualizar localmente
+      setConversations(prevConversations => 
+        prevConversations.map(conv => 
+          conv.id === activeConversation.id 
+            ? { 
+                ...conv, 
+                unreadCount: { 
+                  ...conv.unreadCount, 
+                  [user.uid]: 0 
+                } 
+              }
+            : conv
+        )
+      );
+      
+      console.log('Successfully marked as read');
+    } catch (error) {
+      console.error('Error marking conversation as read:', error);
+    }
+  }, [user, activeConversation, unreadTotal]);
+
+  // Eliminar conversación (soft delete)
   const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
     if (!user) {
-      console.error('[ChatContext] Cannot delete conversation: no user logged in');
+      console.error('Cannot delete conversation: no user logged in');
       return false;
     }
     
     try {
-      console.log(`[ChatContext] Deleting conversation ${conversationId}`);
+      console.log(`Attempting to delete conversation: ${conversationId}`);
+      
+      // Guardar información de la conversación antes de marcarla como eliminada
+      const deletedConversation = conversations.find(conv => conv.id === conversationId);
+      if (!deletedConversation) {
+        console.error(`Conversation ${conversationId} not found in local state`);
+        return false;
+      }
       
       const result = await chatService.deleteConversation(conversationId, user.uid);
       
       if (result.success) {
-        console.log(`[ChatContext] Successfully deleted conversation ${conversationId}`);
+        console.log(`Successfully marked conversation ${conversationId} as deleted`);
         
-        // Actualizar estado local inmediatamente
-        setConversations(prev => prev.filter(conv => conv.id !== conversationId));
+        // Actualizar el estado local después de eliminar (soft delete)
+        setConversations(prevConversations => 
+          prevConversations.filter(conv => conv.id !== conversationId)
+        );
         
-        // Actualizar total de no leídos
-        const deletedConversation = conversations.find(c => c.id === conversationId);
-        if (deletedConversation?.unreadCount?.[user.uid]) {
-          const count = deletedConversation.unreadCount[user.uid];
-          setUnreadTotal(prev => Math.max(0, prev - count));
+        // Actualizar el contador de no leídos
+        if (deletedConversation && deletedConversation.unreadCount?.[user.uid]) {
+          setUnreadTotal(prev => Math.max(0, prev - deletedConversation.unreadCount![user.uid]));
         }
         
-        // Si era la conversación activa, limpiar estado
+        // Si la conversación eliminada era la activa, limpiar el estado
         if (activeConversationId === conversationId) {
           _setActiveConversationId(null);
           setActiveConversation(null);
@@ -577,16 +451,15 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         
         return true;
       } else {
-        console.error('[ChatContext] Failed to delete conversation:', result.error);
+        console.error('Failed to delete conversation:', result.error);
         return false;
       }
     } catch (error) {
-      console.error('[ChatContext] Error deleting conversation:', error);
+      console.error('Error deleting conversation:', error);
       return false;
     }
   }, [user, conversations, activeConversationId]);
   
-  // Valor del contexto
   const contextValue: ChatContextType = {
     conversations,
     activeConversation,
@@ -609,7 +482,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   );
 };
 
-// Hook personalizado
+// Hook personalizado para usar el contexto de chat
 export const useChat = () => {
   const context = useContext(ChatContext);
   if (context === undefined) {
