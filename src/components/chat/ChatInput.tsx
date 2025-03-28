@@ -13,8 +13,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 
 interface ChatInputProps {
-  onSend: (text: string, imageUrl?: string) => Promise<boolean | void>; // Allow both return types
-  uploadImage?: (uri: string) => Promise<string | null>;
+  onSend: (text: string, imageUrl?: string) => Promise<boolean | void>;
+  uploadImage?: (uri: string) => Promise<string | null | undefined>; // Updated type to allow undefined
   disabled?: boolean;
 }
 

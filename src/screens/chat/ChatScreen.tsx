@@ -20,13 +20,11 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
-import { useChat } from '../../context/ChatContext';
+import { chatService } from '../../../services/ChatService';
 import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessage from '../../components/chat/ChatMessage';
 import ChatInput from '../../components/chat/ChatInput';
-import { Message } from '../../../models/chatTypes';
-import { useChat as useChatHook } from '../../hooks/useChat';
-import firebase from 'firebase/compat/app';
+import { Message, Conversation } from '../../../models/chatTypes';
 
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -35,424 +33,248 @@ const ChatScreen: React.FC = () => {
   const route = useRoute<ChatScreenRouteProp>();
   const navigation = useNavigation<ChatScreenNavigationProp>();
   const { user } = useAuth();
-  const { 
-    activeConversation, 
-    activeMessages,
-    sendMessage: contextSendMessage,
-    markConversationAsRead,
-    refreshConversations
-  } = useChat();
-  
   const { conversationId } = route.params;
+
+  // Estados centralizados
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [chatError, setChatError] = useState<string | null>(null);
-  
-  // Estados para manejo de carga mejorado
-  const [loadingTimeout, setLoadingTimeout] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  
-  // Hook para manejo de mensajes en tiempo real
-  const { 
-    messages: hookMessages, 
-    sendMessage: hookSendMessage, 
-    uploadImage, 
-    markAsRead,
-    conversation: hookConversation
-  } = useChatHook({
-    userId: user?.uid || '',
-    conversationId
-  });
-  
-  // Referencia para desplazamiento a nuevos mensajes
+
+  // Referencias
   const messagesListRef = useRef<FlatList>(null);
-  
-  // Determinar qué conjunto de mensajes usar
-  const messages = activeMessages.length > 0 ? activeMessages : hookMessages;
-  const currentConversation = activeConversation || hookConversation;
-  
-  // Temporizador para detectar problemas de carga
-  useEffect(() => {
-    if (!conversationId) {
-      console.error('ERROR: ID de conversación no proporcionado');
-      Alert.alert('Error', 'No se pudo cargar la conversación', [
-        { text: 'Volver', onPress: () => navigation.goBack() }
-      ]);
-      setLoadError('No se proporcionó ID de conversación');
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+
+  // Cargar conversación y mensajes
+  const loadConversation = useCallback(async () => {
+    if (!conversationId || !user) {
+      setError('Datos insuficientes para cargar conversación');
       setLoading(false);
       return;
     }
 
-    console.log(`Intentando cargar conversación con ID: ${conversationId}`);
-
-    const timeout = setTimeout(() => {
-      console.log('TIMEOUT: La carga de la conversación está tardando demasiado');
-      if (activeMessages.length === 0 && !activeConversation && hookMessages.length === 0 && !hookConversation) {
-        setLoadingTimeout(true);
-      }
-    }, 10000); // Reducido a 10 segundos
-
-    return () => clearTimeout(timeout);
-  }, [conversationId, navigation, activeMessages.length, activeConversation, hookMessages.length, hookConversation]);
-
-  // Actualizar estado de carga cuando llegan mensajes
-  useEffect(() => {
-    if (messages.length > 0 || currentConversation) {
-      setLoading(false);
-    }
-  }, [messages, currentConversation]);
-
-  // Función manual de carga con opción de reintento
-  const loadConversationManually = useCallback(async () => {
-    if (!user || !conversationId) return;
-    
     try {
-      console.log('Cargando conversación manualmente desde ChatScreen');
       setLoading(true);
       
-      const convResult = await firebase.firestore()
-        .collection('conversations')
-        .doc(conversationId)
-        .get();
-      
-      if (!convResult.exists) {
-        console.error(`ERROR: La conversación ${conversationId} no existe en Firestore`);
-        Alert.alert('Error', 'Esta conversación no existe o ha sido eliminada', [
-          { text: 'Volver', onPress: () => navigation.goBack() }
-        ]);
-        setLoading(false);
-        return;
+      // Obtener datos de conversación
+      const convResult = await chatService.getConversation(conversationId);
+      if (!convResult.success || !convResult.data) {
+        throw new Error(convResult.error?.message || 'No se pudo cargar la conversación');
       }
-      
-      console.log('Datos de conversación recuperados manualmente');
-      
-      // Cargar mensajes manualmente
-      const messagesResult = await firebase.firestore()
-        .collection('conversations')
-        .doc(conversationId)
-        .collection('messages')
-        .orderBy('timestamp', 'desc')
-        .limit(20)
-        .get();
-      
-      console.log(`Recuperados ${messagesResult.size} mensajes manualmente`);
-      
-      // Marcar como leído manualmente
-      if (user) {
-        try {
-          await firebase.firestore()
-            .collection('conversations')
-            .doc(conversationId)
-            .update({
-              [`unreadCount.${user.uid}`]: 0
-            });
-          console.log('Marcado como leído manualmente');
-          
-          // Refrescar lista de conversaciones para actualizar contador
-          refreshConversations();
-        } catch (error) {
-          console.error('Error al marcar como leído manualmente:', error);
-        }
-      }
-      
-      setLoading(false);
-      setLoadingTimeout(false);
-      setLoadError(null);
-    } catch (error) {
-      console.error('Error cargando conversación manualmente:', error);
-      Alert.alert('Error de conexión', 'No se pudo acceder a los datos de la conversación');
+      setConversation(convResult.data);
+
+      // Configurar listener de mensajes
+      unsubscribeRef.current = chatService.listenToMessages(
+        conversationId,
+        (updatedMessages) => {
+          // Ordenar mensajes por timestamp
+          const sortedMessages = [...updatedMessages].sort((a, b) => {
+            const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : 
+                          typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : 
+                          typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : 0;
+            return timeA - timeB;
+          });
+
+          setMessages(sortedMessages);
+          // Desplazar al final si hay nuevos mensajes
+          setTimeout(() => {
+            messagesListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        },
+        (err) => {
+          console.error('Error en listener de mensajes:', err);
+          setError('Error al recibir mensajes en tiempo real');
+        },
+        50 // Límite de mensajes
+      );
+
+      // Marcar como leído
+      await chatService.markMessagesAsRead(conversationId, user.uid);
+    } catch (err) {
+      console.error('Error cargando conversación:', err);
+      setError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
       setLoading(false);
     }
-  }, [conversationId, user, refreshConversations]);
+  }, [conversationId, user]);
 
-  // Manejador de reintento
-  const handleRetry = useCallback(() => {
-    setLoading(true);
-    setLoadingTimeout(false);
-    setLoadError(null);
-    loadConversationManually();
-  }, [loadConversationManually]);
-
-  // Intentar carga manual después de un tiempo
+  // Efecto principal de carga
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (!currentConversation && messages.length === 0) {
-        console.log('Timeout alcanzado, intentando carga manual');
-        loadConversationManually();
-      }
-    }, 5000);
+    loadConversation();
 
-    return () => clearTimeout(timer);
-  }, [conversationId, user, currentConversation, messages.length, loadConversationManually]);
-  
-  // Marcar como leído al abrir la conversación
-  useEffect(() => {
-    console.log('ChatScreen montada con conversationId:', conversationId);
-    
-    if (!conversationId) {
-      console.error('Error: No se proporcionó ID de conversación');
-      setChatError('No se proporcionó ID de conversación');
-      return;
-    }
-    
-    if (!user) {
-      console.error('Error: No hay usuario autenticado');
-      setChatError('No hay usuario autenticado');
-      return;
-    }
-    
-    // Intentar marcar como leído
-    try {
-      if (activeConversation) {
-        markConversationAsRead();
-        console.log('Conversación marcada como leída (contexto)');
-      } else {
-        markAsRead();
-        console.log('Conversación marcada como leída (hook)');
-      }
-    } catch (error) {
-      console.error('Error al marcar conversación como leída:', error);
-    }
-    
-    // Al salir, refrescar conversaciones
+    // Limpiar listener al desmontar
     return () => {
-      refreshConversations();
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+      }
     };
-  }, [conversationId, user, activeConversation, markConversationAsRead, markAsRead, refreshConversations]);
-  
-  // Función mejorada para envío de mensajes
-  const handleSendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
-    if (!user) {
-      console.error('Cannot send message: No user logged in');
+  }, [loadConversation]);
+
+  // Enviar mensaje
+  const handleSendMessage = useCallback(async (text: string, imageUrl?: string) => {
+    if (!user || !conversationId) {
+      Alert.alert('Error', 'No se puede enviar el mensaje');
       return false;
     }
-    
-    if (!conversationId) {
-      console.error('Cannot send message: No conversationId');
-      return false;
-    }
-    
+
     try {
-      const trimmedText = text.trim();
-      console.log(`Attempting to send message${imageUrl ? ' with image' : ''}`);
-      
-      let success = false;
-      
-      // Intentar primero con el hook, luego con el contexto
-      if (hookSendMessage) {
-        console.log('Sending via hook');
-        success = await hookSendMessage(trimmedText, imageUrl);
-      } else if (contextSendMessage) {
-        console.log('Sending via context');
-        success = await contextSendMessage(trimmedText, imageUrl);
-      } else {
-        console.error('No message sending function available');
-        return false;
-      }
-      
-      if (success) {
-        // Scroll al final después de enviar
-        setTimeout(() => {
-          messagesListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      } else {
-        console.error('Message sending failed');
-      }
-      
-      return success;
+      const result = await chatService.sendMessage(
+        conversationId,
+        user.uid,
+        { 
+          text: text.trim(), 
+          imageUrl,
+          type: imageUrl ? 'image' : 'text'
+        },
+        user.displayName || 'Usuario',
+        user.photoURL || undefined
+      );
+
+      return result.success;
     } catch (error) {
-      console.error('Error sending message:', error);
+      console.error('Error enviando mensaje:', error);
+      Alert.alert('Error', 'No se pudo enviar el mensaje');
       return false;
     }
-  }, [user, conversationId, hookSendMessage, contextSendMessage]);
-  
-  // Mostrar imagen a tamaño completo
+  }, [user, conversationId]);
+
+  // Subir imagen
+  const handleUploadImage = useCallback(async (uri: string) => {
+    if (!user || !conversationId) {
+      Alert.alert('Error', 'No se puede subir imagen');
+      return null;
+    }
+
+    try {
+      const result = await chatService.uploadMessageImage(uri, conversationId);
+      return result.success ? result.data : null;
+    } catch (error) {
+      console.error('Error subiendo imagen:', error);
+      Alert.alert('Error', 'No se pudo subir la imagen');
+      return null;
+    }
+  }, [conversationId]);
+
+  // Mostrar imagen a pantalla completa
   const handleImagePress = useCallback((imageUrl: string) => {
     setSelectedImage(imageUrl);
     setImageModalVisible(true);
   }, []);
-  
-  // Ordenar mensajes por fecha
-  const sortedMessages = useMemo(() => {
-    return [...messages].sort((a, b) => {
-      let dateA: Date;
-      let dateB: Date;
-      
-      if (a.timestamp instanceof firebase.firestore.Timestamp) {
-        dateA = a.timestamp.toDate();
-      } else if (a.timestamp instanceof Date) {
-        dateA = a.timestamp;
-      } else {
-        dateA = new Date(a.timestamp);
-      }
-      
-      if (b.timestamp instanceof firebase.firestore.Timestamp) {
-        dateB = b.timestamp.toDate();
-      } else if (b.timestamp instanceof Date) {
-        dateB = b.timestamp;
-      } else {
-        dateB = new Date(b.timestamp);
-      }
-      
-      return dateA.getTime() - dateB.getTime();
-    });
-  }, [messages]);
-  
+
   // Obtener ID del otro participante
-  const getOtherParticipantId = useCallback(() => {
-    if (!currentConversation || !user) return '';
-    
-    return currentConversation.participants.find(id => id !== user.uid) || '';
-  }, [currentConversation, user]);
-  
-  // Calcular ID del otro participante para el encabezado
-  const otherParticipantId = getOtherParticipantId();
-  
+  const otherParticipantId = useMemo(() => {
+    return conversation?.participants.find(p => p !== user?.uid) || '';
+  }, [conversation, user]);
+
+  // Renderizado de estado vacío
+  const EmptyStateComponent = useCallback(() => (
+    <View style={styles.emptyStateContainer}>
+      <LinearGradient
+        colors={['#F4F6FF', '#E8EEFF']}
+        style={styles.emptyStateGradient}
+      >
+        <MaterialIcons 
+          name="chat-bubble-outline" 
+          size={120} 
+          color="#B9C5FF" 
+          style={styles.emptyStateIcon}
+        />
+        <Text style={styles.emptyText}>No hay mensajes</Text>
+        <Text style={styles.emptySubtext}>
+          Sé el primero en enviar un mensaje
+        </Text>
+      </LinearGradient>
+    </View>
+  ), []);
+
+  // Renderizado condicional
+  if (loading) {
+    return (
+      <View style={styles.centerContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Cargando conversación...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.centerContainer}>
+        <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+        <Text style={styles.errorText}>{error}</Text>
+        <TouchableOpacity 
+          style={styles.retryButton}
+          onPress={loadConversation}
+        >
+          <Text style={styles.retryButtonText}>Reintentar</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#007AFF" />
+      <StatusBar barStyle="dark-content" />
       
-      {/* Header */}
-      <ChatHeader 
-        conversation={currentConversation} 
-        participantId={otherParticipantId}
-      />
+      {conversation && (
+        <ChatHeader 
+          conversation={conversation} 
+          participantId={otherParticipantId}
+        />
+      )}
       
-      {/* Contenido principal solo si no hay error */}
-      {!chatError && (
-        <KeyboardAvoidingView
-          style={styles.keyboardAvoidingView}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-        >
-          {/* Componente de carga mejorado */}
-          {loading ? (
-            <View style={styles.centerContainer}>
-              <ActivityIndicator size="large" color="#007AFF" />
-              <Text style={styles.loadingText}>Cargando conversación...</Text>
-              {loadingTimeout && (
-                <>
-                  <Text style={styles.timeoutText}>
-                    La carga está tardando más de lo esperado
-                  </Text>
-                  <TouchableOpacity 
-                    style={styles.retryButton}
-                    onPress={handleRetry}
-                  >
-                    <Text style={styles.retryButtonText}>Reintentar</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.cancelButton}
-                    onPress={() => navigation.goBack()}
-                  >
-                    <Text style={styles.cancelButtonText}>Cancelar</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          ) : loadError ? (
-            <View style={styles.centerContainer}>
-              <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
-              <Text style={styles.errorText}>{loadError}</Text>
-              <TouchableOpacity 
-                style={styles.retryButton}
-                onPress={handleRetry}
-              >
-                <Text style={styles.retryButtonText}>Reintentar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.cancelButton}
-                onPress={() => navigation.goBack()}
-              >
-                <Text style={styles.cancelButtonText}>Volver</Text>
-              </TouchableOpacity>
-            </View>
-          ) : sortedMessages.length === 0 ? (
-            <View style={styles.emptyStateContainer}>
-              <LinearGradient
-                colors={['#F4F6FF', '#E8EEFF']}
-                style={styles.emptyStateGradient}
-              >
-                <MaterialIcons 
-                  name="chat-bubble-outline" 
-                  size={120} 
-                  color="#B9C5FF" 
-                  style={styles.emptyStateIcon}
-                />
-                <Text style={styles.emptyText}>No hay mensajes</Text>
-                <Text style={styles.emptySubtext}>
-                  Sé el primero en enviar un mensaje
-                </Text>
-              </LinearGradient>
-            </View>
-          ) : (
-            <FlatList
-              ref={messagesListRef}
-              data={sortedMessages}
-              keyExtractor={(item: Message) => item.id}
-              renderItem={({ item }: { item: Message }) => (
-                <ChatMessage 
-                  message={item} 
-                  isMine={item.senderId === user?.uid}
-                  onImagePress={handleImagePress}
-                />
-              )}
-              contentContainerStyle={styles.messagesContainer}
-              inverted={false}
-              onContentSizeChange={() => {
-                messagesListRef.current?.scrollToEnd({ animated: true });
-              }}
-              onLayout={() => {
-                messagesListRef.current?.scrollToEnd({ animated: false });
-              }}
+      <KeyboardAvoidingView
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
+        <FlatList
+          ref={messagesListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => (
+            <ChatMessage 
+              message={item} 
+              isMine={item.senderId === user?.uid}
+              onImagePress={handleImagePress}
             />
           )}
-          
-          {/* Entrada de nuevos mensajes */}
-          <ChatInput 
-            onSend={handleSendMessage}
-            uploadImage={uploadImage}
-          />
-        </KeyboardAvoidingView>
-      )}
+          contentContainerStyle={styles.messagesContainer}
+          inverted={false}
+          ListEmptyComponent={EmptyStateComponent}
+          onContentSizeChange={() => {
+            messagesListRef.current?.scrollToEnd({ animated: true });
+          }}
+        />
+        
+        <ChatInput 
+          onSend={handleSendMessage}
+          uploadImage={handleUploadImage}
+        />
+      </KeyboardAvoidingView>
       
-      {/* Mostrar error si existe */}
-      {chatError && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>Error: {chatError}</Text>
-          <TouchableOpacity 
-            style={styles.errorButton}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={styles.errorButtonText}>Volver</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-      
-      {/* Modal para ver imágenes a pantalla completa */}
+      {/* Modal para imagen a pantalla completa */}
       <Modal
         visible={imageModalVisible}
         transparent={true}
-        animationType="fade"
         onRequestClose={() => setImageModalVisible(false)}
       >
-        <View style={styles.modalContainer}>
-          <TouchableOpacity
-            style={styles.closeButton}
-            onPress={() => setImageModalVisible(false)}
-          >
-            <MaterialIcons name="close" size={28} color="white" />
-          </TouchableOpacity>
-          
+        <TouchableOpacity 
+          style={styles.modalContainer} 
+          onPress={() => setImageModalVisible(false)}
+          activeOpacity={1}
+        >
           {selectedImage && (
             <Image
               source={{ uri: selectedImage }}
-              style={styles.fullImage}
+              style={styles.fullScreenImage}
               resizeMode="contain"
             />
           )}
-        </View>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );
@@ -463,13 +285,51 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F7FF',
   },
-  keyboardAvoidingView: {
+  keyboardContainer: {
     flex: 1,
   },
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#333333',
+  },
+  errorText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#FF3B30',
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 16,
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
   messagesContainer: {
-    flexGrow: 1,
     paddingVertical: 16,
     paddingHorizontal: 8,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  fullScreenImage: {
+    width: '100%',
+    height: '80%',
   },
   emptyStateContainer: {
     flex: 1,
@@ -486,88 +346,6 @@ const styles = StyleSheet.create({
   emptyStateIcon: {
     marginBottom: 16,
   },
-  modalContainer: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeButton: {
-    position: 'absolute',
-    top: 50,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1,
-  },
-  closeButtonText: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  fullImage: {
-    width: '100%',
-    height: '80%',
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  centerContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#333333',
-  },
-  timeoutText: {
-    marginTop: 16,
-    fontSize: 14,
-    color: '#FF9500',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  errorText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#FF3B30',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  retryButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#007AFF',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  cancelButton: {
-    marginTop: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderWidth: 1,
-    borderColor: '#8E8E93',
-    borderRadius: 8,
-  },
-  cancelButtonText: {
-    color: '#8E8E93',
-    fontSize: 16,
-  },
   emptyText: {
     fontSize: 20,
     fontWeight: 'bold',
@@ -579,17 +357,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#8E8E93',
     textAlign: 'center',
-  },
-  errorButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  errorButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
   },
 });
 
