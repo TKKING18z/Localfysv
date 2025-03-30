@@ -1,8 +1,20 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { chatService } from '../../services/ChatService';
+import { firebaseService } from '../services/firebaseService';
 import { useAuth } from './AuthContext';
 import { Conversation, Message } from '../../models/chatTypes';
 import firebase from 'firebase/compat/app';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// Definición del tipo Result para evitar errores
+interface Result<T> {
+  success: boolean;
+  data?: T;
+  error?: {
+    message: string;
+    code?: string;
+  };
+}
 
 interface ChatContextType {
   conversations: Conversation[];
@@ -32,54 +44,64 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const [error, setError] = useState<string | null>(null);
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   
-  // Cargar conversaciones iniciales
+  // Efecto para limpiar automáticamente conversaciones duplicadas
   useEffect(() => {
+    const cleanupDuplicateConversations = async () => {
+      if (!user) return;
+      
+      try {
+        // Verificar si ya se hizo limpieza recientemente (no hacerlo demasiado a menudo)
+        const lastCleanupStr = await AsyncStorage.getItem('last_chat_cleanup');
+        if (lastCleanupStr) {
+          const lastCleanup = new Date(lastCleanupStr);
+          const now = new Date();
+          const hoursSinceLastCleanup = (now.getTime() - lastCleanup.getTime()) / (1000 * 60 * 60);
+          
+          // Si se hizo limpieza en las últimas 24 horas, no hacerla de nuevo
+          if (hoursSinceLastCleanup < 24) {
+            console.log('Skipping duplicate conversation cleanup (done recently)');
+            return;
+          }
+        }
+        
+        console.log('Running automatic duplicate conversation cleanup');
+        
+        // Verificar la existencia del método de manera segura
+        const chatCleanup = (firebaseService as any).chat?.chatCleanup;
+        if (chatCleanup && typeof chatCleanup.detectAndMergeDuplicateConversations === 'function') {
+          const result = await chatCleanup.detectAndMergeDuplicateConversations(user.uid);
+          console.log('Cleanup result:', result);
+          
+          // Si hubo cambios, refrescar conversaciones
+          if (result.success) {
+            // Guardar timestamp de la última limpieza
+            await AsyncStorage.setItem('last_chat_cleanup', new Date().toISOString());
+            
+            // Refrescar conversaciones después de un breve retraso
+            setTimeout(() => {
+              loadConversations();
+            }, 1000);
+          }
+        } else {
+          console.log('Cleanup method not available in firebaseService');
+        }
+      } catch (error) {
+        console.error('Error during duplicate conversation cleanup:', error);
+      }
+    };
+    
+    // Ejecutar limpieza después de un retraso para no afectar el rendimiento inicial
+    let cleanupTimeout: NodeJS.Timeout | null = null;
     if (user) {
-      console.log('Loading initial conversations for user:', user.uid);
-      loadConversations();
-    } else {
-      console.log('No user logged in, resetting conversations');
-      setConversations([]);
-      setActiveConversation(null);
-      setActiveMessages([]);
-      setUnreadTotal(0);
+      cleanupTimeout = setTimeout(cleanupDuplicateConversations, 5000);
     }
+    
+    return () => {
+      if (cleanupTimeout) {
+        clearTimeout(cleanupTimeout);
+      }
+    };
   }, [user]);
-  
-  // Cargar conversación activa cuando cambia el ID
-  useEffect(() => {
-    if (activeConversationId && user) {
-      console.log(`Loading active conversation: ${activeConversationId}`);
-      loadActiveConversation(activeConversationId);
-    } else {
-      setActiveConversation(null);
-      setActiveMessages([]);
-    }
-  }, [activeConversationId, user]);
-
-  // Función para actualizar el contador de mensajes no leídos
-  const updateUnreadCount = useCallback(() => {
-    if (!user || !conversations.length) return;
-    
-    // Calcular el total de mensajes no leídos
-    const total = conversations.reduce((sum, conv) => {
-      return sum + (conv.unreadCount?.[user.uid] || 0);
-    }, 0);
-    
-    setUnreadTotal(total);
-    
-    // Actualizar el badge en el tab navigator de manera opcional
-    try {
-      // Aquí podrías agregar integración con notificaciones nativas si lo deseas
-    } catch (error) {
-      console.error('Error al actualizar badge:', error);
-    }
-  }, [user, conversations]);
-
-  // Agregar este efecto dentro del ChatProvider
-  useEffect(() => {
-    updateUnreadCount();
-  }, [updateUnreadCount, conversations]);
   
   // Función para cargar todas las conversaciones del usuario
   const loadConversations = useCallback(async () => {
@@ -98,7 +120,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         console.log(`Loaded ${result.data.length} conversations`);
         
         // Filtrar aquí también en caso de que el servicio no lo haga correctamente
-        const filteredConversations = result.data.filter(conv => 
+        const filteredConversations = result.data.filter((conv: Conversation) => 
           !(conv.deletedFor && conv.deletedFor[user.uid] === true)
         );
         
@@ -106,7 +128,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         setConversations(filteredConversations);
         
         // Calcular total de no leídos basado en las conversaciones filtradas
-        const total = filteredConversations.reduce((sum, conv) => {
+        const total = filteredConversations.reduce((sum: number, conv: Conversation) => {
           return sum + (conv.unreadCount?.[user.uid] || 0);
         }, 0);
         
@@ -124,11 +146,129 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user]);
   
-  // Refrescar conversaciones
+  // Cargar conversaciones iniciales
+  useEffect(() => {
+    if (user) {
+      console.log('Loading initial conversations for user:', user.uid);
+      loadConversations();
+    } else {
+      console.log('No user logged in, resetting conversations');
+      setConversations([]);
+      setActiveConversation(null);
+      setActiveMessages([]);
+      setUnreadTotal(0);
+    }
+  }, [user, loadConversations]);
+  
+  // Cargar conversación activa cuando cambia el ID
+  useEffect(() => {
+    if (activeConversationId && user) {
+      console.log(`Loading active conversation: ${activeConversationId}`);
+      loadActiveConversation(activeConversationId);
+    } else {
+      setActiveConversation(null);
+      setActiveMessages([]);
+    }
+  }, [activeConversationId, user]);
+
+  // Función para actualizar el contador de mensajes no leídos
+  const updateUnreadCount = useCallback(() => {
+    if (!user || !conversations.length) return;
+    
+    // Calcular el total de mensajes no leídos
+    const total = conversations.reduce((sum: number, conv: Conversation) => {
+      return sum + (conv.unreadCount?.[user.uid] || 0);
+    }, 0);
+    
+    setUnreadTotal(total);
+    
+    // Actualizar el badge en el tab navigator de manera opcional
+    try {
+      // Aquí podrías agregar integración con notificaciones nativas si lo deseas
+    } catch (error) {
+      console.error('Error al actualizar badge:', error);
+    }
+  }, [user, conversations]);
+
+  // Agregar este efecto dentro del ChatProvider
+  useEffect(() => {
+    updateUnreadCount();
+  }, [updateUnreadCount]);
+  
+  // Método mejorado para refrescar conversaciones
   const refreshConversations = useCallback(async () => {
-    console.log('Refreshing conversations');
-    await loadConversations();
-  }, [loadConversations]);
+    if (!user) {
+      console.error('Cannot refresh conversations: no user logged in');
+      return;
+    }
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('Refreshing conversations for user:', user.uid);
+      
+      // Implementar un timeout para evitar que la operación se quede colgada
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timeout fetching conversations')), 15000);
+      });
+      
+      // Crear una promesa que se pueda cancelar con timeout
+      const fetchPromise = chatService.getUserConversations(user.uid);
+      
+      // Usar Promise.race para manejar el caso de timeout
+      const result = await Promise.race([fetchPromise, timeoutPromise]) as Result<Conversation[]>;
+      
+      if (result.success && result.data) {
+        console.log(`Refreshed ${result.data.length} conversations`);
+        
+        // Filtrar conversaciones eliminadas
+        const filteredConversations = result.data.filter((conv: Conversation) => 
+          !(conv.deletedFor && conv.deletedFor[user.uid] === true)
+        );
+        
+        console.log(`After filtering deleted, ${filteredConversations.length} conversations remain`);
+        
+        // Sanitizar datos para evitar problemas de renderizado
+        const sanitizedConversations = filteredConversations.map((conv: Conversation) => {
+          // Asegurar que unreadCount exista
+          if (!conv.unreadCount) {
+            conv.unreadCount = {};
+            conv.participants.forEach((p: string) => {
+              conv.unreadCount[p] = 0;
+            });
+          }
+          
+          // Asegurar que participantNames exista
+          if (!conv.participantNames) {
+            conv.participantNames = {};
+            conv.participants.forEach((p: string) => {
+              conv.participantNames[p] = 'Usuario';
+            });
+          }
+          
+          return conv;
+        });
+        
+        setConversations(sanitizedConversations);
+        
+        // Calcular total de no leídos
+        const unreadTotal = sanitizedConversations.reduce((sum: number, conv: Conversation) => {
+          return sum + (conv.unreadCount[user.uid] || 0);
+        }, 0);
+        
+        setUnreadTotal(unreadTotal);
+      } else {
+        console.error('Failed to refresh conversations:', result.error);
+        setError(result.error?.message || 'Error al cargar conversaciones');
+      }
+    } catch (error) {
+      console.error('Unexpected error refreshing conversations:', error);
+      setError('Error inesperado al cargar conversaciones');
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
   
   // Cargar una conversación específica
   const loadActiveConversation = useCallback(async (conversationId: string) => {
@@ -318,7 +458,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, activeConversation, activeConversationId]);
   
-  // Crear una nueva conversación
+  // Método mejorado para crear conversación
   const createConversation = useCallback(async (
     recipientId: string,
     recipientName: string,
@@ -334,40 +474,122 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     try {
       console.log(`Creating conversation with ${recipientName} (${recipientId})`);
       
-      // Preparar participantes
-      const participants = [user.uid, recipientId];
-      const participantNames: Record<string, string> = {
-        [user.uid]: user.displayName || 'Usuario',
-        [recipientId]: recipientName
-      };
+      // Implementar retrointento (hasta 3 veces)
+      const MAX_RETRIES = 3;
+      let lastError: any = null;
       
-      // Preparar fotos de perfil
-      const participantPhotos: Record<string, string> = {};
-      if (user.photoURL) {
-        participantPhotos[user.uid] = user.photoURL;
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          // Si es una conversación de negocio, usar el método específico
+          if (businessId && businessName) {
+            console.log(`Creating business conversation for business ${businessId}`);
+            
+            const result = await chatService.checkOrCreateBusinessConversation(
+              user.uid,
+              user.displayName || 'Usuario',
+              recipientId,
+              recipientName,
+              businessId,
+              businessName
+            );
+            
+            if (result.success && result.data) {
+              const conversationId = result.data.conversationId;
+              console.log(`Business conversation created/found: ${conversationId}`);
+              
+              // Si hay un mensaje inicial, enviarlo
+              if (initialMessage && initialMessage.trim()) {
+                console.log('Sending initial message');
+                await chatService.sendMessage(
+                  conversationId, 
+                  user.uid, 
+                  { text: initialMessage.trim() },
+                  user.displayName || 'Usuario',
+                  user.photoURL || undefined
+                );
+              }
+              
+              // Refrescar conversaciones en segundo plano
+              setTimeout(() => {
+                refreshConversations().catch(err => {
+                  console.error('Background refresh error:', err);
+                });
+              }, 500);
+              
+              return conversationId;
+            }
+            
+            lastError = result.error || new Error('Error creating business conversation');
+            console.error(`Attempt ${attempt} failed:`, lastError);
+            
+            // Si no es un error que se pueda resolver reintentando, salir del bucle
+            if (result.error?.code === 'chat/same-user-conversation') {
+              break;
+            }
+            
+            // Esperar antes de reintentar (backoff exponencial)
+            if (attempt < MAX_RETRIES) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+          } else {
+            // Conversación normal entre usuarios
+            console.log('Creating regular user conversation');
+            
+            // Resto del código actual para conversaciones normales
+            const participants = [user.uid, recipientId];
+            const participantNames: Record<string, string> = {
+              [user.uid]: user.displayName || 'Usuario',
+              [recipientId]: recipientName
+            };
+            
+            // Preparar fotos de perfil
+            const participantPhotos: Record<string, string> = {};
+            if (user.photoURL) {
+              participantPhotos[user.uid] = user.photoURL;
+            }
+            
+            const result = await chatService.createConversation(
+              participants,
+              participantNames,
+              participantPhotos,
+              undefined, // No businessId
+              undefined, // No businessName
+              initialMessage
+            );
+            
+            if (result.success && result.data) {
+              // Refrescar conversaciones en segundo plano
+              setTimeout(() => {
+                refreshConversations().catch(err => {
+                  console.error('Background refresh error:', err);
+                });
+              }, 500);
+              
+              return result.data.conversationId;
+            }
+            
+            lastError = result.error || new Error('Error creating conversation');
+            console.error(`Attempt ${attempt} failed:`, lastError);
+            
+            // Esperar antes de reintentar
+            if (attempt < MAX_RETRIES) {
+              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            }
+          }
+        } catch (retryError) {
+          lastError = retryError;
+          console.error(`Error in attempt ${attempt}:`, retryError);
+          
+          // Esperar antes de reintentar
+          if (attempt < MAX_RETRIES) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          }
+        }
       }
       
-      // Crear la conversación usando el servicio
-      const result = await chatService.createConversation(
-        participants,
-        participantNames,
-        participantPhotos,
-        businessId,
-        businessName,
-        initialMessage
-      );
-      
-      if (result.success && result.data) {
-        console.log(`Conversation created with ID: ${result.data.conversationId}`);
-        
-        // Refrescar la lista de conversaciones
-        await refreshConversations();
-        
-        return result.data.conversationId;
-      } else {
-        console.error('Failed to create conversation:', result.error);
-        return null;
-      }
+      // Si llegamos aquí, todos los intentos fallaron
+      console.error('All attempts to create conversation failed');
+      return null;
     } catch (error) {
       console.error('Unexpected error creating conversation:', error);
       return null;
@@ -391,7 +613,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       
       // Actualizar localmente
       setConversations(prevConversations => 
-        prevConversations.map(conv => 
+        prevConversations.map((conv: Conversation) => 
           conv.id === activeConversation.id 
             ? { 
                 ...conv, 

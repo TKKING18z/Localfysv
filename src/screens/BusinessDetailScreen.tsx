@@ -309,7 +309,7 @@ const BusinessDetailScreen: React.FC = () => {
       // Mostrar indicador de carga
       setIsLoading(true);
       
-      // Verificar que el usuario tenga permisos para chatear
+      // Verificar si el usuario es el propietario del negocio (no puede chatear consigo mismo)
       if (user.uid === business.createdBy) {
         Alert.alert('Información', 'No puedes iniciar un chat contigo mismo como propietario');
         setIsLoading(false);
@@ -319,30 +319,54 @@ const BusinessDetailScreen: React.FC = () => {
       console.log('Iniciando chat con propietario:', business.createdBy);
       
       // Obtener información del propietario
-      const ownerDoc = await firebase.firestore()
-        .collection('users')
-        .doc(business.createdBy)
-        .get();
-      
-      if (!ownerDoc.exists) {
-        throw new Error('No se pudo encontrar al propietario del negocio');
-      }
-      
-      const ownerData = ownerDoc.data();
-      const ownerName = ownerData?.displayName || 'Propietario';
-      
-      // Crear o recuperar conversación existente
-      const result = await chatService.checkOrCreateBusinessConversation(
-        user.uid,
-        user.displayName || 'Usuario',
-        business.createdBy,
-        ownerName,
-        business.id,
-        business.name
-      );
-      
-      if (result.success && result.data) {
-        const conversationId = result.data.conversationId;
+      try {
+        const ownerDoc = await firebase.firestore()
+          .collection('users')
+          .doc(business.createdBy)
+          .get();
+        
+        if (!ownerDoc.exists) {
+          throw new Error('No se pudo encontrar al propietario del negocio');
+        }
+        
+        const ownerData = ownerDoc.data();
+        // Usar un nombre por defecto si no hay displayName
+        const ownerName = ownerData?.displayName || 'Propietario';
+        
+        // Intentar crear o recuperar conversación existente usando el método mejorado
+        const MAX_RETRIES = 2;
+        let conversationId: string | null = null;
+        let error: Error | null = null;
+        
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          try {
+            conversationId = await createConversation(
+              business.createdBy, // recipientId = propietario del negocio
+              ownerName,
+              business.id,      // businessId
+              business.name     // businessName
+            );
+            
+            if (conversationId) {
+              break; // Éxito, salir del bucle
+            }
+            
+            // Si llegamos aquí, createConversation devolvió null
+            await new Promise(resolve => setTimeout(resolve, 1000));
+          } catch (err) {
+            error = err instanceof Error ? err : new Error('Error desconocido');
+            console.error(`Error en intento ${attempt + 1}:`, err);
+            
+            // Esperar antes de reintentar
+            if (attempt < MAX_RETRIES - 1) {
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+          }
+        }
+        
+        if (!conversationId) {
+          throw error || new Error('No se pudo crear la conversación después de varios intentos');
+        }
         
         // Navegar a la pantalla de chat
         navigation.navigate('Chat', { conversationId });
@@ -351,16 +375,23 @@ const BusinessDetailScreen: React.FC = () => {
         setTimeout(() => {
           refreshConversations();
         }, 500);
-      } else {
-        throw new Error(result.error?.message || 'Error al crear conversación');
+        
+      } catch (dbError) {
+        console.error('Error al acceder a datos del propietario:', dbError);
+        throw new Error('No se pudo obtener información del propietario del negocio');
       }
+      
     } catch (error) {
       console.error('Error iniciando chat:', error);
-      Alert.alert('Error', 'No se pudo iniciar la conversación. Intente nuevamente más tarde.');
+      Alert.alert(
+        'Error', 
+        'No se pudo iniciar la conversación. Intente nuevamente más tarde.',
+        [{ text: 'OK' }]
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [user, business, navigation, refreshConversations]);
+  }, [user, business, navigation, createConversation, refreshConversations]);
 
   const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';
