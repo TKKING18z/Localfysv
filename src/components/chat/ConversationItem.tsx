@@ -1,119 +1,135 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { memo } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Image,
+  Animated,
+  Pressable
+} from 'react-native';
 import { Conversation } from '../../../models/chatTypes';
-import firebase from 'firebase/compat/app';
+import { formatConversationTime, getNameInitial, getAvatarColor, truncateText } from '../../../src/utils/chatUtils';
+import * as Haptics from 'expo-haptics';
 
 interface ConversationItemProps {
   conversation: Conversation;
   userId: string;
   onPress: (conversationId: string) => void;
+  onLongPress?: (conversationId: string) => void;
+  isActive?: boolean;
 }
 
-const ConversationItem: React.FC<ConversationItemProps> = ({ 
+const ConversationItem: React.FC<ConversationItemProps> = memo(({ 
   conversation, 
   userId,
-  onPress 
+  onPress,
+  onLongPress,
+  isActive = false
 }) => {
-  // Obtener el ID del otro participante
+  // Get the ID of the other participant
   const getOtherParticipantId = () => {
     return conversation.participants.find(id => id !== userId) || '';
   };
   
-  // Formatear la última fecha de mensaje
+  // Format the last message date
   const getFormattedDate = () => {
-    try {
-      if (!conversation.lastMessage?.timestamp) return '';
-      
-      let date: Date;
-      if (conversation.lastMessage.timestamp instanceof firebase.firestore.Timestamp) {
-        date = conversation.lastMessage.timestamp.toDate();
-      } else if (conversation.lastMessage.timestamp instanceof Date) {
-        date = conversation.lastMessage.timestamp;
-      } else if (typeof conversation.lastMessage.timestamp === 'string') {
-        date = new Date(conversation.lastMessage.timestamp);
-      } else {
-        return '';
-      }
-      
-      const now = new Date();
-      const diffMs = now.getTime() - date.getTime();
-      const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 0) {
-        // Hoy: Mostrar hora
-        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      } else if (diffDays === 1) {
-        // Ayer
-        return 'Ayer';
-      } else if (diffDays < 7) {
-        // En la última semana: mostrar día de la semana
-        const days = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-        return days[date.getDay()];
-      } else {
-        // Fechas más antiguas: formato corto
-        return date.toLocaleDateString();
-      }
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return '';
-    }
+    if (!conversation.lastMessage?.timestamp) return '';
+    return formatConversationTime(conversation.lastMessage.timestamp);
   };
   
   const otherParticipantId = getOtherParticipantId();
   const otherParticipantName = conversation.participantNames[otherParticipantId] || 'Usuario';
   const otherParticipantPhoto = conversation.participantPhotos?.[otherParticipantId];
   
-  // Número de mensajes no leídos
+  // Unread message count
   const unreadCount = conversation.unreadCount?.[userId] || 0;
   
-  // Determinar si el último mensaje es del usuario actual
+  // Determine if the last message is from the current user
   const isLastMessageMine = conversation.lastMessage?.senderId === userId;
   
-  // Texto para mostrar como último mensaje
+  // Text to show as last message
   let lastMessageText = conversation.lastMessage?.text || 'Sin mensajes';
   if (isLastMessageMine) {
     lastMessageText = `Tú: ${lastMessageText}`;
   }
   
-  // Decidir qué mostrar como título (nombre de participante o de negocio)
+  // Decide what to show as title (participant name or business name)
   const title = conversation.businessId
     ? conversation.businessName || otherParticipantName
     : otherParticipantName;
     
-  // El subtítulo es el nombre del otro participante si hay un negocio
+  // The subtitle is the other participant's name if there's a business
   const subtitle = conversation.businessId
     ? otherParticipantName
     : undefined;
   
+  const handlePress = () => {
+    onPress(conversation.id);
+  };
+  
+  const handleLongPress = () => {
+    if (onLongPress) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      onLongPress(conversation.id);
+    }
+  };
+  
   return (
-    <TouchableOpacity 
-      style={[
+    <Pressable 
+      style={({ pressed }) => [
         styles.container,
-        unreadCount > 0 && styles.unreadContainer
+        unreadCount > 0 && styles.unreadContainer,
+        isActive && styles.activeContainer,
+        pressed && styles.pressedContainer
       ]} 
-      onPress={() => onPress(conversation.id)}
-      activeOpacity={0.7}
+      onPress={handlePress}
+      onLongPress={handleLongPress}
+      android_ripple={{ color: 'rgba(0, 122, 255, 0.1)' }}
     >
       {/* Avatar */}
-      {otherParticipantPhoto ? (
-        <Image source={{ uri: otherParticipantPhoto }} style={styles.avatar} />
-      ) : (
-        <View style={styles.defaultAvatar}>
-          <Text style={styles.avatarText}>{otherParticipantName[0]}</Text>
-        </View>
-      )}
+      <View style={styles.avatarContainer}>
+        {otherParticipantPhoto ? (
+          <Image 
+            source={{ uri: otherParticipantPhoto }} 
+            style={styles.avatar}
+            onError={() => {
+              // This will silently handle the error when image fails to load
+              // The default avatar view will be shown automatically in the render
+            }}
+          />
+        ) : (
+          <View style={[
+            styles.defaultAvatar,
+            { backgroundColor: getAvatarColor(otherParticipantId) }
+          ]}>
+            <Text style={styles.avatarText}>{getNameInitial(otherParticipantName)}</Text>
+          </View>
+        )}
+        
+        {/* Business badge */}
+        {conversation.businessId && (
+          <View style={styles.businessBadge}>
+            <Text style={styles.businessBadgeText}>B</Text>
+          </View>
+        )}
+      </View>
       
-      {/* Contenido central */}
+      {/* Content */}
       <View style={styles.contentContainer}>
-        <Text 
-          style={[
-            styles.nameText, 
-            unreadCount > 0 && styles.unreadText
-          ]} 
-          numberOfLines={1}
-        >
-          {title}
-        </Text>
+        <View style={styles.headerRow}>
+          <Text 
+            style={[
+              styles.nameText, 
+              unreadCount > 0 && styles.unreadText
+            ]} 
+            numberOfLines={1}
+          >
+            {title}
+          </Text>
+          
+          <Text style={styles.timeText}>{getFormattedDate()}</Text>
+        </View>
         
         {subtitle && (
           <Text style={styles.subtitleText} numberOfLines={1}>
@@ -121,32 +137,29 @@ const ConversationItem: React.FC<ConversationItemProps> = ({
           </Text>
         )}
         
-        <Text 
-          style={[
-            styles.lastMessageText, 
-            unreadCount > 0 && styles.unreadText
-          ]} 
-          numberOfLines={1}
-        >
-          {lastMessageText}
-        </Text>
+        <View style={styles.messageRow}>
+          <Text 
+            style={[
+              styles.lastMessageText, 
+              unreadCount > 0 && styles.unreadText
+            ]} 
+            numberOfLines={1}
+          >
+            {truncateText(lastMessageText, 60)}
+          </Text>
+          
+          {unreadCount > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>
+                {unreadCount > 99 ? '99+' : unreadCount}
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
-      
-      {/* Sección derecha con fecha y contador */}
-      <View style={styles.rightContainer}>
-        <Text style={styles.timeText}>{getFormattedDate()}</Text>
-        
-        {unreadCount > 0 && (
-          <View style={styles.unreadBadge}>
-            <Text style={styles.unreadBadgeText}>
-              {unreadCount > 99 ? '99+' : unreadCount}
-            </Text>
-          </View>
-        )}
-      </View>
-    </TouchableOpacity>
+    </Pressable>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -159,64 +172,103 @@ const styles = StyleSheet.create({
   unreadContainer: {
     backgroundColor: '#F2F7FF',
   },
+  activeContainer: {
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+  },
+  pressedContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+  },
+  avatarContainer: {
+    marginRight: 16,
+    position: 'relative',
+    height: 60,
+    width: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
   },
   defaultAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
   },
   avatarText: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  businessBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#FF9500',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  businessBadgeText: {
+    color: 'white',
+    fontSize: 12,
     fontWeight: 'bold',
   },
   contentContainer: {
     flex: 1,
     justifyContent: 'center',
   },
+  headerRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
   nameText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#000',
-    marginBottom: 2,
+    flex: 1,
+    marginRight: 8,
+  },
+  timeText: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginTop: 2,
   },
   subtitleText: {
     fontSize: 13,
     color: '#8E8E93',
     marginBottom: 2,
   },
+  messageRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 4,
+  },
   lastMessageText: {
     fontSize: 14,
     color: '#8E8E93',
+    flex: 1,
+    marginRight: 8,
   },
   unreadText: {
     fontWeight: 'bold',
     color: '#000',
   },
-  rightContainer: {
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    paddingTop: 4,
-    paddingBottom: 4,
-  },
-  timeText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginBottom: 4,
-  },
   unreadBadge: {
-    minWidth: 20,
-    height: 20,
-    borderRadius: 10,
+    minWidth: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',

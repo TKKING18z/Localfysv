@@ -12,298 +12,217 @@ import {
   Text,
   Image,
   ActivityIndicator,
-  Alert
+  Alert,
+  Animated,
+  BackHandler,
+  Keyboard
 } from 'react-native';
-import { useRoute, RouteProp, useNavigation } from '@react-navigation/native';
-import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { useRoute, RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
+import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
-import { chatService } from '../../../services/ChatService';
+import { useChat } from '../../context/ChatContext';
 import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessage from '../../components/chat/ChatMessage';
 import ChatInput from '../../components/chat/ChatInput';
-import { Message, Conversation } from '../../../models/chatTypes';
-import firebase from 'firebase/compat/app';
+import { Message } from '../../../models/chatTypes';
+import * as Haptics from 'expo-haptics';
 
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
-type ChatScreenNavigationProp = NativeStackNavigationProp<RootStackParamList>;
+type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList>;
 
 const ChatScreen: React.FC = () => {
+  // Navigation and route params
   const route = useRoute<ChatScreenRouteProp>();
   const navigation = useNavigation<ChatScreenNavigationProp>();
-  const { user } = useAuth();
   const { conversationId } = route.params;
+  
+  // Contexts
+  const { user } = useAuth();
+  const { 
+    activeConversation, 
+    activeMessages, 
+    loading, 
+    error, 
+    sendMessage, 
+    markConversationAsRead,
+    uploadImage,
+    resendFailedMessage,
+    refreshConversations,
+    isOffline
+  } = useChat();
 
-  // Estados centralizados
-  const [conversation, setConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  // Local state
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [scrollToBottom, setScrollToBottom] = useState(true);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
-  // Referencias
+  // Refs
   const messagesListRef = useRef<FlatList>(null);
-  const unsubscribeRef = useRef<(() => void) | null>(null);
-
-  // Mejora en el loadConversation
-  const loadConversation = useCallback(async () => {
-    if (!conversationId || !user) {
-      setError('Datos insuficientes para cargar conversación');
-      setLoading(false);
-      return;
-    }
-
-    try {
-      setLoading(true);
-      
-      // Implementar un timeout para evitar que la operación quede colgada
-      let timeoutId: NodeJS.Timeout | null = null;
-      
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error('Tiempo de espera agotado al cargar la conversación'));
-        }, 15000); // 15 segundos de timeout
-      });
-      
-      // Limpiar unsubscribe anterior si existe
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
-      }
-      
-      // Función para cargar los datos
-      const fetchDataPromise = async () => {
-        // Obtener datos de conversación
-        const convResult = await chatService.getConversation(conversationId);
-        if (!convResult.success || !convResult.data) {
-          throw new Error(convResult.error?.message || 'No se pudo cargar la conversación');
-        }
-        
-        // Verificar si la conversación ha sido eliminada por el usuario
-        if (convResult.data.deletedFor && convResult.data.deletedFor[user.uid] === true) {
-          throw new Error('Esta conversación ya no está disponible');
-        }
-        
-        setConversation(convResult.data);
-        
-        // Cargar mensajes iniciales para mostrar algo rápido
-        const messagesResult = await chatService.getMessages(conversationId, 30);
-        if (messagesResult.success && messagesResult.data) {
-          // Ordenar mensajes por timestamp
-          const sortedMessages = [...messagesResult.data].sort((a, b) => {
-            const timeA = a.timestamp instanceof Date ? a.timestamp.getTime() : 
-                        typeof a.timestamp === 'string' ? new Date(a.timestamp).getTime() : 0;
-            const timeB = b.timestamp instanceof Date ? b.timestamp.getTime() : 
-                        typeof b.timestamp === 'string' ? new Date(b.timestamp).getTime() : 0;
-            return timeA - timeB;
-          });
-          
-          setMessages(sortedMessages);
-        }
-        
-        // Configurar listener para actualizaciones en tiempo real
-        const unsubscribe = chatService.listenToMessages(
-          conversationId,
-          (updatedMessages) => {
-            // Ordenar por timestamp
-            const sortedMessages = [...updatedMessages].sort((a, b) => {
-              let timeA: number;
-              let timeB: number;
-              
-              if (a.timestamp instanceof firebase.firestore.Timestamp) {
-                timeA = a.timestamp.toMillis();
-              } else if (a.timestamp instanceof Date) {
-                timeA = a.timestamp.getTime();
-              } else if (typeof a.timestamp === 'string') {
-                timeA = new Date(a.timestamp).getTime();
-              } else {
-                timeA = 0;
-              }
-              
-              if (b.timestamp instanceof firebase.firestore.Timestamp) {
-                timeB = b.timestamp.toMillis();
-              } else if (b.timestamp instanceof Date) {
-                timeB = b.timestamp.getTime();
-              } else if (typeof b.timestamp === 'string') {
-                timeB = new Date(b.timestamp).getTime();
-              } else {
-                timeB = 0;
-              }
-              
-              return timeA - timeB;
-            });
-            
-            setMessages(sortedMessages);
-            
-            // Desplazar al final con un pequeño retraso para asegurar que la UI se actualice
-            setTimeout(() => {
-              if (messagesListRef.current) {
-                messagesListRef.current.scrollToEnd({ animated: false });
-              }
-            }, 100);
-          },
-          (error) => {
-            console.error('Error en listener de mensajes:', error);
-            if (messagesListRef.current) {
-              setError('Error al recibir mensajes en tiempo real. Intenta recargar la conversación.');
-            }
-          },
-          50 // Límite de mensajes
-        );
-        
-        // Guardar referencia para limpieza
-        unsubscribeRef.current = unsubscribe;
-        
-        // Marcar como leído
-        try {
-          await chatService.markMessagesAsRead(conversationId, user.uid);
-        } catch (markError) {
-          console.error('Error marcando mensajes como leídos:', markError);
-          // No interrumpir el flujo por este error
-        }
-        
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  
+  // Handle back button press
+  useFocusEffect(
+    useCallback(() => {
+      const onBackPress = () => {
+        handleGoBack();
         return true;
       };
       
-      // Ejecutar con timeout
-      await Promise.race([fetchDataPromise(), timeoutPromise]);
-      
-      // Limpiar timeout
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => BackHandler.removeEventListener('hardwareBackPress', onBackPress);
+    }, [])
+  );
+  
+  // Listen for keyboard events
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => {
+        setKeyboardVisible(true);
+        scrollToBottomIfNeeded();
       }
-    } catch (err) {
-      console.error('Error cargando conversación:', err);
-      setError(err instanceof Error ? err.message : 'Error desconocido');
-      
-      // Implementar reintento automático solo para errores de red
-      if (err instanceof Error && 
-          (err.message.includes('network') || 
-          err.message.includes('timeout') || 
-          err.message.includes('connection'))) {
-        // Reintentar después de un tiempo
-        setTimeout(() => {
-          if (messagesListRef.current) { // Verificar que la pantalla sigue montada
-            loadConversation();
-          }
-        }, 5000);
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardVisible(false);
       }
-    } finally {
-      setLoading(false);
-    }
-  }, [conversationId, user]);
+    );
 
-  // Función mejorada para enviar mensajes
+    return () => {
+      keyboardDidShowListener.remove();
+      keyboardDidHideListener.remove();
+    };
+  }, []);
+  
+  // Animate in the chat screen
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 300,
+      useNativeDriver: true
+    }).start();
+  }, [fadeAnim]);
+  
+  // Mark messages as read when the conversation becomes active
+  useEffect(() => {
+    const markAsRead = async () => {
+      if (activeConversation) {
+        try {
+          await markConversationAsRead();
+        } catch (error) {
+          console.error('Error marking conversation as read:', error);
+        }
+      }
+    };
+    
+    markAsRead();
+  }, [activeConversation, markConversationAsRead]);
+  
+  // Scroll to bottom when new messages are added
+  useEffect(() => {
+    if (scrollToBottom && activeMessages.length > 0) {
+      scrollToBottomIfNeeded();
+    }
+  }, [activeMessages, scrollToBottom]);
+  
+  // Scroll to bottom if needed
+  const scrollToBottomIfNeeded = useCallback(() => {
+    setTimeout(() => {
+      if (messagesListRef.current) {
+        messagesListRef.current.scrollToEnd({ animated: true });
+      }
+    }, 100);
+  }, []);
+  
+  // Get the other participant's ID from the active conversation
+  const otherParticipantId = useMemo(() => {
+    if (!activeConversation || !user) return '';
+    return activeConversation.participants.find(id => id !== user.uid) || '';
+  }, [activeConversation, user]);
+  
+  // Handle sending a message
   const handleSendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
-    if (!user || !conversationId) {
-      Alert.alert('Error', 'No se puede enviar el mensaje');
+    if (!user) {
+      Alert.alert('Error', 'No se puede enviar el mensaje, usuario no autenticado');
       return false;
     }
 
-    // Si no hay texto y no hay imagen, no enviar
-    if (!text.trim() && !imageUrl) {
+    if (isOffline) {
+      Alert.alert('Sin conexión', 'No puedes enviar mensajes sin conexión a internet');
       return false;
     }
 
     try {
-      // Mostrar optimistamente el mensaje
-      const optimisticMessage: Message = {
-        id: `temp-${Date.now()}`,
-        text: text.trim(),
-        senderId: user.uid,
-        senderName: user.displayName || 'Usuario',
-        senderPhoto: user.photoURL || '',
-        timestamp: new Date(),
-        read: false,
-        type: imageUrl ? 'image' : 'text',
-        imageUrl
-      };
-
-      // Actualizar UI inmediatamente
-      setMessages(prevMessages => [...prevMessages, optimisticMessage]);
+      const success = await sendMessage(text, imageUrl);
       
-      // Enviar mensaje real en segundo plano
-      const result = await chatService.sendMessage(
-        conversationId,
-        user.uid,
-        { 
-          text: text.trim(), 
-          imageUrl,
-          type: imageUrl ? 'image' : 'text'
-        },
-        user.displayName || 'Usuario',
-        user.photoURL || undefined
-      );
-
-      if (!result.success) {
-        console.error('Error sending message:', result.error);
-        
-        // Quitar mensaje optimista
-        setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
-        
-        // Mostrar error
-        Alert.alert('Error', 'No se pudo enviar el mensaje. Intente nuevamente.');
-        return false;
+      if (success) {
+        scrollToBottomIfNeeded();
+        return true;
       }
-
-      // Desplazar al final con un pequeño retraso
-      setTimeout(() => {
-        messagesListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-
-      return true;
+      
+      return false;
     } catch (error) {
-      console.error('Error enviando mensaje:', error);
-      Alert.alert('Error', 'No se pudo enviar el mensaje');
+      console.error('Error sending message:', error);
       return false;
     }
-  }, [user, conversationId]);
-
-  // Subir una imagen
-  const handleUploadImage = useCallback(async (uri: string) => {
-    if (!user || !conversationId) {
-      Alert.alert('Error', 'No se puede subir imagen');
-      return null;
-    }
-
-    try {
-      const result = await chatService.uploadMessageImage(uri, conversationId);
-      return result.success ? result.data : null;
-    } catch (error) {
-      console.error('Error subiendo imagen:', error);
-      Alert.alert('Error', 'No se pudo subir la imagen');
-      return null;
-    }
-  }, [conversationId]);
-
-  // Mostrar imagen a pantalla completa
+  }, [user, sendMessage, scrollToBottomIfNeeded, isOffline]);
+  
+  // Handle showing an image in fullscreen mode
   const handleImagePress = useCallback((imageUrl: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedImage(imageUrl);
     setImageModalVisible(true);
   }, []);
-
-  // Obtener ID del otro participante
-  const otherParticipantId = useMemo(() => {
-    return conversation?.participants.find(p => p !== user?.uid) || '';
-  }, [conversation, user]);
-
-  // Efecto para cargar la conversación
-  useEffect(() => {
-    loadConversation();
-
-    // Limpiar al desmontar el componente
-    return () => {
-      if (unsubscribeRef.current) {
-        unsubscribeRef.current();
-        unsubscribeRef.current = null;
+  
+  // Handle retrying a failed message
+  const handleRetryMessage = useCallback(async (messageId: string) => {
+    if (isOffline) {
+      Alert.alert('Sin conexión', 'No puedes reenviar mensajes sin conexión a internet');
+      return;
+    }
+    
+    try {
+      const success = await resendFailedMessage(messageId);
+      if (success) {
+        scrollToBottomIfNeeded();
       }
-    };
-  }, [loadConversation]);
-
-  // Renderizado de estado vacío
+    } catch (error) {
+      console.error('Error retrying message:', error);
+    }
+  }, [resendFailedMessage, scrollToBottomIfNeeded, isOffline]);
+  
+  // Handle going back
+  const handleGoBack = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Update conversations list when going back
+    setTimeout(() => {
+      refreshConversations().catch(err => {
+        console.error('Error refreshing conversations on back:', err);
+      });
+    }, 300);
+    
+    navigation.goBack();
+  }, [navigation, refreshConversations]);
+  
+  // Handle scroll events to determine if we should auto-scroll
+  const handleScroll = useCallback((event: any) => {
+    const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+    
+    // Calculate if we're close to the bottom (within 200px)
+    const closeToBottom = layoutMeasurement.height + contentOffset.y >= contentSize.height - 200;
+    
+    // Only auto-scroll when user is near the bottom
+    setScrollToBottom(closeToBottom);
+  }, []);
+  
+  // Empty state component
   const EmptyStateComponent = useCallback(() => (
     <View style={styles.emptyStateContainer}>
       <LinearGradient
@@ -323,14 +242,9 @@ const ChatScreen: React.FC = () => {
       </LinearGradient>
     </View>
   ), []);
-
-  // Manejar volver atrás
-  const handleGoBack = useCallback(() => {
-    navigation.goBack();
-  }, [navigation]);
-
-  // Renderizado condicional
-  if (loading && !conversation) {
+  
+  // Loading state
+  if (loading && !activeConversation) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -339,16 +253,17 @@ const ChatScreen: React.FC = () => {
     );
   }
 
-  if (error && !conversation) {
+  // Error state
+  if (error && !activeConversation) {
     return (
       <View style={styles.centerContainer}>
         <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
         <Text style={styles.errorText}>{error}</Text>
         <TouchableOpacity 
           style={styles.retryButton}
-          onPress={loadConversation}
+          onPress={handleGoBack}
         >
-          <Text style={styles.retryButtonText}>Reintentar</Text>
+          <Text style={styles.retryButtonText}>Volver</Text>
         </TouchableOpacity>
       </View>
     );
@@ -356,61 +271,84 @@ const ChatScreen: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle="light-content" />
       
-      {conversation && (
-        <ChatHeader 
-          conversation={conversation} 
-          participantId={otherParticipantId}
-          onBackPress={handleGoBack}
-        />
+      {/* Header */}
+      <ChatHeader 
+        conversation={activeConversation} 
+        participantId={otherParticipantId}
+        isTyping={isTyping}
+        businessMode={!!activeConversation?.businessId}
+        onBackPress={handleGoBack}
+      />
+      
+      {/* Offline indicator */}
+      {isOffline && (
+        <View style={styles.offlineBar}>
+          <MaterialIcons name="cloud-off" size={16} color="#FFF" />
+          <Text style={styles.offlineText}>Sin conexión</Text>
+        </View>
       )}
       
-      <KeyboardAvoidingView
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
-      >
-        {error && (
-          <View style={styles.errorBanner}>
-            <Text style={styles.errorBannerText}>{error}</Text>
-            <TouchableOpacity onPress={loadConversation}>
-              <Text style={styles.errorBannerRetry}>Reintentar</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        <FlatList
-          ref={messagesListRef}
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={({ item }) => (
-            <ChatMessage 
-              message={item} 
-              isMine={item.senderId === user?.uid}
-              onImagePress={handleImagePress}
-            />
+      {/* Main content */}
+      <Animated.View style={[styles.contentContainer, { opacity: fadeAnim }]}>
+        <KeyboardAvoidingView
+          style={styles.keyboardContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+        >
+          {/* Error banner */}
+          {error && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>{error}</Text>
+              <TouchableOpacity onPress={() => refreshConversations()}>
+                <Text style={styles.errorBannerRetry}>Reintentar</Text>
+              </TouchableOpacity>
+            </View>
           )}
-          contentContainerStyle={styles.messagesContainer}
-          inverted={false}
-          ListEmptyComponent={EmptyStateComponent}
-          onContentSizeChange={() => {
-            messagesListRef.current?.scrollToEnd({ animated: false });
-          }}
-        />
-        
-        <ChatInput 
-          onSend={handleSendMessage}
-          uploadImage={handleUploadImage}
-          disabled={loading}
-        />
-      </KeyboardAvoidingView>
+
+          {/* Messages list */}
+          <FlatList
+            ref={messagesListRef}
+            data={activeMessages}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item, index }) => (
+              <ChatMessage 
+                message={item} 
+                isMine={item.senderId === user?.uid}
+                onImagePress={handleImagePress}
+                onRetry={handleRetryMessage}
+                previousMessage={index > 0 ? activeMessages[index - 1] : null}
+              />
+            )}
+            contentContainerStyle={styles.messagesContainer}
+            inverted={false}
+            ListEmptyComponent={EmptyStateComponent}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
+            onContentSizeChange={() => {
+              if (scrollToBottom) {
+                scrollToBottomIfNeeded();
+              }
+            }}
+            showsVerticalScrollIndicator={true}
+          />
+          
+          {/* Input area */}
+          <ChatInput 
+            onSend={handleSendMessage}
+            uploadImage={uploadImage}
+            disabled={loading || isOffline}
+          />
+        </KeyboardAvoidingView>
+      </Animated.View>
       
-      {/* Modal para imagen a pantalla completa */}
+      {/* Fullscreen image modal */}
       <Modal
         visible={imageModalVisible}
         transparent={true}
         onRequestClose={() => setImageModalVisible(false)}
+        animationType="fade"
       >
         <TouchableOpacity 
           style={styles.modalContainer} 
@@ -422,16 +360,39 @@ const ChatScreen: React.FC = () => {
               source={{ uri: selectedImage }}
               style={styles.fullScreenImage}
               resizeMode="contain"
+              onLoadStart={() => {}}
+              onLoadEnd={() => {}}
+              fadeDuration={300}
             />
           )}
           <TouchableOpacity 
             style={styles.closeModalButton}
             onPress={() => setImageModalVisible(false)}
           >
-            <MaterialIcons name="close" size={24} color="#FFFFFF" />
+            <LinearGradient
+              colors={['rgba(0,0,0,0.8)', 'rgba(0,0,0,0.6)']}
+              style={styles.closeGradient}
+            >
+              <MaterialIcons name="close" size={24} color="#FFFFFF" />
+            </LinearGradient>
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
+      
+      {/* Scroll to bottom button */}
+      {!scrollToBottom && activeMessages.length > 10 && (
+        <TouchableOpacity
+          style={styles.scrollToBottomButton}
+          onPress={scrollToBottomIfNeeded}
+        >
+          <LinearGradient
+            colors={['#007AFF', '#00C2FF']}
+            style={styles.scrollToBottomGradient}
+          >
+            <MaterialIcons name="arrow-downward" size={22} color="#FFFFFF" />
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 };
@@ -440,6 +401,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',
+  },
+  contentContainer: {
+    flex: 1,
   },
   keyboardContainer: {
     flex: 1,
@@ -462,11 +426,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   retryButton: {
-    marginTop: 16,
-    backgroundColor: '#007AFF',
+    marginTop: 20,
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    minWidth: 120,
+    alignItems: 'center',
   },
   retryButtonText: {
     color: 'white',
@@ -492,9 +458,12 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 40,
     right: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
     borderRadius: 20,
-    padding: 8,
+    overflow: 'hidden',
+  },
+  closeGradient: {
+    padding: 10,
+    borderRadius: 20,
   },
   emptyStateContainer: {
     flex: 1,
@@ -513,7 +482,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyText: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#333333',
     marginTop: 8,
@@ -526,7 +495,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     backgroundColor: '#FFEBE9',
-    padding: 10,
+    padding: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -542,6 +511,38 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontWeight: 'bold',
     marginLeft: 10,
+    fontSize: 14,
+  },
+  scrollToBottomButton: {
+    position: 'absolute',
+    right: 20,
+    bottom: 80,
+    borderRadius: 25,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  scrollToBottomGradient: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  offlineBar: {
+    backgroundColor: '#FF3B30',
+    padding: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  offlineText: {
+    color: 'white',
+    marginLeft: 8,
+    fontWeight: '500',
   }
 });
 

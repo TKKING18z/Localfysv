@@ -1,61 +1,81 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
-import { Message, Conversation, NewMessageData } from '../models/chatTypes';
+import { Message, Conversation, NewMessageData, ChatResult, MessageStatus, MessageType } from '../models/chatTypes';
+import { getCurrentTimestamp, normalizeTimestamp, isValidURL, sanitizeText } from '../src/utils/chatUtils';
 
-interface Result<T> {
-  success: boolean;
-  data?: T;
-  error?: {
-    message: string;
-    code?: string;
-  };
-}
-
+/**
+ * Chat Service - Handles all Firebase interactions for the chat functionality
+ */
 export const chatService = {
-  // Obtener conversaciones de un usuario
-  getUserConversations: async (userId: string): Promise<Result<Conversation[]>> => {
+  // Get conversations for a user
+  getUserConversations: async (userId: string): Promise<ChatResult<Conversation[]>> => {
     try {
       if (!userId) {
-        console.error('getUserConversations: missing userId');
-        return { success: false, error: { message: 'ID de usuario requerido', code: 'chat/missing-user-id' }};
+        console.error('[ChatService] getUserConversations: missing userId');
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de usuario requerido', 
+            code: 'chat/missing-user-id' 
+          }
+        };
       }
 
-      console.log(`Fetching conversations for user ${userId}`);
+      console.log(`[ChatService] Fetching conversations for user ${userId}`);
 
-      // Obtener todas las conversaciones del usuario
+      // Get all conversations for the user
       const snapshot = await firebase.firestore()
         .collection('conversations')
         .where('participants', 'array-contains', userId)
         .orderBy('updatedAt', 'desc')
         .get();
 
-      console.log(`Retrieved ${snapshot.docs.length} conversations from Firestore`);
+      console.log(`[ChatService] Retrieved ${snapshot.docs.length} conversations from Firestore`);
 
-      // Filtrar estrictamente conversaciones marcadas como eliminadas
+      // Strictly filter conversations marked as deleted
       const conversations = snapshot.docs
         .filter(doc => {
           const data = doc.data();
           
-          // Comprobar si la conversación está marcada como eliminada para este usuario
+          // Check if conversation is marked as deleted for this user
           const isDeleted = data.deletedFor && data.deletedFor[userId] === true;
           
           if (isDeleted) {
-            console.log(`Filtering out deleted conversation: ${doc.id}`);
+            console.log(`[ChatService] Filtering out deleted conversation: ${doc.id}`);
           }
           
           return !isDeleted;
         })
-        .map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Conversation[];
+        .map(doc => {
+          const data = doc.data();
+          
+          // Normalize timestamps
+          const createdAt = normalizeTimestamp(data.createdAt);
+          const updatedAt = normalizeTimestamp(data.updatedAt);
+          
+          let lastMessage = data.lastMessage;
+          if (lastMessage) {
+            lastMessage = {
+              ...lastMessage,
+              timestamp: normalizeTimestamp(lastMessage.timestamp)
+            };
+          }
+          
+          return {
+            id: doc.id,
+            ...data,
+            createdAt,
+            updatedAt,
+            lastMessage
+          };
+        }) as Conversation[];
 
-      console.log(`After filtering, ${conversations.length} conversations remain`);
+      console.log(`[ChatService] After filtering, ${conversations.length} conversations remain`);
 
-      // Asegurar que cada conversación tenga las propiedades necesarias
+      // Ensure each conversation has required properties with default values
       const validatedConversations = conversations.map(conv => {
-        // Asegurar que existe unreadCount con valor por defecto
+        // Ensure unreadCount exists with default value
         if (!conv.unreadCount) {
           conv.unreadCount = {};
           conv.participants.forEach((p: string) => {
@@ -63,9 +83,12 @@ export const chatService = {
           });
         }
 
-        // Asegurar que todos los participantes tienen un nombre
+        // Ensure all participants have a name
         if (!conv.participantNames) {
           conv.participantNames = {};
+          conv.participants.forEach((p: string) => {
+            conv.participantNames[p] = 'Usuario';
+          });
         }
 
         return conv;
@@ -73,23 +96,30 @@ export const chatService = {
 
       return { success: true, data: validatedConversations };
     } catch (error) {
-      console.error('Error getting conversations:', error);
+      console.error('[ChatService] Error getting conversations:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al obtener conversaciones',
-          code: 'chat/get-conversations-failed'
+          code: 'chat/get-conversations-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Obtener una conversación específica
-  getConversation: async (conversationId: string): Promise<Result<Conversation>> => {
+  // Get a specific conversation
+  getConversation: async (conversationId: string): Promise<ChatResult<Conversation>> => {
     try {
       if (!conversationId) {
-        console.error('getConversation: missing conversationId');
-        return { success: false, error: { message: 'ID de conversación requerido', code: 'chat/missing-conversation-id' }};
+        console.error('[ChatService] getConversation: missing conversationId');
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de conversación requerido', 
+            code: 'chat/missing-conversation-id'
+          }
+        };
       }
 
       const doc = await firebase.firestore()
@@ -107,32 +137,61 @@ export const chatService = {
         };
       }
 
+      const data = doc.data();
+      
+      // Normalize timestamps
+      const createdAt = normalizeTimestamp(data?.createdAt);
+      const updatedAt = normalizeTimestamp(data?.updatedAt);
+      
+      let lastMessage = data?.lastMessage;
+      if (lastMessage) {
+        lastMessage = {
+          ...lastMessage,
+          timestamp: normalizeTimestamp(lastMessage.timestamp)
+        };
+      }
+      
       const conversation = {
         id: doc.id,
-        ...doc.data()
+        ...data,
+        createdAt,
+        updatedAt,
+        lastMessage
       } as Conversation;
 
-      // Validar datos mínimos
-      if (!conversation.participants || conversation.participants.length < 2) {
-        console.warn(`Conversation ${conversationId} has invalid participants data`);
+      // Validate minimum data
+      if (!conversation.participants || conversation.participants.length < 1) {
+        console.warn(`[ChatService] Conversation ${conversationId} has invalid participants data`);
       }
 
       return { success: true, data: conversation };
     } catch (error) {
-      console.error('Error getting conversation:', error);
+      console.error('[ChatService] Error getting conversation:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al obtener la conversación',
-          code: 'chat/get-conversation-failed'
+          code: 'chat/get-conversation-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Obtener mensajes de una conversación
-  getMessages: async (conversationId: string, limit = 50): Promise<Result<Message[]>> => {
+  // Get messages for a conversation
+  getMessages: async (conversationId: string, limit = 50): Promise<ChatResult<Message[]>> => {
     try {
+      if (!conversationId) {
+        console.error('[ChatService] getMessages: missing conversationId');
+        return { 
+          success: false, 
+          error: { 
+            message: 'ID de conversación requerido', 
+            code: 'chat/missing-conversation-id'
+          }
+        };
+      }
+      
       const snapshot = await firebase.firestore()
         .collection('conversations')
         .doc(conversationId)
@@ -141,37 +200,50 @@ export const chatService = {
         .limit(limit)
         .get();
 
-      const messages = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Message[];
+      const messages = snapshot.docs.map(doc => {
+        const data = doc.data();
+        
+        // Normalize the timestamp
+        const timestamp = normalizeTimestamp(data.timestamp);
+        
+        return {
+          id: doc.id,
+          ...data,
+          timestamp,
+          // Ensure message type is valid
+          type: data.type || MessageType.TEXT,
+          // Ensure read property exists
+          read: data.read === true
+        } as Message;
+      });
 
       return { success: true, data: messages };
     } catch (error) {
-      console.error('Error getting messages:', error);
+      console.error('[ChatService] Error getting messages:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al obtener mensajes',
-          code: 'chat/get-messages-failed'
+          code: 'chat/get-messages-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Enviar un mensaje
+  // Send a message
   sendMessage: async (
     conversationId: string, 
     senderId: string,
     messageData: NewMessageData,
     senderName?: string,
     senderPhoto?: string
-  ): Promise<Result<Message>> => {
+  ): Promise<ChatResult<Message>> => {
     try {
-      console.log(`ChatService: Sending message to conversation ${conversationId}`);
+      console.log(`[ChatService] Sending message to conversation ${conversationId}`);
       
       if (!conversationId) {
-        console.error('ChatService: Missing conversationId');
+        console.error('[ChatService] SendMessage: Missing conversationId');
         return { 
           success: false, 
           error: { 
@@ -182,7 +254,7 @@ export const chatService = {
       }
       
       if (!senderId) {
-        console.error('ChatService: Missing senderId');
+        console.error('[ChatService] SendMessage: Missing senderId');
         return { 
           success: false, 
           error: { 
@@ -192,12 +264,12 @@ export const chatService = {
         };
       }
       
-      // Verificar que la conversación existe
+      // Verify conversation exists
       const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
       const conversationDoc = await conversationRef.get();
       
       if (!conversationDoc.exists) {
-        console.error('ChatService: Conversation does not exist');
+        console.error('[ChatService] SendMessage: Conversation does not exist');
         return { 
           success: false, 
           error: { 
@@ -210,9 +282,9 @@ export const chatService = {
       const conversationData = conversationDoc.data() as Conversation;
       const participants = conversationData.participants || [];
       
-      // Verificar que el remitente es parte de la conversación
+      // Verify sender is part of the conversation
       if (!participants.includes(senderId)) {
-        console.error('ChatService: Sender not part of conversation');
+        console.error('[ChatService] SendMessage: Sender not part of conversation');
         return { 
           success: false, 
           error: { 
@@ -222,9 +294,10 @@ export const chatService = {
         };
       }
       
-      // Verificar si el mensaje tiene contenido
-      if (!messageData.text && !messageData.imageUrl) {
-        console.error('ChatService: Message has no content');
+      // Verify message has content
+      const cleanText = sanitizeText(messageData.text || '');
+      if (!cleanText && !messageData.imageUrl) {
+        console.error('[ChatService] SendMessage: Message has no content');
         return { 
           success: false, 
           error: { 
@@ -233,85 +306,112 @@ export const chatService = {
           } 
         };
       }
+      
+      // Verify URL if it's an image message
+      if (messageData.imageUrl && !isValidURL(messageData.imageUrl)) {
+        console.error('[ChatService] SendMessage: Invalid image URL');
+        return { 
+          success: false, 
+          error: { 
+            message: 'URL de imagen no válida',
+            code: 'chat/invalid-image-url'
+          } 
+        };
+      }
 
       const timestamp = firebase.firestore.FieldValue.serverTimestamp();
       const messageRef = conversationRef.collection('messages').doc();
 
-      // Datos del mensaje
+      // Message data
       const messageObj: any = {
         id: messageRef.id,
-        text: messageData.text || '',
+        text: cleanText,
         senderId,
         senderName: senderName || '',
         senderPhoto: senderPhoto || '',
         timestamp,
+        status: MessageStatus.SENT,
         read: false,
-        type: messageData.type || 'text',
+        type: messageData.type || MessageType.TEXT,
       };
 
       if (messageData.imageUrl) {
         messageObj.imageUrl = messageData.imageUrl;
       }
       
-      // Actualizar contadores de no leídos para todos excepto el remitente
+      if (messageData.metadata) {
+        messageObj.metadata = messageData.metadata;
+      }
+      
+      // Update unread counts for everyone except sender
       const unreadCount: Record<string, number> = conversationData.unreadCount ? { ...conversationData.unreadCount } : {};
       participants.forEach((participantId: string) => {
         if (participantId !== senderId) {
           unreadCount[participantId] = (unreadCount[participantId] || 0) + 1;
+        } else {
+          // Ensure sender has an entry with 0 unread
+          unreadCount[participantId] = 0;
         }
       });
 
-      // Actualizar transacción atomica
+      // Atomic transaction
       try {
         await firebase.firestore().runTransaction(async transaction => {
-          // Agregar mensaje
+          // Add message
           transaction.set(messageRef, messageObj);
           
-          // Actualizar conversación
+          // Update conversation
           transaction.update(conversationRef, {
             lastMessage: {
-              text: messageData.text || (messageData.imageUrl ? '[Imagen]' : ''),
+              text: cleanText || (messageData.imageUrl ? '[Imagen]' : ''),
               senderId,
               timestamp
             },
             unreadCount,
-            updatedAt: timestamp
+            updatedAt: timestamp,
+            // If conversation was deleted for any user, mark as undeleted
+            deletedFor: participants.reduce((acc, id) => {
+              acc[id] = false;
+              return acc;
+            }, {} as Record<string, boolean>)
           });
         });
         
-        console.log('ChatService: Message sent successfully');
+        console.log('[ChatService] Message sent successfully');
         
-        // Devolver el mensaje con timestamp actualizado para la interfaz
+        // Return message with current timestamp for UI
         const message: Message = {
           ...messageObj,
-          timestamp: firebase.firestore.Timestamp.now(),
+          timestamp: getCurrentTimestamp(),
         };
 
         return { success: true, data: message };
       } catch (transactionError) {
-        console.error('ChatService: Transaction failed:', transactionError);
+        console.error('[ChatService] Transaction failed:', transactionError);
         return { 
           success: false, 
           error: { 
             message: 'Error al guardar el mensaje en la base de datos',
-            code: 'chat/transaction-failed'
+            code: 'chat/transaction-failed',
+            originalError: transactionError
           } 
         };
       }
     } catch (error) {
-      console.error('ChatService: Error sending message:', error);
+      console.error('[ChatService] Error sending message:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al enviar mensaje',
-          code: 'chat/send-message-failed'
+          code: 'chat/send-message-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Marcar mensajes como leídos
-  markMessagesAsRead: async (conversationId: string, userId: string): Promise<Result<void>> => {
+  // Mark messages as read
+  markMessagesAsRead: async (conversationId: string, userId: string): Promise<ChatResult<void>> => {
     try {
       if (!conversationId || !userId) {
         return { 
@@ -325,7 +425,7 @@ export const chatService = {
 
       const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
       
-      // Verificar que la conversación existe
+      // Verify conversation exists
       const conversationDoc = await conversationRef.get();
       if (!conversationDoc.exists) {
         return { 
@@ -337,7 +437,7 @@ export const chatService = {
         };
       }
 
-      // Obtener los mensajes no leídos enviados por otros
+      // Get unread messages sent by others
       const snapshot = await conversationRef
         .collection('messages')
         .where('read', '==', false)
@@ -345,18 +445,21 @@ export const chatService = {
         .get();
       
       if (snapshot.empty) {
-        // No hay mensajes para marcar
+        // No messages to mark
         return { success: true };
       }
 
-      // Actualizar en una transacción
+      // Update in a transaction
       await firebase.firestore().runTransaction(async transaction => {
-        // Marcar cada mensaje como leído
+        // Mark each message as read
         snapshot.docs.forEach(doc => {
-          transaction.update(doc.ref, { read: true });
+          transaction.update(doc.ref, { 
+            read: true,
+            status: MessageStatus.READ
+          });
         });
         
-        // Actualizar contador de no leídos a 0 para este usuario
+        // Update unread count to 0 for this user
         transaction.update(conversationRef, {
           [`unreadCount.${userId}`]: 0
         });
@@ -364,18 +467,19 @@ export const chatService = {
 
       return { success: true };
     } catch (error) {
-      console.error('Error marking messages as read:', error);
+      console.error('[ChatService] Error marking messages as read:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al marcar mensajes como leídos',
-          code: 'chat/mark-read-failed'
+          code: 'chat/mark-read-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Crear una nueva conversación
+  // Create a new conversation
   createConversation: async (
     participants: string[],
     participantNames: Record<string, string>,
@@ -383,41 +487,53 @@ export const chatService = {
     businessId?: string,
     businessName?: string,
     initialMessage?: string
-  ): Promise<Result<{ conversationId: string, messageId?: string }>> => {
+  ): Promise<ChatResult<{ conversationId: string, messageId?: string }>> => {
     try {
       if (participants.length < 2) {
         throw new Error('Se requieren al menos 2 participantes');
       }
 
-      const sender = participants[0]; // El primer participante es quien crea la conversación
+      const sender = participants[0]; // First participant is the creator
       
-      // Verificar si ya existe una conversación entre estos participantes
+      // Check if a conversation already exists between these participants
       let existingConversationId: string | null = null;
       
       if (businessId) {
-        // Buscar conversación existente con mismo businessId y participantes
+        // Look for existing conversation with same businessId and participants
         const existingQuery = await firebase.firestore()
           .collection('conversations')
           .where('participants', 'array-contains', sender)
           .where('businessId', '==', businessId)
           .get();
         
-        // Verificar exactamente los mismos participantes
+        // Check for exactly the same participants
         existingQuery.docs.forEach(doc => {
           const data = doc.data();
           const docParticipants = data.participants || [];
           
-          // Verificar que contenga exactamente los mismos participantes (sin importar el orden)
+          // Check if contains exactly the same participants (regardless of order)
           const hasSameParticipants = 
             participants.every((p: string) => docParticipants.includes(p)) && 
             docParticipants.every((p: string) => participants.includes(p));
           
           if (hasSameParticipants) {
+            // If it was marked as deleted for this user, unmark it
+            if (data.deletedFor && data.deletedFor[sender]) {
+              firebase.firestore()
+                .collection('conversations')
+                .doc(doc.id)
+                .update({
+                  [`deletedFor.${sender}`]: false,
+                  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                })
+                .catch(err => console.error('[ChatService] Error unmarking conversation as deleted:', err));
+            }
+            
             existingConversationId = doc.id;
           }
         });
       } else {
-        // Buscar conversación sin businessId entre los mismos participantes
+        // Look for conversation without businessId between the same participants
         const existingQuery = await firebase.firestore()
           .collection('conversations')
           .where('participants', 'array-contains', sender)
@@ -425,28 +541,40 @@ export const chatService = {
         
         existingQuery.docs.forEach(doc => {
           const data = doc.data();
-          // Solo considerar si no tiene businessId
+          // Only consider if it doesn't have a businessId
           if (data.businessId) {
             return;
           }
           
           const docParticipants = data.participants || [];
-          // Verificar mismos participantes
+          // Check if same participants
           const hasSameParticipants = 
             participants.every((p: string) => docParticipants.includes(p)) && 
             docParticipants.every((p: string) => participants.includes(p));
           
           if (hasSameParticipants) {
+            // If it was marked as deleted for this user, unmark it
+            if (data.deletedFor && data.deletedFor[sender]) {
+              firebase.firestore()
+                .collection('conversations')
+                .doc(doc.id)
+                .update({
+                  [`deletedFor.${sender}`]: false,
+                  updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                })
+                .catch(err => console.error('[ChatService] Error unmarking conversation as deleted:', err));
+            }
+            
             existingConversationId = doc.id;
           }
         });
       }
       
-      // Si ya existe, usar esa conversación
+      // If it already exists, use that conversation
       if (existingConversationId) {
-        console.log(`Using existing conversation: ${existingConversationId}`);
+        console.log(`[ChatService] Using existing conversation: ${existingConversationId}`);
         
-        // Si hay un mensaje inicial, enviarlo
+        // If there's an initial message, send it
         if (initialMessage) {
           const messageResult = await chatService.sendMessage(
             existingConversationId,
@@ -470,14 +598,20 @@ export const chatService = {
         return { success: true, data: { conversationId: existingConversationId } };
       }
       
-      // Si no existe, crear nueva conversación
-      console.log('Creating new conversation');
+      // If it doesn't exist, create a new conversation
+      console.log('[ChatService] Creating new conversation');
       const timestamp = firebase.firestore.FieldValue.serverTimestamp();
       
-      // Inicializar contador de no leídos
+      // Initialize unread counts
       const unreadCount: Record<string, number> = {};
       participants.forEach((p: string) => {
         unreadCount[p] = 0;
+      });
+      
+      // Initialize deletedFor state
+      const deletedFor: Record<string, boolean> = {};
+      participants.forEach((p: string) => {
+        deletedFor[p] = false;
       });
       
       const conversationRef = firebase.firestore().collection('conversations').doc();
@@ -486,6 +620,7 @@ export const chatService = {
         participants,
         participantNames,
         unreadCount,
+        deletedFor,
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -503,9 +638,9 @@ export const chatService = {
       }
       
       await conversationRef.set(conversationData);
-      console.log(`Created new conversation with ID: ${conversationRef.id}`);
+      console.log(`[ChatService] Created new conversation with ID: ${conversationRef.id}`);
       
-      // Si hay un mensaje inicial, enviarlo
+      // If there's an initial message, send it
       if (initialMessage) {
         const messageResult = await chatService.sendMessage(
           conversationRef.id,
@@ -528,44 +663,76 @@ export const chatService = {
       
       return { success: true, data: { conversationId: conversationRef.id } };
     } catch (error) {
-      console.error('Error creating conversation:', error);
+      console.error('[ChatService] Error creating conversation:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al crear conversación',
-          code: 'chat/create-conversation-failed'
+          code: 'chat/create-conversation-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Subir una imagen para un mensaje
-  uploadMessageImage: async (uri: string, conversationId: string): Promise<Result<string>> => {
+  // Upload an image for a message
+  uploadMessageImage: async (uri: string, conversationId: string): Promise<ChatResult<string>> => {
     try {
+      // Validate input
+      if (!uri || !conversationId) {
+        return {
+          success: false,
+          error: {
+            message: 'URI y ID de conversación son requeridos',
+            code: 'chat/missing-parameters'
+          }
+        };
+      }
+      
+      // Fetch the image
       const response = await fetch(uri);
       const blob = await response.blob();
       
+      // Validate blob
+      if (!blob || blob.size === 0) {
+        return {
+          success: false,
+          error: {
+            message: 'No se pudo obtener la imagen',
+            code: 'chat/invalid-image'
+          }
+        };
+      }
+      
+      // Upload to Firebase Storage
       const storageRef = firebase.storage().ref();
       const imageRef = storageRef.child(`chat/${conversationId}/${Date.now()}.jpg`);
       
-      await imageRef.put(blob);
+      // Set metadata for caching
+      const metadata = {
+        contentType: 'image/jpeg',
+        cacheControl: 'public, max-age=31536000', // Cache for 1 year
+      };
+      
+      await imageRef.put(blob, metadata);
       const downloadUrl = await imageRef.getDownloadURL();
       
       return { success: true, data: downloadUrl };
     } catch (error) {
-      console.error('Error uploading message image:', error);
+      console.error('[ChatService] Error uploading message image:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error al subir imagen de mensaje',
-          code: 'chat/upload-image-failed'
+          code: 'chat/upload-image-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Eliminar (marcar como eliminada) una conversación
-  deleteConversation: async (conversationId: string, userId: string): Promise<Result<void>> => {
+  // Delete (mark as deleted) a conversation
+  deleteConversation: async (conversationId: string, userId: string): Promise<ChatResult<void>> => {
     try {
       if (!conversationId || !userId) {
         return { 
@@ -577,7 +744,7 @@ export const chatService = {
         };
       }
 
-      // Verificar que la conversación existe
+      // Verify conversation exists
       const conversationRef = firebase.firestore().collection('conversations').doc(conversationId);
       const conversationDoc = await conversationRef.get();
       
@@ -591,7 +758,7 @@ export const chatService = {
         };
       }
       
-      // Verificar que el usuario es parte de la conversación
+      // Verify user is part of the conversation
       const conversationData = conversationDoc.data();
       if (!conversationData?.participants.includes(userId)) {
         return { 
@@ -603,79 +770,120 @@ export const chatService = {
         };
       }
       
-      console.log(`Marking conversation ${conversationId} as deleted for user ${userId}`);
+      console.log(`[ChatService] Marking conversation ${conversationId} as deleted for user ${userId}`);
       
       try {
-        // Usando la estrategia de marcado como eliminado ("soft delete")
-        // Esto funciona dentro de las restricciones de las reglas de seguridad
+        // Using soft delete strategy
         await conversationRef.update({
           [`deletedFor.${userId}`]: true,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
         });
         
-        console.log(`Conversation ${conversationId} marked as deleted for user ${userId}`);
+        console.log(`[ChatService] Conversation ${conversationId} marked as deleted for user ${userId}`);
         return { success: true };
       } catch (updateError) {
-        console.error('Error marking conversation as deleted:', updateError);
+        console.error('[ChatService] Error marking conversation as deleted:', updateError);
         return { 
           success: false, 
           error: { 
             message: 'Error al marcar la conversación como eliminada',
-            code: 'chat/update-failed' 
+            code: 'chat/update-failed',
+            originalError: updateError
           } 
         };
       }
     } catch (error) {
-      console.error('Error deleting conversation:', error);
+      console.error('[ChatService] Error deleting conversation:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido al eliminar conversación',
-          code: 'chat/delete-failed' 
+          code: 'chat/delete-failed',
+          originalError: error
         } 
       };
     }
   },
 
-  // Escuchar por cambios en una conversación (para tiempo real)
+  // Listen for changes in a conversation (real-time)
   listenToConversation: (
     conversationId: string,
     onUpdate: (conversation: Conversation) => void,
     onError: (error: Error) => void
   ): (() => void) => {
-    const unsubscribe = firebase.firestore()
-      .collection('conversations')
-      .doc(conversationId)
-      .onSnapshot(
-        snapshot => {
-          if (snapshot.exists) {
-            const conversationData = {
-              id: snapshot.id,
-              ...snapshot.data()
-            } as Conversation;
-            onUpdate(conversationData);
-          }
-        },
-        error => {
-          console.error('Error listening to conversation:', error);
-          onError(error);
-        }
-      );
+    try {
+      if (!conversationId) {
+        const error = new Error('ID de conversación requerido');
+        onError(error);
+        return () => {}; // Return empty function as fallback
+      }
       
-    return unsubscribe;
+      const unsubscribe = firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .onSnapshot(
+          {
+            includeMetadataChanges: true,
+          },
+          (snapshot) => {
+            if (snapshot.exists) {
+              const data = snapshot.data();
+              
+              // Normalize timestamps
+              const createdAt = normalizeTimestamp(data?.createdAt);
+              const updatedAt = normalizeTimestamp(data?.updatedAt);
+              
+              let lastMessage = data?.lastMessage;
+              if (lastMessage) {
+                lastMessage = {
+                  ...lastMessage,
+                  timestamp: normalizeTimestamp(lastMessage.timestamp)
+                };
+              }
+              
+              const conversationData = {
+                id: snapshot.id,
+                ...data,
+                createdAt,
+                updatedAt,
+                lastMessage
+              } as Conversation;
+              
+              onUpdate(conversationData);
+            }
+          },
+          error => {
+            console.error('[ChatService] Error listening to conversation:', error);
+            onError(error);
+          }
+        );
+        
+      return unsubscribe;
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error('Error desconocido');
+      console.error('[ChatService] Error setting up conversation listener:', err);
+      onError(err);
+      return () => {}; // Return empty function as fallback
+    }
   },
 
-  // Escuchar por cambios en los mensajes (para tiempo real)
+  // Listen for changes in messages (real-time)
   listenToMessages: (
     conversationId: string,
     onUpdate: (messages: Message[]) => void,
     onError: (error: Error) => void,
     limit = 50
   ): (() => void) => {
-    console.log(`Setting up message listener for conversation: ${conversationId}`);
-    
     try {
-      // Usar un enfoque más robusto para ordenar mensajes
+      if (!conversationId) {
+        const error = new Error('ID de conversación requerido');
+        onError(error);
+        return () => {}; // Return empty function as fallback
+      }
+      
+      console.log(`[ChatService] Setting up message listener for conversation: ${conversationId}`);
+      
+      // Use more robust approach to sort messages
       const unsubscribe = firebase.firestore()
         .collection('conversations')
         .doc(conversationId)
@@ -688,45 +896,24 @@ export const chatService = {
           // Second parameter: observer object with next and error callbacks
           {
             next: (snapshot) => {
-              // Verificar si tenemos datos del servidor o solo del caché
+              // Check if we have server data or just cache
               const hasServerData = snapshot.metadata.fromCache === false;
-              console.log(`Message listener update: ${snapshot.docs.length} messages, server data: ${hasServerData}`);
+              console.log(`[ChatService] Message listener update: ${snapshot.docs.length} messages, server data: ${hasServerData}`);
               
               if (snapshot.empty) {
-                console.log('No messages in this conversation');
+                console.log('[ChatService] No messages in this conversation');
                 onUpdate([]);
                 return;
               }
               
-              // Procesar mensajes
+              // Process messages
               const messagesData = snapshot.docs.map(doc => {
                 const data = doc.data();
                 
-                // Normalizar timestamp (este es un área problemática común)
-                let timestamp;
-                if (data.timestamp) {
-                  if (data.timestamp instanceof firebase.firestore.Timestamp) {
-                    timestamp = data.timestamp;
-                  } else if (typeof data.timestamp === 'object' && data.timestamp.seconds) {
-                    // Manejar objetos serializados de Timestamp
-                    timestamp = new firebase.firestore.Timestamp(
-                      data.timestamp.seconds, 
-                      data.timestamp.nanoseconds || 0
-                    );
-                  } else if (typeof data.timestamp === 'string') {
-                    // Convertir string a Date y luego a Timestamp
-                    const date = new Date(data.timestamp);
-                    timestamp = firebase.firestore.Timestamp.fromDate(date);
-                  } else {
-                    // Usar tiempo actual como fallback
-                    timestamp = firebase.firestore.Timestamp.now();
-                  }
-                } else {
-                  // Si no hay timestamp, usar el actual
-                  timestamp = firebase.firestore.Timestamp.now();
-                }
+                // Normalize timestamp
+                const timestamp = normalizeTimestamp(data.timestamp);
                 
-                // Construir objeto Message normalizado
+                // Build normalized Message object
                 return {
                   id: doc.id,
                   text: data.text || '',
@@ -734,38 +921,26 @@ export const chatService = {
                   senderName: data.senderName || '',
                   senderPhoto: data.senderPhoto || '',
                   timestamp: timestamp,
+                  status: data.status || MessageStatus.SENT,
                   read: !!data.read,
-                  type: data.type || 'text',
-                  imageUrl: data.imageUrl || undefined
+                  type: data.type || MessageType.TEXT,
+                  imageUrl: data.imageUrl || undefined,
+                  metadata: data.metadata || undefined
                 } as Message;
               });
               
-              // Ordenar mensajes por timestamp (de más antiguo a más reciente)
-              // Esto es importante para mostrar la conversación en el orden correcto
+              // Sort messages by timestamp (oldest to newest)
+              // This is important to display the conversation in the correct order
               const sortedMessages = messagesData.sort((a, b) => {
-                const timeA = a.timestamp instanceof firebase.firestore.Timestamp 
-                  ? a.timestamp.toMillis() 
-                  : a.timestamp instanceof Date 
-                    ? a.timestamp.getTime() 
-                    : typeof a.timestamp === 'string' 
-                      ? new Date(a.timestamp).getTime() 
-                      : 0;
-                      
-                const timeB = b.timestamp instanceof firebase.firestore.Timestamp 
-                  ? b.timestamp.toMillis() 
-                  : b.timestamp instanceof Date 
-                    ? b.timestamp.getTime() 
-                    : typeof b.timestamp === 'string' 
-                      ? new Date(b.timestamp).getTime() 
-                      : 0;
-                      
-                return timeA - timeB; // Ordenar de más antiguo a más reciente
+                const timeA = getMessageTimestamp(a);
+                const timeB = getMessageTimestamp(b);
+                return timeA - timeB; // Sort from oldest to newest
               });
               
               onUpdate(sortedMessages);
             },
             error: (error) => {
-              console.error('Error in message listener:', error);
+              console.error('[ChatService] Error in message listener:', error);
               onError(error);
             }
           }
@@ -773,22 +948,28 @@ export const chatService = {
         
       return unsubscribe;
     } catch (error) {
-      console.error('Error setting up message listener:', error);
-      onError(error as Error);
-      // Devolver una función vacía como fallback
-      return () => {};
+      const err = error instanceof Error ? error : new Error('Error desconocido');
+      console.error('[ChatService] Error setting up message listener:', err);
+      onError(err);
+      return () => {}; // Return empty function as fallback
     }
   },
 
-  // Escuchar por cambios en todas las conversaciones de un usuario (para tiempo real)
+  // Listen for changes in all user conversations (real-time)
   listenToUserConversations: (
     userId: string,
     onUpdate: (conversations: Conversation[]) => void,
     onError: (error: Error) => void
   ): (() => void) => {
-    console.log(`Setting up conversations listener for user: ${userId}`);
-    
     try {
+      if (!userId) {
+        const error = new Error('ID de usuario requerido');
+        onError(error);
+        return () => {}; // Return empty function as fallback
+      }
+      
+      console.log(`[ChatService] Setting up conversations listener for user: ${userId}`);
+      
       const unsubscribe = firebase.firestore()
         .collection('conversations')
         .where('participants', 'array-contains', userId)
@@ -799,7 +980,7 @@ export const chatService = {
             next: (snapshot) => {
               // Log data source (server vs cache)
               const hasServerData = snapshot.metadata.fromCache === false;
-              console.log(`Conversation listener update: ${snapshot.docs.length} conversations, server data: ${hasServerData}`);
+              console.log(`[ChatService] Conversation listener update: ${snapshot.docs.length} conversations, server data: ${hasServerData}`);
               
               // Filter deleted conversations
               const conversations = snapshot.docs
@@ -809,10 +990,29 @@ export const chatService = {
                   const isDeleted = data.deletedFor && data.deletedFor[userId] === true;
                   return !isDeleted;
                 })
-                .map(doc => ({
-                  id: doc.id,
-                  ...doc.data()
-                })) as Conversation[];
+                .map(doc => {
+                  const data = doc.data();
+                  
+                  // Normalize timestamps
+                  const createdAt = normalizeTimestamp(data.createdAt);
+                  const updatedAt = normalizeTimestamp(data.updatedAt);
+                  
+                  let lastMessage = data.lastMessage;
+                  if (lastMessage) {
+                    lastMessage = {
+                      ...lastMessage,
+                      timestamp: normalizeTimestamp(lastMessage.timestamp)
+                    };
+                  }
+                  
+                  return {
+                    id: doc.id,
+                    ...data,
+                    createdAt,
+                    updatedAt,
+                    lastMessage
+                  };
+                }) as Conversation[];
                 
               // Validate conversation data
               const validatedConversations = conversations.map(conv => {
@@ -827,6 +1027,9 @@ export const chatService = {
                 // Ensure participant names exist
                 if (!conv.participantNames) {
                   conv.participantNames = {};
+                  conv.participants.forEach((p: string) => {
+                    conv.participantNames[p] = 'Usuario';
+                  });
                 }
                 
                 return conv;
@@ -835,7 +1038,7 @@ export const chatService = {
               onUpdate(validatedConversations);
             },
             error: (error) => {
-              console.error('Error in conversation listener:', error);
+              console.error('[ChatService] Error in conversation listener:', error);
               onError(error);
             }
           }
@@ -843,13 +1046,14 @@ export const chatService = {
         
       return unsubscribe;
     } catch (error) {
-      console.error('Error setting up conversation listener:', error);
-      onError(error as Error);
-      return () => {};
+      const err = error instanceof Error ? error : new Error('Error desconocido');
+      console.error('[ChatService] Error setting up conversation listener:', err);
+      onError(err);
+      return () => {}; // Return empty function as fallback
     }
   },
 
-  // Función adicional para verificar o crear una conversación entre usuario y propietario de negocio
+  // Function to check or create a conversation between user and business owner
   checkOrCreateBusinessConversation: async (
     userId: string,
     userName: string,
@@ -857,11 +1061,11 @@ export const chatService = {
     businessOwnerName: string,
     businessId: string,
     businessName: string
-  ): Promise<Result<{conversationId: string}>> => {
+  ): Promise<ChatResult<{conversationId: string}>> => {
     try {
-      // Validar datos obligatorios
+      // Validate required data
       if (!userId || !businessOwnerId || !businessId) {
-        console.error('checkOrCreateBusinessConversation: missing required parameters');
+        console.error('[ChatService] checkOrCreateBusinessConversation: missing required parameters');
         return { 
           success: false, 
           error: { 
@@ -871,9 +1075,9 @@ export const chatService = {
         };
       }
 
-      // Verificar que los IDs de usuario son diferentes
+      // Verify that user IDs are different
       if (userId === businessOwnerId) {
-        console.log('Cannot create conversation between same user:', userId);
+        console.log('[ChatService] Cannot create conversation between same user:', userId);
         return { 
           success: false, 
           error: { 
@@ -883,33 +1087,33 @@ export const chatService = {
         };
       }
 
-      console.log(`Checking for existing conversation between ${userId} and ${businessOwnerId} for business ${businessId}`);
+      console.log(`[ChatService] Checking for existing conversation between ${userId} and ${businessOwnerId} for business ${businessId}`);
       
-      // Buscar conversación existente - BÚSQUEDA MEJORADA
-      // 1. Primero buscamos todas las conversaciones donde el usuario es participante
+      // Look for existing conversation - IMPROVED SEARCH
+      // 1. First get all conversations where the user is a participant
       const userConversationsQuery = await firebase.firestore()
         .collection('conversations')
         .where('participants', 'array-contains', userId)
         .get();
       
-      // 2. Filtrar localmente para buscar una coincidencia exacta
+      // 2. Filter locally to find an exact match
       let existingConversationId: string | null = null;
       
       if (!userConversationsQuery.empty) {
         for (const doc of userConversationsQuery.docs) {
           const data = doc.data();
           
-          // Verificar si es conversación de negocio correcta con los participantes exactos
+          // Check if it's the correct business conversation with the exact participants
           if (data.businessId === businessId && 
               data.participants && 
               data.participants.includes(businessOwnerId) &&
               data.participants.length === 2) {
             
-            // Verificar si la conversación ha sido eliminada por este usuario
+            // Check if the conversation was deleted by this user
             if (data.deletedFor && data.deletedFor[userId] === true) {
-              // La conversación existe pero fue "eliminada" por este usuario
-              // Reactivarla en lugar de crear una nueva
-              console.log(`Found deleted conversation ${doc.id}, will reactivate it`);
+              // The conversation exists but was "deleted" by this user
+              // Reactivate it instead of creating a new one
+              console.log(`[ChatService] Found deleted conversation ${doc.id}, will reactivate it`);
               
               try {
                 await firebase.firestore()
@@ -920,27 +1124,27 @@ export const chatService = {
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                   });
               } catch (updateError) {
-                console.error('Error reactivating conversation:', updateError);
-                // Continuamos y crearemos una nueva si es necesario
+                console.error('[ChatService] Error reactivating conversation:', updateError);
+                // Continue and create a new one if necessary
               }
             }
             
-            console.log(`Found existing conversation: ${doc.id}`);
+            console.log(`[ChatService] Found existing conversation: ${doc.id}`);
             existingConversationId = doc.id;
             break;
           }
         }
       }
       
-      // Si existe una conversación, devolverla
+      // If a conversation exists, return it
       if (existingConversationId) {
         return { success: true, data: { conversationId: existingConversationId } };
       }
       
-      // Si no existe, crear una nueva con una transacción
-      console.log('Creating new business conversation');
+      // If it doesn't exist, create a new one with a transaction
+      console.log('[ChatService] Creating new business conversation');
       
-      // Usar una transacción para garantizar atomicidad
+      // Use a transaction to ensure atomicity
       const conversationRef = firebase.firestore().collection('conversations').doc();
       const conversationId = conversationRef.id;
       
@@ -950,17 +1154,22 @@ export const chatService = {
         [businessOwnerId]: businessOwnerName || 'Propietario'
       };
       
-      // Inicializar contadores no leídos
+      // Initialize unread counts
       const unreadCount: Record<string, number> = {};
       participants.forEach(id => {
         unreadCount[id] = 0;
       });
       
+      // Initialize deletedFor
+      const deletedFor: Record<string, boolean> = {};
+      participants.forEach(id => {
+        deletedFor[id] = false;
+      });
+      
       try {
         await firebase.firestore().runTransaction(async transaction => {
-          // Verificar de nuevo si la conversación ya existe (doble comprobación)
-          // Esta es una protección contra condiciones de carrera
-          // First get matching conversations outside transaction
+          // Double-check if the conversation already exists (double-check)
+          // This is a protection against race conditions
           const query = firebase.firestore()
             .collection('conversations')
             .where('participants', 'array-contains', userId)
@@ -968,7 +1177,7 @@ export const chatService = {
 
           const querySnapshot = await query.get();
           
-          // Then check each document reference inside transaction
+          // Check each document reference inside transaction
           for (const docSnapshot of querySnapshot.docs) {
             const docRef = firebase.firestore().collection('conversations').doc(docSnapshot.id);
             const transactionDoc = await transaction.get(docRef);
@@ -981,54 +1190,74 @@ export const chatService = {
             }
           }
           
-          // Si llegamos aquí, podemos crear la nueva conversación
+          // If we get here, we can create the new conversation
           transaction.set(conversationRef, {
             participants,
             participantNames,
             businessId,
             businessName,
             unreadCount,
+            deletedFor,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             updatedAt: firebase.firestore.FieldValue.serverTimestamp()
           });
         });
         
-        console.log(`New conversation successfully created: ${conversationId}`);
+        console.log(`[ChatService] New conversation successfully created: ${conversationId}`);
         return { success: true, data: { conversationId } };
         
       } catch (transactionError: any) {
-        // Manejar el caso especial donde se detecta una conversación existente
+        // Handle the special case where an existing conversation is detected
         if (transactionError.message && transactionError.message.startsWith('CONVERSATION_ALREADY_EXISTS:')) {
           const existingId = transactionError.message.split(':')[1];
-          console.log(`Conversation created concurrently, using existing: ${existingId}`);
+          console.log(`[ChatService] Conversation created concurrently, using existing: ${existingId}`);
           return { success: true, data: { conversationId: existingId } };
         }
         
-        // Otros errores
-        console.error('Transaction error creating conversation:', transactionError);
+        // Other errors
+        console.error('[ChatService] Transaction error creating conversation:', transactionError);
         return { 
           success: false, 
           error: { 
             message: 'Error al crear conversación',
-            code: 'chat/create-conversation-failed'
+            code: 'chat/create-conversation-failed',
+            originalError: transactionError
           } 
         };
       }
       
     } catch (error) {
-      console.error('Error in checkOrCreateBusinessConversation:', error);
+      console.error('[ChatService] Error in checkOrCreateBusinessConversation:', error);
       return { 
         success: false, 
         error: { 
           message: error instanceof Error ? error.message : 'Error desconocido',
-          code: 'chat/business-conversation-failed'
+          code: 'chat/business-conversation-failed',
+          originalError: error
         } 
       };
     }
   },
 };
 
-// Integración con el servicio de Firebase general
+// Helper functions
+
+// Get message timestamp as a number
+function getMessageTimestamp(message: Message): number {
+  if (!message.timestamp) return 0;
+  
+  if (message.timestamp instanceof firebase.firestore.Timestamp) {
+    return message.timestamp.toMillis();
+  } else if (message.timestamp instanceof Date) {
+    return message.timestamp.getTime();
+  } else if (typeof message.timestamp === 'string') {
+    return new Date(message.timestamp).getTime();
+  }
+  
+  return 0;
+}
+
+// Integration with the general Firebase service
 export const firebaseServiceAddition = {
   chat: chatService
 };

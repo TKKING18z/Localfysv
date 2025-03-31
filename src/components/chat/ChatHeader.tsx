@@ -1,28 +1,67 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import React, { memo, useEffect, useState } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  TouchableOpacity, 
+  Image, 
+  Platform,
+  ActivityIndicator,
+  Animated
+} from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Conversation } from '../../../models/chatTypes';
 import { useNavigation } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { getNameInitial, getAvatarColor } from '../../../src/utils/chatUtils';
+import * as Haptics from 'expo-haptics';
 
 interface ChatHeaderProps {
   conversation: Conversation | null;
   participantId: string;
   businessMode?: boolean;
+  isOnline?: boolean;
+  isTyping?: boolean;
   onBackPress?: () => void;
   onInfoPress?: () => void;
+  onAvatarPress?: () => void;
 }
 
-const ChatHeader: React.FC<ChatHeaderProps> = ({ 
+const ChatHeader: React.FC<ChatHeaderProps> = memo(({ 
   conversation, 
   participantId,
-  businessMode,
+  businessMode = false,
+  isOnline = false,
+  isTyping = false,
   onBackPress,
-  onInfoPress
+  onInfoPress,
+  onAvatarPress
 }) => {
   const navigation = useNavigation();
+  const [fadeAnim] = useState(new Animated.Value(0));
+  const [slideAnim] = useState(new Animated.Value(-20));
+  
+  // Animate header entrance
+  useEffect(() => {
+    if (conversation) {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true
+        }),
+        Animated.spring(slideAnim, {
+          toValue: 0,
+          friction: 6,
+          tension: 40,
+          useNativeDriver: true
+        })
+      ]).start();
+    }
+  }, [conversation, fadeAnim, slideAnim]);
   
   const handleBack = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onBackPress) {
       onBackPress();
     } else {
@@ -30,17 +69,38 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
     }
   };
   
+  const handleInfoPress = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (onInfoPress) {
+      onInfoPress();
+    }
+  };
+  
+  const handleAvatarPress = () => {
+    if (onAvatarPress) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      onAvatarPress();
+    }
+  };
+  
   if (!conversation) {
     return (
-      <View style={styles.container}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={handleBack}
+      <View style={styles.loadingContainer}>
+        <LinearGradient
+          colors={['#007AFF', '#00C2FF']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.loadingGradient}
         >
-          <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
-        </TouchableOpacity>
-        <Text style={styles.title}>Cargando conversación...</Text>
-        <View style={styles.placeholder} />
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={handleBack}
+          >
+            <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
+          </TouchableOpacity>
+          <ActivityIndicator size="small" color="#FFFFFF" />
+          <Text style={styles.loadingText}>Cargando conversación...</Text>
+        </LinearGradient>
       </View>
     );
   }
@@ -48,10 +108,28 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
   const otherParticipantName = conversation.participantNames[participantId] || 'Usuario';
   const otherParticipantPhoto = conversation.participantPhotos?.[participantId];
   
+  // For showing the business name if present
+  const headerTitle = businessMode && conversation.businessName 
+    ? conversation.businessName
+    : otherParticipantName;
+  
+  // For showing additional info under the main title
+  const headerSubtitle = businessMode && conversation.businessName 
+    ? `${otherParticipantName} - ${isTyping ? 'escribiendo...' : isOnline ? 'en línea' : ''}`
+    : isTyping ? 'escribiendo...' : isOnline ? 'en línea' : '';
+  
   return (
-    <View style={styles.containerWrapper}>
+    <Animated.View 
+      style={[
+        styles.containerWrapper,
+        { 
+          opacity: fadeAnim,
+          transform: [{ translateY: slideAnim }]
+        }
+      ]}
+    >
       <LinearGradient
-        colors={['#007AFF', '#00C2FF']}
+        colors={businessMode ? ['#FF9500', '#FF2D55'] : ['#007AFF', '#00C2FF']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 0 }}
         style={styles.headerGradient}
@@ -60,48 +138,78 @@ const ChatHeader: React.FC<ChatHeaderProps> = ({
           <TouchableOpacity 
             style={styles.backButton} 
             onPress={handleBack}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            activeOpacity={0.7}
           >
             <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
           
-          <View style={styles.userInfo}>
+          <TouchableOpacity 
+            style={styles.userInfo}
+            onPress={handleAvatarPress}
+            activeOpacity={0.8}
+            disabled={!onAvatarPress}
+          >
             {otherParticipantPhoto ? (
-              <Image source={{ uri: otherParticipantPhoto }} style={styles.avatar} />
+              <Image 
+                source={{ uri: otherParticipantPhoto }} 
+                style={styles.avatar}
+                defaultSource={require('../../../assets/Iconprofile.png')}
+              />
             ) : (
-              <View style={styles.defaultAvatar}>
-                <Text style={styles.avatarText}>{otherParticipantName[0]}</Text>
+              <View style={[
+                styles.defaultAvatar,
+                { backgroundColor: getAvatarColor(participantId) }
+              ]}>
+                <Text style={styles.avatarText}>{getNameInitial(otherParticipantName)}</Text>
               </View>
             )}
             
+            {/* Status indicator */}
+            {(isOnline || isTyping) && (
+              <View style={[
+                styles.statusIndicator,
+                isTyping ? styles.typingIndicator : styles.onlineIndicator
+              ]} />
+            )}
+            
             <View style={styles.nameContainer}>
-              <Text style={styles.title} numberOfLines={1}>{otherParticipantName}</Text>
+              <Text style={styles.title} numberOfLines={1}>{headerTitle}</Text>
+              {headerSubtitle ? (
+                <Text style={styles.subtitle} numberOfLines={1}>{headerSubtitle}</Text>
+              ) : null}
             </View>
-          </View>
+          </TouchableOpacity>
           
           {onInfoPress && (
             <TouchableOpacity 
               style={styles.infoButton} 
-              onPress={onInfoPress}
+              onPress={handleInfoPress}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              activeOpacity={0.7}
             >
               <MaterialIcons name="info-outline" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           )}
         </View>
       </LinearGradient>
-    </View>
+      
+      {/* Nice shadow on iOS */}
+      {Platform.OS === 'ios' && (
+        <View style={styles.shadowLine} />
+      )}
+    </Animated.View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   containerWrapper: {
-    overflow: 'hidden',
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+    elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowRadius: 3,
+    zIndex: 10,
   },
   headerGradient: {
     width: '100%',
@@ -122,6 +230,7 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
+    position: 'relative',
   },
   avatar: {
     width: 44,
@@ -149,6 +258,7 @@ const styles = StyleSheet.create({
   },
   nameContainer: {
     flex: 1,
+    justifyContent: 'center',
   },
   title: {
     fontSize: 18,
@@ -165,9 +275,46 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
-  placeholder: {
-    width: 40,
+  loadingContainer: {
+    height: 70,
   },
+  loadingGradient: {
+    width: '100%',
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  loadingText: {
+    color: '#FFFFFF',
+    marginLeft: 12,
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  statusIndicator: {
+    position: 'absolute',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    bottom: 0,
+    left: 32,
+    borderWidth: 2,
+    borderColor: 'white',
+  },
+  onlineIndicator: {
+    backgroundColor: '#34C759',
+  },
+  typingIndicator: {
+    backgroundColor: '#FF9500',
+  },
+  shadowLine: {
+    height: 1,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1,
+  }
 });
 
 export default ChatHeader;
