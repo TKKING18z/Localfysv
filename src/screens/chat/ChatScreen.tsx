@@ -1,3 +1,4 @@
+// React and React Native imports
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -15,23 +16,36 @@ import {
   Alert,
   Animated,
   BackHandler,
-  Keyboard
+  Keyboard,
+  ScrollView
 } from 'react-native';
+
+// Navigation imports
 import { useRoute, RouteProp, useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { RootStackParamList } from '../../navigation/AppNavigator';
+
+// Third party libraries
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { RootStackParamList } from '../../navigation/AppNavigator';
+import * as Haptics from 'expo-haptics';
+
+// Context and utilities
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
+
+// Components
 import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessage from '../../components/chat/ChatMessage';
 import ChatInput from '../../components/chat/ChatInput';
-import { Message } from '../../../models/chatTypes';
-import * as Haptics from 'expo-haptics';
 
+// Types
+import { Message, Conversation } from '../../../models/chatTypes';
+
+// Detailed type definitions
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
-type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList>;
+type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
+type MessageListRef = React.RefObject<FlatList<Message>>;
 
 const ChatScreen: React.FC = () => {
   // Navigation and route params

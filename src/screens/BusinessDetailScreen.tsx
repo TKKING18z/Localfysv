@@ -298,7 +298,7 @@ const BusinessDetailScreen: React.FC = () => {
     return business.images[0].url;
   }, [business?.images]);
 
-  // Mejorar la función handleStartChat para mayor robustez
+  // Mejorar la función handleStartChat para mayor robustez y manejo de errores
   const handleStartChat = useCallback(async () => {
     if (!user || !business || !business.createdBy) {
       Alert.alert('Error', 'No se puede iniciar chat en este momento');
@@ -316,76 +316,83 @@ const BusinessDetailScreen: React.FC = () => {
         return;
       }
       
-      console.log('Iniciando chat con propietario:', business.createdBy);
+      console.log(`[BusinessDetailScreen] Iniciando chat con propietario: ${business.createdBy} para negocio: ${business.id}`);
       
-      // Obtener información del propietario
+      // Obtener información del propietario para tener nombre más amigable
+      let ownerName = 'Propietario';
+      let ownerPhotoURL: string | undefined = undefined;
+      
       try {
         const ownerDoc = await firebase.firestore()
           .collection('users')
           .doc(business.createdBy)
           .get();
         
-        if (!ownerDoc.exists) {
-          throw new Error('No se pudo encontrar al propietario del negocio');
+        if (ownerDoc.exists) {
+          const ownerData = ownerDoc.data();
+          // Usar un nombre por defecto si no hay displayName
+          ownerName = ownerData?.displayName || 'Propietario';
+          ownerPhotoURL = ownerData?.photoURL || undefined;
+          
+          console.log(`[BusinessDetailScreen] Propietario encontrado: ${ownerName}`);
+        } else {
+          console.warn(`[BusinessDetailScreen] No se encontró documento para el propietario ${business.createdBy}`);
         }
-        
-        const ownerData = ownerDoc.data();
-        // Usar un nombre por defecto si no hay displayName
-        const ownerName = ownerData?.displayName || 'Propietario';
-        
-        // Intentar crear o recuperar conversación existente usando el método mejorado
-        const MAX_RETRIES = 2;
-        let conversationId: string | null = null;
-        let error: Error | null = null;
-        
-        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-          try {
-            conversationId = await createConversation(
-              business.createdBy, // recipientId = propietario del negocio
-              ownerName,
-              business.id,      // businessId
-              business.name     // businessName
-            );
-            
-            if (conversationId) {
-              break; // Éxito, salir del bucle
-            }
-            
-            // Si llegamos aquí, createConversation devolvió null
-            await new Promise(resolve => setTimeout(resolve, 1000));
-          } catch (err) {
-            error = err instanceof Error ? err : new Error('Error desconocido');
-            console.error(`Error en intento ${attempt + 1}:`, err);
-            
-            // Esperar antes de reintentar
-            if (attempt < MAX_RETRIES - 1) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-        }
-        
-        if (!conversationId) {
-          throw error || new Error('No se pudo crear la conversación después de varios intentos');
-        }
-        
-        // Navegar a la pantalla de chat
-        navigation.navigate('Chat', { conversationId });
-        
-        // Actualizar lista de conversaciones en background
-        setTimeout(() => {
-          refreshConversations();
-        }, 500);
-        
       } catch (dbError) {
-        console.error('Error al acceder a datos del propietario:', dbError);
-        throw new Error('No se pudo obtener información del propietario del negocio');
+        console.error('[BusinessDetailScreen] Error al acceder a datos del propietario:', dbError);
+        // Continuamos con el nombre predeterminado
       }
       
+      // Verificar que tenemos la función createConversation
+      if (!createConversation || typeof createConversation !== 'function') {
+        console.error('[BusinessDetailScreen] createConversation no está disponible en el contexto de chat');
+        throw new Error('La funcionalidad de chat no está disponible en este momento');
+      }
+      
+      // Intentar crear o recuperar conversación existente
+      console.log(`[BusinessDetailScreen] Llamando a createConversation...`);
+      console.log(`  - recipientId: ${business.createdBy}`);
+      console.log(`  - recipientName: ${ownerName}`);
+      console.log(`  - businessId: ${business.id}`);
+      console.log(`  - businessName: ${business.name}`);
+      
+      const conversationId = await createConversation(
+        business.createdBy, // recipientId = propietario del negocio
+        ownerName,          // nombre del propietario 
+        business.id,        // businessId
+        business.name       // businessName
+      );
+      
+      if (!conversationId) {
+        console.error('[BusinessDetailScreen] createConversation devolvió null o undefined');
+        throw new Error('No se pudo crear o recuperar la conversación');
+      }
+      
+      console.log(`[BusinessDetailScreen] Conversación creada/recuperada: ${conversationId}`);
+      
+      // Navegación a la pantalla de chat
+      navigation.navigate('Chat', { conversationId });
+      
+      // Actualizar lista de conversaciones en background
+      setTimeout(() => {
+        if (refreshConversations && typeof refreshConversations === 'function') {
+          refreshConversations().catch(err => {
+            console.error('[BusinessDetailScreen] Error actualizando conversaciones en background:', err);
+          });
+        }
+      }, 500);
+      
     } catch (error) {
-      console.error('Error iniciando chat:', error);
+      console.error('[BusinessDetailScreen] Error completo iniciando chat:', error);
+      let errorMessage = 'No se pudo iniciar la conversación.';
+      
+      if (error instanceof Error) {
+        errorMessage += ' ' + error.message;
+      }
+      
       Alert.alert(
         'Error', 
-        'No se pudo iniciar la conversación. Intente nuevamente más tarde.',
+        errorMessage + ' Intente nuevamente más tarde.',
         [{ text: 'OK' }]
       );
     } finally {

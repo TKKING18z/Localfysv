@@ -1065,7 +1065,9 @@ export const chatService = {
     try {
       // Validate required data
       if (!userId || !businessOwnerId || !businessId) {
-        console.error('[ChatService] checkOrCreateBusinessConversation: missing required parameters');
+        console.error('[ChatService] checkOrCreateBusinessConversation: missing required parameters', {
+          userId, businessOwnerId, businessId
+        });
         return { 
           success: false, 
           error: { 
@@ -1089,33 +1091,28 @@ export const chatService = {
 
       console.log(`[ChatService] Checking for existing conversation between ${userId} and ${businessOwnerId} for business ${businessId}`);
       
-      // Look for existing conversation - IMPROVED SEARCH
-      // 1. First get all conversations where the user is a participant
-      const userConversationsQuery = await firebase.firestore()
-        .collection('conversations')
-        .where('participants', 'array-contains', userId)
-        .get();
-      
-      // 2. Filter locally to find an exact match
-      let existingConversationId: string | null = null;
-      
-      if (!userConversationsQuery.empty) {
-        for (const doc of userConversationsQuery.docs) {
-          const data = doc.data();
-          
-          // Check if it's the correct business conversation with the exact participants
-          if (data.businessId === businessId && 
-              data.participants && 
-              data.participants.includes(businessOwnerId) &&
-              data.participants.length === 2) {
+      // Look for existing conversation with explicit where clause
+      try {
+        const query = await firebase.firestore()
+          .collection('conversations')
+          .where('participants', 'array-contains', userId)
+          .where('businessId', '==', businessId)
+          .get();
+        
+        // Check each conversation for exact participant match
+        if (!query.empty) {
+          for (const doc of query.docs) {
+            const data = doc.data();
+            const participants = data.participants || [];
             
-            // Check if the conversation was deleted by this user
-            if (data.deletedFor && data.deletedFor[userId] === true) {
-              // The conversation exists but was "deleted" by this user
-              // Reactivate it instead of creating a new one
-              console.log(`[ChatService] Found deleted conversation ${doc.id}, will reactivate it`);
+            // Check if the business owner is in the participants
+            if (participants.includes(businessOwnerId) && participants.length === 2) {
+              // Found existing conversation
+              console.log(`[ChatService] Found existing business conversation: ${doc.id}`);
               
-              try {
+              // Check if the conversation was deleted by this user
+              if (data.deletedFor && data.deletedFor[userId] === true) {
+                // Undelete the conversation
                 await firebase.firestore()
                   .collection('conversations')
                   .doc(doc.id)
@@ -1123,109 +1120,67 @@ export const chatService = {
                     [`deletedFor.${userId}`]: false,
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                   });
-              } catch (updateError) {
-                console.error('[ChatService] Error reactivating conversation:', updateError);
-                // Continue and create a new one if necessary
+                
+                console.log(`[ChatService] Reactivated previously deleted conversation: ${doc.id}`);
               }
+              
+              return { success: true, data: { conversationId: doc.id } };
             }
-            
-            console.log(`[ChatService] Found existing conversation: ${doc.id}`);
-            existingConversationId = doc.id;
-            break;
           }
         }
-      }
-      
-      // If a conversation exists, return it
-      if (existingConversationId) {
-        return { success: true, data: { conversationId: existingConversationId } };
-      }
-      
-      // If it doesn't exist, create a new one with a transaction
-      console.log('[ChatService] Creating new business conversation');
-      
-      // Use a transaction to ensure atomicity
-      const conversationRef = firebase.firestore().collection('conversations').doc();
-      const conversationId = conversationRef.id;
-      
-      const participants = [userId, businessOwnerId];
-      const participantNames: Record<string, string> = {
-        [userId]: userName || 'Usuario',
-        [businessOwnerId]: businessOwnerName || 'Propietario'
-      };
-      
-      // Initialize unread counts
-      const unreadCount: Record<string, number> = {};
-      participants.forEach(id => {
-        unreadCount[id] = 0;
-      });
-      
-      // Initialize deletedFor
-      const deletedFor: Record<string, boolean> = {};
-      participants.forEach(id => {
-        deletedFor[id] = false;
-      });
-      
-      try {
-        await firebase.firestore().runTransaction(async transaction => {
-          // Double-check if the conversation already exists (double-check)
-          // This is a protection against race conditions
-          const query = firebase.firestore()
-            .collection('conversations')
-            .where('participants', 'array-contains', userId)
-            .where('businessId', '==', businessId);
-
-          const querySnapshot = await query.get();
-          
-          // Check each document reference inside transaction
-          for (const docSnapshot of querySnapshot.docs) {
-            const docRef = firebase.firestore().collection('conversations').doc(docSnapshot.id);
-            const transactionDoc = await transaction.get(docRef);
-            const data = transactionDoc.data();
-            
-            if (data?.participants && 
-                data.participants.includes(businessOwnerId) &&
-                data.participants.length === 2) {
-              throw new Error('CONVERSATION_ALREADY_EXISTS:' + docSnapshot.id);
-            }
-          }
-          
-          // If we get here, we can create the new conversation
-          transaction.set(conversationRef, {
-            participants,
-            participantNames,
-            businessId,
-            businessName,
-            unreadCount,
-            deletedFor,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
+        
+        // If we reach here, no matching conversation was found
+        console.log('[ChatService] No existing conversation found, creating new one');
+        
+        // Create new conversation with a transaction
+        const conversationRef = firebase.firestore().collection('conversations').doc();
+        const conversationId = conversationRef.id;
+        
+        const participants = [userId, businessOwnerId];
+        const participantNames: Record<string, string> = {
+          [userId]: userName || 'Usuario',
+          [businessOwnerId]: businessOwnerName || 'Propietario'
+        };
+        
+        // Initialize unread counts
+        const unreadCount: Record<string, number> = {};
+        participants.forEach(id => {
+          unreadCount[id] = 0;
         });
         
-        console.log(`[ChatService] New conversation successfully created: ${conversationId}`);
+        // Initialize deletedFor
+        const deletedFor: Record<string, boolean> = {};
+        participants.forEach(id => {
+          deletedFor[id] = false;
+        });
+        
+        // Set initial data
+        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
+        
+        await conversationRef.set({
+          participants,
+          participantNames,
+          businessId,
+          businessName,
+          unreadCount,
+          deletedFor,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        });
+        
+        console.log(`[ChatService] New business conversation created successfully: ${conversationId}`);
         return { success: true, data: { conversationId } };
-        
-      } catch (transactionError: any) {
-        // Handle the special case where an existing conversation is detected
-        if (transactionError.message && transactionError.message.startsWith('CONVERSATION_ALREADY_EXISTS:')) {
-          const existingId = transactionError.message.split(':')[1];
-          console.log(`[ChatService] Conversation created concurrently, using existing: ${existingId}`);
-          return { success: true, data: { conversationId: existingId } };
-        }
-        
-        // Other errors
-        console.error('[ChatService] Transaction error creating conversation:', transactionError);
-        return { 
-          success: false, 
-          error: { 
-            message: 'Error al crear conversación',
-            code: 'chat/create-conversation-failed',
-            originalError: transactionError
-          } 
+      } catch (innerError) {
+        console.error('[ChatService] Error checking/creating business conversation:', innerError);
+        return {
+          success: false,
+          error: {
+            message: 'Error al verificar o crear la conversación',
+            code: 'chat/database-error',
+            originalError: innerError
+          }
         };
       }
-      
     } catch (error) {
       console.error('[ChatService] Error in checkOrCreateBusinessConversation:', error);
       return { 

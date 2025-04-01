@@ -27,6 +27,9 @@ interface ChatContextType {
   deleteConversation: (conversationId: string) => Promise<boolean>;
   resendFailedMessage: (messageId: string) => Promise<boolean>;
   uploadImage: (uri: string) => Promise<string | null>;
+  // New notification token functions
+  updateNotificationToken: (token: string) => Promise<void>;
+  clearNotificationToken: () => Promise<void>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -743,8 +746,30 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       return null;
     }
     
+    // Validate essential parameters
+    if (!recipientId || recipientId.trim() === '') {
+      console.error('[ChatContext] Cannot create conversation: Invalid recipient ID');
+      return null;
+    }
+    
+    // Prevent creating conversation with self
+    if (recipientId === user.uid) {
+      console.error('[ChatContext] Cannot create conversation with yourself');
+      return null;
+    }
+    
+    // Clean recipient name
+    const cleanRecipientName = recipientName?.trim() || 'Usuario';
+    
+    // Business validation
+    if (businessId && !businessName) {
+      console.error('[ChatContext] Business ID provided but missing business name');
+      return null;
+    }
+    
     try {
-      console.log(`[ChatContext] Creating conversation with ${recipientName} (${recipientId})`);
+      console.log(`[ChatContext] Creating conversation with ${cleanRecipientName} (${recipientId})`);
+      console.log(`[ChatContext] Business context: ${businessId || 'none'}, ${businessName || 'none'}`);
       
       // Implement retry (up to 3 times)
       const MAX_RETRIES = 3;
@@ -754,13 +779,13 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         try {
           // If it's a business conversation, use the specific method
           if (businessId && businessName) {
-            console.log(`[ChatContext] Creating business conversation for business ${businessId}`);
+            console.log(`[ChatContext] Creating business conversation for business ${businessId} (attempt ${attempt})`);
             
             const result = await chatService.checkOrCreateBusinessConversation(
               user.uid,
               user.displayName || 'Usuario',
               recipientId,
-              recipientName,
+              cleanRecipientName,
               businessId,
               businessName
             );
@@ -771,7 +796,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
               
               // If there's an initial message, send it
               if (initialMessage && initialMessage.trim()) {
-                console.log('[ChatContext] Sending initial message');
+                console.log('[ChatContext] Sending initial message for business conversation');
                 await chatService.sendMessage(
                   conversationId, 
                   user.uid, 
@@ -792,26 +817,30 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
             }
             
             lastError = result.error || new Error('Error creating business conversation');
-            console.error(`[ChatContext] Attempt ${attempt} failed:`, lastError);
+            console.error(`[ChatContext] Business conversation attempt ${attempt} failed:`, lastError);
             
             // If it's an error that can't be resolved by retrying, exit loop
-            if (result.error?.code === 'chat/same-user-conversation') {
+            if (result.error?.code === 'chat/same-user-conversation' || 
+                result.error?.code === 'chat/invalid-business' ||
+                result.error?.code === 'chat/permission-denied') {
+              console.log('[ChatContext] Non-recoverable business conversation error, stopping retries');
               break;
             }
             
             // Wait before retrying (exponential backoff)
             if (attempt < MAX_RETRIES) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+              const backoffTime = Math.min(1000 * Math.pow(2, attempt), 8000); // max 8 seconds
+              console.log(`[ChatContext] Waiting ${backoffTime}ms before retry ${attempt+1} for business conversation`);
+              await new Promise(resolve => setTimeout(resolve, backoffTime));
             }
           } else {
             // Regular conversation between users
             console.log('[ChatContext] Creating regular user conversation');
             
-            // Current code for regular conversations
             const participants = [user.uid, recipientId];
             const participantNames: Record<string, string> = {
               [user.uid]: user.displayName || 'Usuario',
-              [recipientId]: recipientName
+              [recipientId]: cleanRecipientName
             };
             
             // Prepare profile photos
@@ -923,6 +952,60 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, conversations, activeConversationId, isOffline]);
   
+  // Función para actualizar el token de notificación del usuario
+  const updateNotificationToken = useCallback(async (token: string) => {
+    if (!user || !token) return;
+
+    try {
+      // Comprobar si el token ya está registrado para este usuario
+      const userRef = firebase.firestore().collection('users').doc(user.uid);
+      const userDoc = await userRef.get();
+      
+      if (!userDoc.exists) {
+        console.warn('[ChatContext] User document not found for updating notification token');
+        return;
+      }
+
+      const userData = userDoc.data();
+      const currentToken = userData?.notificationToken;
+
+      // Sólo actualizar si el token ha cambiado
+      if (currentToken !== token) {
+        console.log('[ChatContext] Updating notification token for user', user.uid);
+        
+        await userRef.update({
+          notificationToken: token,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        console.log('[ChatContext] Notification token updated successfully');
+      }
+    } catch (error) {
+      console.error('[ChatContext] Error updating notification token:', error);
+    }
+  }, [user]);
+
+  // Función para registrar la eliminación del token al cerrar sesión
+  const clearNotificationToken = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      console.log('[ChatContext] Clearing notification token for user', user.uid);
+      
+      await firebase.firestore()
+        .collection('users')
+        .doc(user.uid)
+        .update({
+          notificationToken: null,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+      console.log('[ChatContext] Notification token cleared successfully');
+    } catch (error) {
+      console.error('[ChatContext] Error clearing notification token:', error);
+    }
+  }, [user]);
+
   // Use useMemo for context value to prevent unnecessary renders
   const contextValue = useMemo(() => ({
     conversations,
@@ -939,7 +1022,10 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     refreshConversations,
     deleteConversation,
     resendFailedMessage,
-    uploadImage
+    uploadImage,
+    // Add new notification token functions to context
+    updateNotificationToken,
+    clearNotificationToken
   }), [
     conversations,
     activeConversation,
@@ -955,7 +1041,10 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     refreshConversations,
     deleteConversation,
     resendFailedMessage,
-    uploadImage
+    uploadImage,
+    // Include new functions in dependency array
+    updateNotificationToken,
+    clearNotificationToken
   ]);
   
   return (

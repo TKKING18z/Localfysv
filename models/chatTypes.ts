@@ -1,84 +1,145 @@
+/**
+ * Chat Types - Core data models for chat functionality
+ */
 import firebase from 'firebase/compat/app';
 
-// Base timestamp type to handle different timestamp formats
-export type TimestampType = firebase.firestore.Timestamp | Date | string;
+/**
+ * Timestamp type to handle different timestamp formats across the application.
+ * Supports Firebase Timestamp, JavaScript Date, or ISO string format.
+ */
+export type TimestampType = firebase.firestore.Timestamp | Date | string | null;
 
-// Message status enum for better type safety
+/**
+ * Message delivery status types
+ */
 export enum MessageStatus {
-  SENDING = 'sending',
-  SENT = 'sent',
-  DELIVERED = 'delivered',
-  READ = 'read',
-  ERROR = 'error'
+  SENDING = 'sending',  // Message is being sent
+  SENT = 'sent',        // Successfully sent to server
+  DELIVERED = 'delivered', // Delivered to recipient device
+  READ = 'read',        // Read by recipient
+  ERROR = 'error'       // Failed to send
 }
 
-// Message types enum for better type safety
+/**
+ * Message content type
+ */
 export enum MessageType {
-  TEXT = 'text',
-  IMAGE = 'image',
-  SYSTEM = 'system'
+  TEXT = 'text',       // Plain text message
+  IMAGE = 'image',     // Image message
+  SYSTEM = 'system'    // System notification
 }
 
-// Enhanced Message interface
+/**
+ * Message model - Represents a single chat message
+ */
 export interface Message {
+  /** Unique message identifier */
   id: string;
+  /** Message content text */
   text: string;
+  /** User ID of sender */
   senderId: string;
+  /** Display name of sender */
   senderName?: string;
+  /** Profile photo URL of sender */
   senderPhoto?: string;
+  /** When the message was sent */
   timestamp: TimestampType;
+  /** Current delivery status */
   status?: MessageStatus;
+  /** Whether message has been read by recipient */
   read: boolean;
-  type: MessageType | string; // Using enum but allowing string for backward compatibility
+  /** Content type of the message */
+  type: MessageType | string;
+  /** URL to image (for image messages) */
   imageUrl?: string;
-  metadata?: Record<string, any>; // For future extensibility
+  /** Additional data for specialized messages */
+  metadata?: Record<string, any>;
 }
 
-// Enhanced Conversation interface
+/**
+ * Conversation model - Represents a chat thread between users
+ */
 export interface Conversation {
+  /** Unique conversation identifier */
   id: string;
-  participants: string[]; // IDs de los usuarios participantes
-  participantNames: Record<string, string>; // Mapeo de IDs a nombres
-  participantPhotos?: Record<string, string>; // Mapeo de IDs a fotos
+  /** Array of user IDs in the conversation */
+  participants: string[];
+  /** Mapping of user IDs to display names */
+  participantNames: Record<string, string>;
+  /** Mapping of user IDs to profile photos */
+  participantPhotos?: Record<string, string>;
+  /** Most recent message in the conversation */
   lastMessage?: {
     text: string;
     senderId: string;
     timestamp: TimestampType;
   };
-  businessId?: string; // ID del negocio relacionado (si aplica)
-  businessName?: string; // Nombre del negocio relacionado
-  unreadCount: Record<string, number>; // Conteo de mensajes no leídos por usuario
-  deletedFor?: Record<string, boolean>; // Mapeo de IDs de usuario a estado de eliminación
+  /** Associated business ID, if this is a business conversation */
+  businessId?: string;
+  /** Business name if applicable */
+  businessName?: string;
+  /** Count of unread messages per user */
+  unreadCount: Record<string, number>;
+  /** Whether conversation is marked deleted by certain users */
+  deletedFor?: Record<string, boolean>;
+  /** When the conversation was created */
   createdAt: TimestampType;
+  /** When the conversation was last updated */
   updatedAt: TimestampType;
-  metadata?: Record<string, any>; // For future extensibility
-  // For typing purposes
+  /** Additional data for extensibility */
+  metadata?: Record<string, any>;
+  /** Support for additional properties */
   [key: string]: any;
 }
 
+/**
+ * User model specific to chat functionality
+ */
 export interface ChatUser {
+  /** User identifier */
   id: string;
+  /** Display name */
   name: string;
+  /** Profile image URL */
   photoURL?: string;
+  /** Online status */
   isOnline?: boolean;
+  /** When user was last active */
   lastSeen?: TimestampType;
-  role?: 'customer' | 'business_owner';
+  /** User role for permission purposes */
+  role?: 'customer' | 'business_owner' | 'admin';
 }
 
+/**
+ * Data required to create a new message
+ */
 export interface NewMessageData {
+  /** Message text content */
   text: string;
+  /** Optional image URL */
   imageUrl?: string;
+  /** Message content type */
   type?: MessageType | string;
+  /** Additional custom data */
   metadata?: Record<string, any>;
 }
 
-// Standard response type for chat service
+/**
+ * Standard response format for chat service operations
+ */
 export interface ChatResult<T> {
+  /** Whether the operation was successful */
   success: boolean;
+  /** Response data (when success is true) */
   data?: T;
+  /** Error information (when success is false) */
   error?: {
+    /** User-friendly error message */
     message: string;
+    /** Error code for programmatic handling */
     code?: string;
+    /** Original error object for debugging */
     originalError?: any;
   };
 }
