@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { LinearGradient } from 'expo-linear-gradient';
 
 interface ChatInputProps {
   onSend: (text: string, imageUrl?: string) => Promise<boolean | void>;
@@ -88,6 +87,7 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         }
       }
       
+      // Usar MediaTypeOptions en lugar de MediaType para compatibilidad
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -113,11 +113,23 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
             setText('');
           } else {
             console.error('Error al subir imagen');
-            Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
+            Alert.alert('Error', 'No se pudo subir la imagen. Verifique su conexión e intente nuevamente.');
           }
         } catch (error) {
           console.error('Error subiendo imagen:', error);
-          Alert.alert('Error', 'No se pudo subir la imagen. Intente nuevamente.');
+          // Mensaje de error más detallado para ayudar al usuario
+          let errorMessage = 'No se pudo subir la imagen.';
+          
+          // Si es un problema de permisos
+          if (error instanceof Error && error.message.includes('permission')) {
+            errorMessage += ' No tienes permisos para subir imágenes en este momento.';
+          } else if (error instanceof Error && error.message.includes('network')) {
+            errorMessage += ' Verifica tu conexión a internet.';
+          } else {
+            errorMessage += ' Intenta nuevamente más tarde.';
+          }
+          
+          Alert.alert('Error', errorMessage);
         } finally {
           setIsLoading(false);
         }
@@ -136,12 +148,9 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
           onPress={handleAttachImage}
           disabled={isLoading}
         >
-          <LinearGradient
-            colors={['#5AC8FA', '#4CD964']}
-            style={styles.attachButtonGradient}
-          >
-            <MaterialIcons name="photo-camera" size={22} color="#FFFFFF" />
-          </LinearGradient>
+          <View style={styles.attachButtonColor}>
+            <MaterialIcons name="photo-camera" size={24} color="#FFFFFF" />
+          </View>
         </TouchableOpacity>
       )}
       
@@ -171,12 +180,9 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         {isLoading ? (
           <ActivityIndicator size="small" color="#FFF" />
         ) : (
-          <LinearGradient
-            colors={['#007AFF', '#00C2FF']}
-            style={styles.sendButtonGradient}
-          >
-            <MaterialIcons name="send" size={22} color="#FFF" />
-          </LinearGradient>
+          <View style={styles.sendButtonColor}>
+            <MaterialIcons name="send" size={24} color="#FFF" />
+          </View>
         )}
       </TouchableOpacity>
     </View>
@@ -187,54 +193,77 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
+    padding: 12,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E9E9EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 5,
   },
   inputContainer: {
     flex: 1,
-    borderRadius: 20,
-    backgroundColor: '#F2F2F7',
-    paddingHorizontal: 12,
-    marginHorizontal: 8,
+    borderRadius: 24,
+    backgroundColor: '#F0F2F8',
+    paddingHorizontal: 16,
+    marginHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 122, 255, 0.2)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   input: {
-    minHeight: 36,
+    minHeight: 42,
     maxHeight: 120,
     fontSize: 16,
-    color: '#000',
-    paddingTop: 8,
-    paddingBottom: 8,
+    color: '#333333',
+    paddingTop: 10,
+    paddingBottom: 10,
   },
   attachButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  attachButtonGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  attachButtonColor: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#007AFF',
   },
   sendButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#007AFF',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
-  sendButtonGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  sendButtonColor: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#007AFF',
   },
   disabledButton: {
     opacity: 0.5,

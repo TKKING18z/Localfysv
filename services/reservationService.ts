@@ -206,8 +206,9 @@ export const reservationService = {
   // Obtener configuración de disponibilidad
   getAvailability: async (businessId: string): Promise<Result<ReservationAvailability>> => {
     try {
+      // Usamos el mismo nombre de colección que en firebaseService.ts (reservation_availability)
       const availabilityDoc = await firebase.firestore()
-        .collection('reservationAvailability')
+        .collection('reservation_availability')
         .doc(businessId)
         .get();
 
@@ -241,8 +242,9 @@ export const reservationService = {
   // Actualizar configuración de disponibilidad
   updateAvailability: async (availability: ReservationAvailability): Promise<Result<void>> => {
     try {
+      // Usamos el mismo nombre de colección que en firebaseService.ts (reservation_availability)
       await firebase.firestore()
-        .collection('reservationAvailability')
+        .collection('reservation_availability')
         .doc(availability.businessId)
         .set(availability, { merge: true });
 

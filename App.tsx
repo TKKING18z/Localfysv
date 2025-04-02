@@ -9,23 +9,9 @@ import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { StoreProvider } from './src/context/StoreContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
+import firebase from './firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
-
-// Configuración de Firebase
-const firebaseConfig = {
-  apiKey: "AIzaSyC2S36sPSd2XEJmxxkqJ-lQUJc7ySL5Uvw",
-  authDomain: "testlocalfysv25.firebaseapp.com",
-  projectId: "testlocalfysv25",
-  storageBucket: "testlocalfysv25.firebasestorage.app",
-  messagingSenderId: "281205862532",
-  appId: "1:281205862532:web:aa25ca39606dda5db6d2d1",
-  measurementId: "G-Z7V3LK64ZL"
-};
 
 // Ignorar advertencias específicas que no podemos controlar
 LogBox.ignoreLogs([
@@ -35,13 +21,6 @@ LogBox.ignoreLogs([
   'NativeEventEmitter',
   'ViewPropTypes will be removed'
 ]);
-
-// Inicializar Firebase si no está ya inicializado
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-} else {
-  firebase.app();
-}
 
 // Prevenir que la pantalla de splash se oculte automáticamente
 SplashScreen.preventAutoHideAsync().catch(() => {

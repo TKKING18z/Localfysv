@@ -975,7 +975,7 @@ const AddBusinessScreen: React.FC = () => {
               accessibilityLabel="Volver atrás"
               accessibilityRole="button"
             >
-              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+              <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.headerTitle}>Agregar Negocio</Text>
             <View style={styles.placeholder}></View>
@@ -988,7 +988,7 @@ const AddBusinessScreen: React.FC = () => {
               <Text style={styles.sectionTitle}>Información Básica</Text>
               
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Nombre del Negocio *</Text>
+                <Text style={styles.label}>Nombre del Negocio <Text style={styles.requiredMark}>*</Text></Text>
                 <TextInput
                   style={[
                     styles.input,
@@ -996,7 +996,7 @@ const AddBusinessScreen: React.FC = () => {
                   ]}
                   value={name}
                   onChangeText={handleNameChange}
-                  placeholder="Nombre del negocio"
+                  placeholder="Ej: Cafetería El Aroma"
                   placeholderTextColor="#8E8E93"
                   maxLength={100}
                 />
@@ -1006,7 +1006,7 @@ const AddBusinessScreen: React.FC = () => {
               </View>
               
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Descripción *</Text>
+                <Text style={styles.label}>Descripción <Text style={styles.requiredMark}>*</Text></Text>
                 <TextInput
                   style={[
                     styles.input, 
@@ -1015,7 +1015,7 @@ const AddBusinessScreen: React.FC = () => {
                   ]}
                   value={description}
                   onChangeText={handleDescriptionChange}
-                  placeholder="Describe tu negocio..."
+                  placeholder="Describe servicios, especialidad, ventajas..."
                   placeholderTextColor="#8E8E93"
                   multiline={true}
                   numberOfLines={4}
@@ -1028,7 +1028,7 @@ const AddBusinessScreen: React.FC = () => {
               </View>
               
               <View style={styles.formGroup}>
-                <Text style={styles.label}>Categoría *</Text>
+                <Text style={styles.label}>Categoría <Text style={styles.requiredMark}>*</Text></Text>
                 <TextInput
                   style={[
                     styles.input, 
@@ -1037,7 +1037,7 @@ const AddBusinessScreen: React.FC = () => {
                   ]}
                   value={category}
                   onChangeText={updateCategorySuggestions}
-                  placeholder="Categoría (ej. Restaurante, Tienda)"
+                  placeholder="Busca o escribe una categoría"
                   placeholderTextColor="#8E8E93"
                   maxLength={50}
                 />
@@ -1077,19 +1077,19 @@ const AddBusinessScreen: React.FC = () => {
                     style={[styles.input, { flex: 1 }]}
                     value={address}
                     onChangeText={setAddress}
-                    placeholder="Dirección del negocio"
+                    placeholder="Calle, número, colonia..."
                     placeholderTextColor="#8E8E93"
                   />
                   <TouchableOpacity 
                     style={styles.locationButton}
                     onPress={openLocationPicker}
                   >
-                    <MaterialIcons name="map" size={24} color="#007AFF" />
+                    <MaterialIcons name="map" size={24} color="#FFFFFF" />
                   </TouchableOpacity>
                 </View>
                 {location && (
                   <Text style={styles.locationConfirmed}>
-                    <MaterialIcons name="check-circle" size={14} color="#34C759" /> Ubicación seleccionada
+                    <MaterialIcons name="check-circle" size={14} color="#34C759" /> Ubicación seleccionada correctamente
                   </Text>
                 )}
               </View>
@@ -1103,7 +1103,7 @@ const AddBusinessScreen: React.FC = () => {
                   ]}
                   value={phone}
                   onChangeText={handlePhoneChange}
-                  placeholder="+503 7123 4567"
+                  placeholder="+503 XXXX XXXX"
                   placeholderTextColor="#8E8E93"
                   keyboardType="phone-pad"
                 />
@@ -1121,7 +1121,9 @@ const AddBusinessScreen: React.FC = () => {
                 style={styles.advancedButton}
                 onPress={navigateToBusinessHours}
               >
-                <MaterialIcons name="access-time" size={24} color="#007AFF" />
+                <View style={styles.advancedIconContainer}>
+                  <MaterialIcons name="access-time" size={24} color="#007aff" />
+                </View>
                 <Text style={styles.advancedButtonText}>Horarios de Atención</Text>
                 <MaterialIcons 
                   name="check-circle" 
@@ -1134,7 +1136,9 @@ const AddBusinessScreen: React.FC = () => {
                 style={styles.advancedButton}
                 onPress={navigateToPaymentMethods}
               >
-                <MaterialIcons name="payment" size={24} color="#007AFF" />
+                <View style={styles.advancedIconContainer}>
+                  <MaterialIcons name="payment" size={24} color="#007aff" />
+                </View>
                 <Text style={styles.advancedButtonText}>Métodos de Pago</Text>
                 <MaterialIcons 
                   name="check-circle" 
@@ -1147,7 +1151,9 @@ const AddBusinessScreen: React.FC = () => {
                 style={styles.advancedButton}
                 onPress={navigateToSocialLinks}
               >
-                <MaterialIcons name="link" size={24} color="#007AFF" />
+                <View style={styles.advancedIconContainer}>
+                  <MaterialIcons name="link" size={24} color="#007aff" />
+                </View>
                 <Text style={styles.advancedButtonText}>Redes Sociales</Text>
                 <MaterialIcons 
                   name="check-circle" 
@@ -1160,7 +1166,9 @@ const AddBusinessScreen: React.FC = () => {
                 style={styles.advancedButton}
                 onPress={navigateToMenuEditor}
               >
-                <MaterialIcons name="restaurant-menu" size={24} color="#007AFF" />
+                <View style={styles.advancedIconContainer}>
+                  <MaterialIcons name="restaurant-menu" size={24} color="#007aff" />
+                </View>
                 <Text style={styles.advancedButtonText}>Menú</Text>
                 <MaterialIcons 
                   name="check-circle" 
@@ -1192,7 +1200,9 @@ const AddBusinessScreen: React.FC = () => {
                   style={styles.advancedButton}
                   onPress={navigateToReservations}
                 >
-                  <MaterialIcons name="event-available" size={24} color="#007AFF" />
+                  <View style={styles.advancedIconContainer}>
+                    <MaterialIcons name="event-available" size={24} color="#007aff" />
+                  </View>
                   <Text style={styles.advancedButtonText}>Configurar Reservaciones</Text>
                   <MaterialIcons 
                     name="check-circle" 
@@ -1206,7 +1216,9 @@ const AddBusinessScreen: React.FC = () => {
                 style={styles.advancedButton}
                 onPress={navigateToPromotions}
               >
-                <MaterialIcons name="local-offer" size={24} color="#007AFF" />
+                <View style={styles.advancedIconContainer}>
+                  <MaterialIcons name="local-offer" size={24} color="#007aff" />
+                </View>
                 <Text style={styles.advancedButtonText}>Gestionar Promociones</Text>
                 <MaterialIcons 
                   name="check-circle" 
@@ -1218,7 +1230,7 @@ const AddBusinessScreen: React.FC = () => {
             
             {/* Image Picker */}
             <View style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>Imagen Principal *</Text>
+              <Text style={styles.sectionTitle}>Imagen Principal <Text style={styles.requiredMark}>*</Text></Text>
               <TouchableOpacity 
                 style={[
                   styles.imagePicker,
@@ -1234,8 +1246,8 @@ const AddBusinessScreen: React.FC = () => {
                   />
                 ) : (
                   <View style={styles.placeholderContainer}>
-                    <MaterialIcons name="add-photo-alternate" size={40} color="#8E8E93" />
-                    <Text style={styles.placeholderText}>Seleccionar Imagen</Text>
+                    <MaterialIcons name="add-photo-alternate" size={40} color="#007aff" />
+                    <Text style={styles.placeholderText}>Toca para seleccionar imagen</Text>
                   </View>
                 )}
               </TouchableOpacity>
@@ -1272,10 +1284,10 @@ const AddBusinessScreen: React.FC = () => {
             disabled={isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color="#FFFFFF" size="small" />
             ) : (
               <>
-                <MaterialIcons name="save" size={24} color="#FFFFFF" />
+                <MaterialIcons name="business" size={24} color="#FFFFFF" />
                 <Text style={styles.submitButtonText}>Guardar Negocio</Text>
               </>
             )}
@@ -1298,7 +1310,7 @@ const AddBusinessScreen: React.FC = () => {
               accessibilityLabel="Volver atrás"
               accessibilityRole="button"
             >
-              <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+              <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
             </TouchableOpacity>
             <Text style={styles.mapHeaderTitle}>Seleccionar Ubicación</Text>
             <View style={styles.mapHeaderRight}></View>
@@ -1327,7 +1339,7 @@ const AddBusinessScreen: React.FC = () => {
               accessibilityLabel="Mi ubicación actual"
               accessibilityRole="button"
             >
-              <MaterialIcons name="my-location" size={24} color="#007AFF" />
+              <MaterialIcons name="my-location" size={24} color="#007aff" />
             </TouchableOpacity>
             
             <TouchableOpacity 
@@ -1350,32 +1362,47 @@ const AddBusinessScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
+  requiredMark: {
+    color: '#FF3B30',
+    fontWeight: 'bold',
+  },
+  advancedIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,122,255,0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FF',
+    backgroundColor: '#F0F7FF', // Color de fondo más fresco con un toque azul
   },
   scrollContent: {
-    paddingBottom: 40,
+    paddingBottom: 50,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: 'white',
+    backgroundColor: '#007aff', // Azul de logo como color de header
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#FFFFFF', // Texto blanco para mejor contraste en header azul
   },
   placeholder: {
     width: 40,
@@ -1386,35 +1413,48 @@ const styles = StyleSheet.create({
   sectionContainer: {
     backgroundColor: 'white',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    padding: 20,
+    marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 3,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007aff', // Borde izquierdo azul para resaltar secciones
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 16,
+    color: '#007aff', // Título de secciones en azul
+    marginBottom: 20,
+    paddingBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,122,255,0.1)', // Línea sutil bajo el título
   },
   formGroup: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   label: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333333',
+    fontWeight: '600',
+    color: '#2C3E50', // Color oscuro para mejor legibilidad
     marginBottom: 8,
+    letterSpacing: 0.2,
   },
   input: {
-    backgroundColor: '#F0F0F5',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: '#F6F8FC',
+    borderRadius: 10,
+    padding: 15,
     fontSize: 16,
-    color: '#333333',
+    color: '#2C3E50',
+    borderWidth: 1,
+    borderColor: '#E0E7FF', // Borde sutil con toque azul
+    shadowColor: '#8395A7',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   inputError: {
     borderWidth: 1,
@@ -1423,9 +1463,10 @@ const styles = StyleSheet.create({
   },
   errorText: {
     color: '#FF3B30',
-    fontSize: 12,
-    marginTop: 4,
+    fontSize: 13,
+    marginTop: 6,
     marginLeft: 4,
+    fontWeight: '500',
   },
   textArea: {
     height: 120,
@@ -1436,23 +1477,32 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   locationButton: {
-    marginLeft: 8,
-    padding: 8,
-    backgroundColor: '#F0F0F5',
-    borderRadius: 8,
+    marginLeft: 10,
+    padding: 15,
+    backgroundColor: '#007aff',
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   locationConfirmed: {
-    fontSize: 12,
+    fontSize: 13,
     color: '#34C759',
-    marginTop: 4,
+    marginTop: 8,
+    fontWeight: '500',
   },
   imagePicker: {
-    height: 200,
-    backgroundColor: '#F0F0F5',
-    borderRadius: 8,
+    height: 220,
+    backgroundColor: '#F6F8FC',
+    borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+    borderStyle: 'dashed',
   },
   imagePickerError: {
     borderWidth: 1,
@@ -1467,82 +1517,117 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   placeholderText: {
-    marginTop: 8,
+    marginTop: 12,
     fontSize: 16,
-    color: '#8E8E93',
+    color: '#007aff',
+    fontWeight: '500',
   },
   advancedButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F0F5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
+    backgroundColor: '#F6F8FC',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
+    shadowColor: '#8395A7',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.03,
+    shadowRadius: 2,
+    elevation: 1,
   },
   advancedButtonText: {
     fontSize: 16,
-    color: '#333333',
-    marginLeft: 12,
+    color: '#2C3E50',
+    marginLeft: 14,
     flex: 1,
+    fontWeight: '500',
   },
   toggleContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+    padding: 12,
+    backgroundColor: '#F6F8FC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
   },
   toggleLabel: {
     fontSize: 16,
-    color: '#333333',
+    color: '#2C3E50',
+    fontWeight: '500',
   },
   warningText: {
-    marginBottom: 12,
-    color: '#FF3B30',
+    marginBottom: 14,
+    color: '#FF9500',
     fontStyle: 'italic',
+    backgroundColor: 'rgba(255,149,0,0.08)',
+    padding: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
   },
   progressContainer: {
-    marginBottom: 16,
+    marginVertical: 20,
+    backgroundColor: 'white',
+    padding: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   progressText: {
     fontSize: 14,
-    color: '#333333',
-    marginBottom: 8,
+    color: '#2C3E50',
+    marginBottom: 12,
     textAlign: 'center',
+    fontWeight: '600',
   },
   progressBarContainer: {
-    height: 6,
-    backgroundColor: '#E0E0E0',
-    borderRadius: 3,
+    height: 8,
+    backgroundColor: '#E0E7FF',
+    borderRadius: 4,
     overflow: 'hidden',
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#007aff',
+    borderRadius: 4,
   },
   submitButton: {
     flexDirection: 'row',
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#007aff',
+    borderRadius: 14,
+    padding: 18,
     margin: 16,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#007aff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
   },
   submitButtonDisabled: {
     backgroundColor: '#7FB5FF',
+    shadowOpacity: 0.1,
   },
   submitButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    marginLeft: 8,
+    marginLeft: 10,
   },
   suggestionsContainer: {
     backgroundColor: 'white',
     borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
+    borderColor: '#E0E7FF',
+    borderBottomLeftRadius: 10,
+    borderBottomRightRadius: 10,
     borderTopWidth: 0,
     maxHeight: 200,
     position: 'absolute',
@@ -1550,47 +1635,49 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 10,
-    elevation: 3,
+    elevation: 5,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowRadius: 5,
   },
   suggestionsList: {
     maxHeight: 200,
   },
   suggestionItem: {
-    padding: 12,
+    padding: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F5',
+    borderBottomColor: '#F0F7FF',
   },
   suggestionText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#2C3E50',
   },
   mapModalContainer: {
     flex: 1,
-    backgroundColor: '#F5F7FF',
+    backgroundColor: '#F0F7FF',
   },
   mapHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: 'white',
+    backgroundColor: '#007aff',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   mapCloseButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   mapHeaderTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#FFFFFF',
   },
   mapHeaderRight: {
     width: 40,
@@ -1607,30 +1694,31 @@ const styles = StyleSheet.create({
     right: 16,
     top: 16,
     backgroundColor: 'white',
-    padding: 12,
+    padding: 15,
     borderRadius: 30,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
-    shadowRadius: 3,
+    shadowRadius: 5,
     elevation: 5,
   },
   confirmLocationButton: {
     position: 'absolute',
     bottom: 32,
     alignSelf: 'center',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#007aff',
     paddingVertical: 16,
-    paddingHorizontal: 32,
+    paddingHorizontal: 36,
     borderRadius: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
+    shadowColor: '#007aff',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 5,
   },
   disabledButton: {
     backgroundColor: '#A2D1FF',
+    shadowOpacity: 0.1,
   },
   confirmLocationButtonText: {
     color: 'white',

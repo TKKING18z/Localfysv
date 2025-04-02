@@ -524,6 +524,38 @@ const ProfileScreen: React.FC = () => {
             />
           </View>
         </View>
+
+        {/* Centro de Ayuda Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Centro de Ayuda</Text>
+          
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('FAQs')}
+          >
+            <MaterialIcons name="help-outline" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>Preguntas Frecuentes</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('Support')}
+          >
+            <MaterialIcons name="headset-mic" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>Contactar Soporte</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('TermsConditions')}
+          >
+            <MaterialIcons name="description" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>Términos y Condiciones</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+        </View>
         
         {/* Recent Activity Section */}
         <View style={styles.sectionContainer}>

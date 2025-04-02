@@ -27,8 +27,8 @@ import { useLocation } from '../hooks/useLocation';
 import { useAuth } from '../context/AuthContext';
 import { firebaseService } from '../services/firebaseService';
 import { Promotion } from '../types/businessTypes';
-// Add the import for chatService
-import { chatService } from '../../services/ChatService';
+// Comentamos esta importación ya que no se utiliza directamente
+// import { chatService } from '../../services/ChatService';
 // Add the import for ChatContext
 import { useChat } from '../context/ChatContext';
 import firebase from 'firebase/compat/app';
@@ -47,10 +47,11 @@ import ReviewList from '../components/ReviewList'; // Use the component we updat
 // Constants
 const HEADER_HEIGHT = 350;
 const GRADIENT_COLORS = {
-  primary: ['#007AFF', '#00C2FF'] as readonly [string, string],
-  secondary: ['#FF9500', '#FF2D55'] as readonly [string, string],
-  success: ['#34C759', '#32D74B'] as readonly [string, string],
-  danger: ['#FF3B30', '#FF2D55'] as readonly [string, string]
+  primary: ['#007aff', '#0066CC'] as readonly [string, string],
+  call: ['#007aff', '#4CD964'] as readonly [string, string],
+  email: ['#007aff', '#64D2FF'] as readonly [string, string],
+  chat: ['#007aff', '#5E5CE6'] as readonly [string, string],
+  reserve: ['#007aff', '#0066CC'] as readonly [string, string]
 };
 
 // Types
@@ -316,85 +317,105 @@ const BusinessDetailScreen: React.FC = () => {
         return;
       }
       
-      console.log(`[BusinessDetailScreen] Iniciando chat con propietario: ${business.createdBy} para negocio: ${business.id}`);
+      console.log('[BusinessDetail] Iniciando chat con propietario:', business.createdBy);
+      console.log('[BusinessDetail] Usuario actual:', user.uid);
+      console.log('[BusinessDetail] Negocio ID:', business.id);
       
-      // Obtener información del propietario para tener nombre más amigable
-      let ownerName = 'Propietario';
-      let ownerPhotoURL: string | undefined = undefined;
+      // Obtener información del propietario
+      const ownerDoc = await firebase.firestore()
+        .collection('users')
+        .doc(business.createdBy)
+        .get();
       
-      try {
-        const ownerDoc = await firebase.firestore()
-          .collection('users')
-          .doc(business.createdBy)
-          .get();
-        
-        if (ownerDoc.exists) {
-          const ownerData = ownerDoc.data();
-          // Usar un nombre por defecto si no hay displayName
-          ownerName = ownerData?.displayName || 'Propietario';
-          ownerPhotoURL = ownerData?.photoURL || undefined;
-          
-          console.log(`[BusinessDetailScreen] Propietario encontrado: ${ownerName}`);
-        } else {
-          console.warn(`[BusinessDetailScreen] No se encontró documento para el propietario ${business.createdBy}`);
-        }
-      } catch (dbError) {
-        console.error('[BusinessDetailScreen] Error al acceder a datos del propietario:', dbError);
-        // Continuamos con el nombre predeterminado
+      if (!ownerDoc.exists) {
+        console.error('[BusinessDetail] No se pudo encontrar al propietario con ID:', business.createdBy);
+        throw new Error('No se pudo encontrar al propietario del negocio');
       }
       
-      // Verificar que tenemos la función createConversation
-      if (!createConversation || typeof createConversation !== 'function') {
-        console.error('[BusinessDetailScreen] createConversation no está disponible en el contexto de chat');
-        throw new Error('La funcionalidad de chat no está disponible en este momento');
+      const ownerData = ownerDoc.data();
+      console.log('[BusinessDetail] Datos del propietario:', ownerData);
+      // Usar un nombre por defecto si no hay displayName
+      const ownerName = ownerData?.displayName || 'Propietario';
+      
+      // Primero buscar si ya existe una conversación con este negocio para no duplicar
+      console.log('[BusinessDetail] Verificando si ya existe una conversación...');
+      const existingChats = await firebase.firestore()
+        .collection('conversations')
+        .where('participants', 'array-contains', user.uid)
+        .where('businessId', '==', business.id)
+        .get();
+      
+      let conversationId = null;
+      
+      // Si ya existe una conversación, usarla
+      if (!existingChats.empty) {
+        console.log('[BusinessDetail] Conversación existente encontrada');
+        // Usar la primera conversación encontrada
+        conversationId = existingChats.docs[0].id;
+        console.log('[BusinessDetail] Usando conversación existente:', conversationId);
+      } else {
+        // Si no existe, crear una nueva
+        console.log('[BusinessDetail] Creando nueva conversación...');
+        conversationId = await createConversation(
+          business.createdBy, // recipientId = propietario del negocio
+          ownerName,
+          business.id,      // businessId
+          business.name     // businessName
+        );
       }
-      
-      // Intentar crear o recuperar conversación existente
-      console.log(`[BusinessDetailScreen] Llamando a createConversation...`);
-      console.log(`  - recipientId: ${business.createdBy}`);
-      console.log(`  - recipientName: ${ownerName}`);
-      console.log(`  - businessId: ${business.id}`);
-      console.log(`  - businessName: ${business.name}`);
-      
-      const conversationId = await createConversation(
-        business.createdBy, // recipientId = propietario del negocio
-        ownerName,          // nombre del propietario 
-        business.id,        // businessId
-        business.name       // businessName
-      );
-      
       if (!conversationId) {
-        console.error('[BusinessDetailScreen] createConversation devolvió null o undefined');
-        throw new Error('No se pudo crear o recuperar la conversación');
+        console.error('[BusinessDetail] createConversation devolvió null');
+        throw new Error('No se pudo crear la conversación - ID nulo');
       }
       
-      console.log(`[BusinessDetailScreen] Conversación creada/recuperada: ${conversationId}`);
+      console.log('[BusinessDetail] Conversación creada con ID:', conversationId);
       
-      // Navegación a la pantalla de chat
-      navigation.navigate('Chat', { conversationId });
+      // Esperar explícitamente para asegurar que la conversación esté creada
+      console.log('[BusinessDetail] Esperando para asegurar la sincronización...');
+      await new Promise(resolve => setTimeout(resolve, 1500));
       
-      // Actualizar lista de conversaciones en background
-      setTimeout(() => {
-        if (refreshConversations && typeof refreshConversations === 'function') {
-          refreshConversations().catch(err => {
-            console.error('[BusinessDetailScreen] Error actualizando conversaciones en background:', err);
-          });
-        }
-      }, 500);
+      // Actualizar lista de conversaciones antes de navegar
+      try {
+        console.log('[BusinessDetail] Actualizando lista de conversaciones...');
+        await refreshConversations();
+        console.log('[BusinessDetail] Lista de conversaciones actualizada');
+      } catch (refreshError) {
+        console.error('[BusinessDetail] Error al actualizar lista de conversaciones:', refreshError);
+        // Continuamos igual
+      }
+      
+      // Verificar que la conversación exista en Firestore antes de navegar
+      console.log('[BusinessDetail] Verificando que la conversación exista...');
+      const convDoc = await firebase.firestore()
+        .collection('conversations')
+        .doc(conversationId)
+        .get();
+      
+      if (!convDoc.exists) {
+        console.error('[BusinessDetail] ¡La conversación no existe en Firestore! Esperando más...');
+        // Esperar más tiempo si la conversación aún no existe
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+      
+      console.log('[BusinessDetail] Navegando a Chat con ID:', conversationId);
+      
+      // Importante: resetear el estado de carga antes de navegar
+      setIsLoading(false);
+      
+      // En lugar de navegar directamente a Chat, vamos a la pantalla de Conversaciones
+      // Esto evita los problemas de carga infinita en ChatScreen
+      console.log('[BusinessDetail] Navegando a Conversaciones para evitar problemas de carga...');
+      navigation.navigate('MainTabs', { screen: 'Conversations' });
+      
+      // Mostramos mensaje de éxito al usuario
+      Alert.alert(
+        'Conversación creada',
+        'La conversación ha sido creada correctamente. Accede a ella desde la pestaña de Mensajes.'
+      );
       
     } catch (error) {
-      console.error('[BusinessDetailScreen] Error completo iniciando chat:', error);
-      let errorMessage = 'No se pudo iniciar la conversación.';
+      console.error('[BusinessDetail] Error detallado:', error);
       
-      if (error instanceof Error) {
-        errorMessage += ' ' + error.message;
-      }
-      
-      Alert.alert(
-        'Error', 
-        errorMessage + ' Intente nuevamente más tarde.',
-        [{ text: 'OK' }]
-      );
     } finally {
       setIsLoading(false);
     }
@@ -472,16 +493,8 @@ const BusinessDetailScreen: React.FC = () => {
     return tabs;
   }, [business, isRestaurant]);
 
-  // Cálculo de la posición del indicador de pestañas
-  const tabIndicatorPosition = useMemo(() => {
-    const index = availableTabs.indexOf(activeTab);
-    const tabWidth = dimensions.width / availableTabs.length;
-    
-    return {
-      width: tabWidth,
-      transform: [{ translateX: tabWidth * index }]
-    };
-  }, [activeTab, availableTabs, dimensions.width]);
+  // Ya no necesitamos calcular la posición del indicador
+  // Eliminamos el cálculo obsoleto
 
   // Para manejar el scroll animado
   const handleScroll = Animated.event(
@@ -821,8 +834,8 @@ const BusinessDetailScreen: React.FC = () => {
                     tab === 'promociones' ? 'local-offer' :
                     tab === 'reservas' ? 'event-available' : 'rate-review'
                   } 
-                  size={22} 
-                  color={activeTab === tab ? "#FFFFFF" : "#8E8E93"} 
+                  size={24} 
+                  color={activeTab === tab ? "#FFFFFF" : "#007aff"} 
                 />
                 <Text style={[
                   styles.tabText, 
@@ -837,11 +850,7 @@ const BusinessDetailScreen: React.FC = () => {
                 </Text>
               </TouchableOpacity>
             ))}
-            {/* Indicador animado */}
-            <Animated.View style={[
-              styles.tabIndicator,
-              tabIndicatorPosition
-            ]} />
+            {/* Eliminamos el indicador animado ya que no lo necesitamos más */}
           </Animated.View>
           
           {/* Contenido de la pestaña de Información */}
@@ -877,7 +886,7 @@ const BusinessDetailScreen: React.FC = () => {
                     accessibilityRole="button"
                     accessibilityLabel={`Llamar a ${business.phone}`}
                   >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#34C759'}]}>
+                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
                       <MaterialIcons name="phone" size={20} color="white" />
                     </View>
                     <Text style={styles.contactText}>{business.phone}</Text>
@@ -892,7 +901,7 @@ const BusinessDetailScreen: React.FC = () => {
                     accessibilityRole="button"
                     accessibilityLabel={`Enviar correo a ${business.email}`}
                   >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#FF9500'}]}>
+                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
                       <MaterialIcons name="email" size={20} color="white" />
                     </View>
                     <Text style={styles.contactText}>{business.email}</Text>
@@ -901,7 +910,7 @@ const BusinessDetailScreen: React.FC = () => {
                 )}
                 {business.address && (
                   <View style={styles.contactItem}>
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#FF2D55'}]}>
+                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
                       <MaterialIcons name="place" size={20} color="white" />
                     </View>
                     <Text style={styles.contactText}>{business.address}</Text>
@@ -921,7 +930,7 @@ const BusinessDetailScreen: React.FC = () => {
                     accessibilityRole="link"
                     accessibilityLabel={`Visitar sitio web ${business.website}`}
                   >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#007AFF'}]}>
+                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
                       <MaterialIcons name="public" size={20} color="white" />
                     </View>
                     <Text style={[styles.contactText, styles.websiteText]} numberOfLines={1}>{business.website}</Text>
@@ -1153,12 +1162,12 @@ const BusinessDetailScreen: React.FC = () => {
               accessibilityLabel="Llamar al negocio"
             >
               <LinearGradient
-                colors={GRADIENT_COLORS.success}
+                colors={GRADIENT_COLORS.call}
                 style={styles.actionButtonGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 0, y: 1 }}
               >
-                <MaterialIcons name="phone" size={22} color="white" />
+                <MaterialIcons name="phone" size={28} color="white" />
                 <Text style={styles.actionButtonText}>Llamar</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1173,12 +1182,12 @@ const BusinessDetailScreen: React.FC = () => {
               accessibilityLabel="Enviar correo al negocio"
             >
               <LinearGradient
-                colors={GRADIENT_COLORS.secondary}
+                colors={GRADIENT_COLORS.email}
                 style={styles.actionButtonGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 0, y: 1 }}
               >
-                <MaterialIcons name="email" size={22} color="white" />
+                <MaterialIcons name="email" size={28} color="white" />
                 <Text style={styles.actionButtonText}>Correo</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1195,16 +1204,16 @@ const BusinessDetailScreen: React.FC = () => {
               accessibilityLabel="Chatear con el negocio"
             >
               <LinearGradient
-                colors={['#5856D6', '#AF52DE']}
+                colors={GRADIENT_COLORS.chat}
                 style={styles.actionButtonGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 0, y: 1 }}
               >
                 {isLoading ? (
                   <ActivityIndicator size="small" color="white" />
                 ) : (
                   <>
-                    <MaterialIcons name="chat" size={22} color="white" />
+                    <MaterialIcons name="chat" size={28} color="white" />
                     <Text style={styles.actionButtonText}>Chatear</Text>
                   </>
                 )}
@@ -1221,12 +1230,12 @@ const BusinessDetailScreen: React.FC = () => {
               accessibilityLabel="Hacer reservación"
             >
               <LinearGradient
-                colors={GRADIENT_COLORS.primary}
+                colors={GRADIENT_COLORS.reserve}
                 style={styles.actionButtonGradient}
                 start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                end={{ x: 0, y: 1 }}
               >
-                <MaterialIcons name="event-available" size={22} color="white" />
+                <MaterialIcons name="event-available" size={28} color="white" />
                 <Text style={styles.actionButtonText}>Reservar</Text>
               </LinearGradient>
             </TouchableOpacity>
@@ -1548,61 +1557,67 @@ const styles = StyleSheet.create({
   },
   tabsContainer: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
+    justifyContent: 'space-evenly',
+    flexWrap: 'wrap',
     marginBottom: 20,
     position: 'relative',
-    backgroundColor: '#E5E5EA40',
-    borderRadius: 30,
-    padding: 4,
+    backgroundColor: '#F6F9FF',
+    borderRadius: 16,
+    padding: 10,
     marginTop: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
   },
   tab: {
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-    borderRadius: 25,
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     zIndex: 1,
-    flex: 1,
+    marginVertical: 4,
+    width: '22%',
   },
   activeTab: {
-    backgroundColor: 'transparent',
+    backgroundColor: '#007aff',
   },
   tabText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 4,
-    fontWeight: '500',
+    fontSize: 11,
+    color: '#666666',
+    marginTop: 6,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   activeTabText: {
     color: 'white',
     fontWeight: 'bold',
   },
   tabIndicator: {
-    position: 'absolute',
-    height: '90%',
-    backgroundColor: '#007AFF',
-    borderRadius: 25,
-    top: '5%',
-    left: 4,
-    right: 4,
-    zIndex: 0,
+    display: 'none', // Quitamos el indicador para usar un estilo más simple
   },
   card: {
     backgroundColor: 'white',
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    padding: 18,
+    marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007aff',
   },
   cardSectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#333333',
-    marginBottom: 12,
+    color: '#007aff',
+    marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,122,255,0.1)',
   },
   description: {
     fontSize: 16,
@@ -1615,30 +1630,40 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F5',
+    borderBottomColor: 'rgba(0,122,255,0.08)',
+    paddingHorizontal: 6,
   },
   contactIconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   contactText: {
     fontSize: 16,
-    color: '#333333',
+    color: '#2C3E50',
     flex: 1,
+    fontWeight: '500',
   },
   websiteText: {
-    color: '#007AFF',
+    color: '#007aff',
   },
   noInfoText: {
     fontSize: 16,
     color: '#8E8E93',
     fontStyle: 'italic',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: 16,
+    padding: 10,
+    backgroundColor: 'rgba(142,142,147,0.05)',
+    borderRadius: 8,
   },
   galleryCard: {
     backgroundColor: 'white',
@@ -1673,38 +1698,43 @@ const styles = StyleSheet.create({
   actionButtonsContainer: {
     flexDirection: 'row',
     padding: 16,
+    paddingHorizontal: 20,
     backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -3 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 5,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    justifyContent: 'space-evenly',
   },
   actionButton: {
-    flex: 1,
-    borderRadius: 16,
-    marginHorizontal: 8,
+    width: 76,
+    height: 76,
+    borderRadius: 20,
+    marginHorizontal: 6,
     overflow: 'hidden',
-    elevation: 2,
+    elevation: 4,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   actionButtonGradient: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 16,
+    padding: 8,
     width: '100%',
+    height: '100%',
   },
   actionButtonText: {
     color: 'white',
     fontWeight: 'bold',
-    marginLeft: 8,
-    fontSize: 16,
+    fontSize: 12,
+    marginTop: 6,
+    textAlign: 'center',
   },
   reviewFormOverlay: {
     position: 'absolute',

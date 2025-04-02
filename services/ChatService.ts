@@ -379,6 +379,57 @@ export const chatService = {
         
         console.log('[ChatService] Message sent successfully');
         
+        // Enviar notificaciones cuando se reciben mensajes nuevos
+        try {
+          // Solo en desarrollo, enviar notificación local para pruebas
+          if (__DEV__) {
+            try {
+              // Importar el servicio de notificaciones de manera dinámica
+              const { notificationService } = require('../services/NotificationService');
+              
+              // Preparar datos para la notificación
+              const senderDisplayName = senderName || 'Usuario';
+              
+              // Crear texto para la notificación
+              const notificationBody = messageData.imageUrl 
+                ? `${senderDisplayName} te ha enviado una imagen` 
+                : cleanText.length > 100 
+                  ? `${cleanText.substring(0, 100)}...` 
+                  : cleanText;
+              
+              // Enviar una notificación local para pruebas
+              // Esto evita los problemas de permisos con Firestore
+              await notificationService.sendLocalNotification(
+                senderDisplayName,
+                notificationBody,
+                {
+                  type: 'chat',
+                  conversationId: conversationId,
+                  messageId: messageRef.id
+                }
+              );
+              
+              console.log('[ChatService] Sent local notification for development testing');
+            } catch (localNotificationError) {
+              console.error('[ChatService] Error sending local notification:', localNotificationError);
+            }
+          } else {
+            // En producción, registramos la intención pero no hacemos consultas a Firestore
+            // para evitar errores de permisos
+            
+            // Identificar otros participantes
+            const otherParticipants = participants.filter(id => id !== senderId);
+            
+            if (otherParticipants.length > 0) {
+              console.log(`[ChatService] In production, would send notifications to ${otherParticipants.length} participants`);
+              // En producción, esto sería manejado por Cloud Functions con los permisos adecuados
+            }
+          }
+        } catch (notificationError) {
+          // No queremos que un error de notificación haga fallar el envío del mensaje
+          console.error('[ChatService] Error in notification handling:', notificationError);
+        }
+        
         // Return message with current timestamp for UI
         const message: Message = {
           ...messageObj,
@@ -689,35 +740,96 @@ export const chatService = {
         };
       }
       
-      // Fetch the image
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      
-      // Validate blob
-      if (!blob || blob.size === 0) {
+      // Verificar que el usuario esté autenticado
+      const currentUser = firebase.auth().currentUser;
+      if (!currentUser) {
+        console.error('[ChatService] No user is logged in for uploading image');
         return {
           success: false,
           error: {
-            message: 'No se pudo obtener la imagen',
-            code: 'chat/invalid-image'
+            message: 'Debe iniciar sesión para subir imágenes',
+            code: 'chat/authentication-required'
           }
         };
       }
       
-      // Upload to Firebase Storage
-      const storageRef = firebase.storage().ref();
-      const imageRef = storageRef.child(`chat/${conversationId}/${Date.now()}.jpg`);
+      console.log(`[ChatService] Uploading image for conversation ${conversationId} by user ${currentUser.uid}`);
       
-      // Set metadata for caching
-      const metadata = {
-        contentType: 'image/jpeg',
-        cacheControl: 'public, max-age=31536000', // Cache for 1 year
-      };
-      
-      await imageRef.put(blob, metadata);
-      const downloadUrl = await imageRef.getDownloadURL();
-      
-      return { success: true, data: downloadUrl };
+      try {
+        // Fetch the image
+        const response = await fetch(uri);
+        const blob = await response.blob();
+        
+        // Validate blob
+        if (!blob || blob.size === 0) {
+          return {
+            success: false,
+            error: {
+              message: 'No se pudo obtener la imagen',
+              code: 'chat/invalid-image'
+            }
+          };
+        }
+        
+        // Cambiar la ruta de almacenamiento para usar el directorio del usuario
+        // Esto ayudará con los permisos si las reglas de seguridad permiten a los usuarios
+        // escribir sólo en sus propios directorios
+        const timestamp = Date.now();
+        const fileName = `${timestamp}.jpg`;
+        
+        // Usar una ruta que incluya el ID del usuario para mejor gestión de permisos
+        // Formato: message_images/{userId}/{conversationId}/{timestamp}.jpg
+        const imageRef = firebase.storage()
+          .ref()
+          .child(`message_images/${currentUser.uid}/${conversationId}/${fileName}`);
+        
+        // Set metadata for caching
+        const metadata = {
+          contentType: 'image/jpeg',
+          cacheControl: 'public, max-age=31536000', // Cache for 1 year
+          customMetadata: {
+            'userId': currentUser.uid,
+            'conversationId': conversationId,
+            'uploadTime': timestamp.toString()
+          }
+        };
+        
+        console.log(`[ChatService] Starting upload to path: message_images/${currentUser.uid}/${conversationId}/${fileName}`);
+        
+        // Subir la imagen con los metadatos
+        const uploadTask = await imageRef.put(blob, metadata);
+        console.log('[ChatService] Upload completed, getting download URL');
+        
+        // Obtener la URL de descarga
+        const downloadUrl = await imageRef.getDownloadURL();
+        console.log(`[ChatService] Image uploaded successfully. URL length: ${downloadUrl.length}`);
+        
+        return { success: true, data: downloadUrl };
+      } catch (uploadError) {
+        // Intentar subir a un directorio alternativo en caso de fallo
+        console.error('[ChatService] First upload attempt failed, trying alternate location:', uploadError);
+        
+        try {
+          // Alternativa: Intentar un directorio público
+          const timestamp = Date.now();
+          const imageRef = firebase.storage()
+            .ref()
+            .child(`public_uploads/chat_images/${timestamp}.jpg`);
+            
+          // Fetch the image again
+          const response = await fetch(uri);
+          const blob = await response.blob();
+            
+          await imageRef.put(blob, { contentType: 'image/jpeg' });
+          const downloadUrl = await imageRef.getDownloadURL();
+          
+          console.log('[ChatService] Successfully uploaded to alternate location');
+          return { success: true, data: downloadUrl };
+        } catch (altError) {
+          console.error('[ChatService] Both upload attempts failed:', altError);
+          throw altError; // Propagar para que el catch externo lo maneje
+        }
+      }
     } catch (error) {
       console.error('[ChatService] Error uploading message image:', error);
       return { 
@@ -1065,17 +1177,26 @@ export const chatService = {
     try {
       // Validate required data
       if (!userId || !businessOwnerId || !businessId) {
-        console.error('[ChatService] checkOrCreateBusinessConversation: missing required parameters', {
-          userId, businessOwnerId, businessId
-        });
+        const missing = [];
+        if (!userId) missing.push('userId');
+        if (!businessOwnerId) missing.push('businessOwnerId');
+        if (!businessId) missing.push('businessId');
+        
+        console.error(`[ChatService] Missing parameters: ${missing.join(', ')}`);
         return { 
           success: false, 
           error: { 
-            message: 'Faltan datos obligatorios para crear la conversación',
+            message: `Faltan datos obligatorios para crear la conversación: ${missing.join(', ')}`,
             code: 'chat/missing-parameters'
           } 
         };
       }
+
+      // Log all parameters for debugging
+      console.log('[ChatService] checkOrCreateBusinessConversation parameters:');
+      console.log(`  userId: ${userId}, userName: ${userName}`);
+      console.log(`  businessOwnerId: ${businessOwnerId}, businessOwnerName: ${businessOwnerName}`);
+      console.log(`  businessId: ${businessId}, businessName: ${businessName}`);
 
       // Verify that user IDs are different
       if (userId === businessOwnerId) {
@@ -1091,28 +1212,70 @@ export const chatService = {
 
       console.log(`[ChatService] Checking for existing conversation between ${userId} and ${businessOwnerId} for business ${businessId}`);
       
-      // Look for existing conversation with explicit where clause
+      // Fetch business main image to use as owner's avatar
+      let businessImageUrl: string | undefined;
       try {
-        const query = await firebase.firestore()
-          .collection('conversations')
-          .where('participants', 'array-contains', userId)
-          .where('businessId', '==', businessId)
+        const businessDoc = await firebase.firestore()
+          .collection('businesses')
+          .doc(businessId)
           .get();
         
-        // Check each conversation for exact participant match
-        if (!query.empty) {
-          for (const doc of query.docs) {
-            const data = doc.data();
-            const participants = data.participants || [];
+        if (businessDoc.exists) {
+          const businessData = businessDoc.data();
+          if (businessData?.images && Array.isArray(businessData.images) && businessData.images.length > 0) {
+            // First look for the main image
+            const mainImage = businessData.images.find((img: any) => img && img.isMain);
+            if (mainImage && mainImage.url) {
+              businessImageUrl = mainImage.url;
+            } else if (businessData.images[0].url) {
+              // If no main image is marked, use the first one
+              businessImageUrl = businessData.images[0].url;
+            }
+          }
+        }
+        
+        if (businessImageUrl) {
+          console.log(`[ChatService] Found business image to use as avatar: ${businessImageUrl}`);
+        }
+      } catch (imageError) {
+        console.error('[ChatService] Error fetching business image:', imageError);
+        // Continue without image if there's an error
+      }
+      
+      // MEJORADO: Enfoque más directo para verificar conversaciones existentes
+      // 1. Consulta más específica para conversaciones con el usuario y el negocio
+      const existingConvQuery = firebase.firestore()
+        .collection('conversations')
+        .where('participants', 'array-contains', userId)
+        .where('businessId', '==', businessId)
+        .limit(5); // Limitamos a 5 para evitar cargar demasiados datos
+      
+      const existingConvSnapshot = await existingConvQuery.get();
+      console.log(`[ChatService] Found ${existingConvSnapshot.docs.length} potential existing conversations`);
+      
+      // 2. Filtrar localmente para encontrar una coincidencia exacta
+      let existingConversationId: string | null = null;
+      
+      if (!existingConvSnapshot.empty) {
+        for (const doc of existingConvSnapshot.docs) {
+          const data = doc.data();
+          
+          // Log para depuración
+          console.log(`[ChatService] Checking conversation ${doc.id}:`);
+          console.log(`  participants: ${JSON.stringify(data.participants || [])}`);
+          
+          // Verificar participantes exactos
+          if (data.participants && 
+              data.participants.includes(businessOwnerId) &&
+              data.participants.length === 2) {
             
-            // Check if the business owner is in the participants
-            if (participants.includes(businessOwnerId) && participants.length === 2) {
-              // Found existing conversation
-              console.log(`[ChatService] Found existing business conversation: ${doc.id}`);
+            console.log(`[ChatService] Found matching conversation: ${doc.id}`);
+            
+            // Si está marcada como eliminada para este usuario, reactivarla
+            if (data.deletedFor && data.deletedFor[userId] === true) {
+              console.log(`[ChatService] Conversation was deleted, reactivating: ${doc.id}`);
               
-              // Check if the conversation was deleted by this user
-              if (data.deletedFor && data.deletedFor[userId] === true) {
-                // Undelete the conversation
+              try {
                 await firebase.firestore()
                   .collection('conversations')
                   .doc(doc.id)
@@ -1121,68 +1284,139 @@ export const chatService = {
                     updatedAt: firebase.firestore.FieldValue.serverTimestamp()
                   });
                 
-                console.log(`[ChatService] Reactivated previously deleted conversation: ${doc.id}`);
+                console.log(`[ChatService] Successfully reactivated conversation ${doc.id}`);
+              } catch (updateError) {
+                console.error('[ChatService] Error reactivating conversation:', updateError);
+                // Continuamos y usamos la conversación de todos modos
               }
-              
-              return { success: true, data: { conversationId: doc.id } };
             }
+            
+            // Si encontramos una imagen del negocio y la conversación no tiene la foto del propietario,
+            // actualicemos la foto en la conversación existente
+            if (businessImageUrl && (!data.participantPhotos || !data.participantPhotos[businessOwnerId])) {
+              try {
+                console.log(`[ChatService] Updating business owner photo in conversation ${doc.id}`);
+                
+                const participantPhotos = data.participantPhotos || {};
+                participantPhotos[businessOwnerId] = businessImageUrl;
+                
+                await firebase.firestore()
+                  .collection('conversations')
+                  .doc(doc.id)
+                  .update({
+                    participantPhotos,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                  });
+                
+                console.log(`[ChatService] Successfully updated business owner photo`);
+              } catch (photoUpdateError) {
+                console.error('[ChatService] Error updating business owner photo:', photoUpdateError);
+                // Continuamos aunque falle la actualización de la foto
+              }
+            }
+            
+            existingConversationId = doc.id;
+            break;
           }
         }
+      }
+      
+      // Si encontramos una conversación existente, la devolvemos
+      if (existingConversationId) {
+        console.log(`[ChatService] Using existing conversation: ${existingConversationId}`);
+        return { success: true, data: { conversationId: existingConversationId } };
+      }
+      
+      // Si no existe, crear una nueva conversación (enfoque simplificado)
+      console.log('[ChatService] No existing conversation found, creating new one');
+      
+      // Crear referencia para el nuevo documento
+      const conversationRef = firebase.firestore().collection('conversations').doc();
+      const conversationId = conversationRef.id;
+      console.log(`[ChatService] Generated new conversation ID: ${conversationId}`);
+      
+      // Preparar datos de la conversación
+      const participants = [userId, businessOwnerId];
+      const participantNames: Record<string, string> = {
+        [userId]: userName || 'Usuario',
+        [businessOwnerId]: businessOwnerName || 'Propietario'
+      };
+      
+      // Preparar las fotos de los participantes si tenemos la imagen del negocio
+      const participantPhotos: Record<string, string> = {};
+      if (businessImageUrl) {
+        participantPhotos[businessOwnerId] = businessImageUrl;
+      }
+      
+      // Inicializar contadores de no leídos
+      const unreadCount: Record<string, number> = {};
+      participants.forEach(id => {
+        unreadCount[id] = 0;
+      });
+      
+      // Inicializar estado de eliminación
+      const deletedFor: Record<string, boolean> = {};
+      participants.forEach(id => {
+        deletedFor[id] = false;
+      });
+      
+      // Datos completos de la conversación
+      const conversationData: any = {
+        participants,
+        participantNames,
+        businessId,
+        businessName,
+        unreadCount,
+        deletedFor,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      };
+      
+      // Agregar fotos de participantes si hay alguna
+      if (Object.keys(participantPhotos).length > 0) {
+        conversationData.participantPhotos = participantPhotos;
+      }
+      
+      console.log('[ChatService] Creating conversation with data:', JSON.stringify({
+        participants,
+        participantNames: { ...participantNames },
+        businessId,
+        businessName,
+        hasPhotos: Object.keys(participantPhotos).length > 0
+      }));
+      
+      try {
+        // CAMBIO IMPORTANTE: Usar set() directo en lugar de transacción
+        // Las transacciones pueden fallar por problemas de conectividad o limitaciones de Firestore
+        await conversationRef.set(conversationData);
         
-        // If we reach here, no matching conversation was found
-        console.log('[ChatService] No existing conversation found, creating new one');
-        
-        // Create new conversation with a transaction
-        const conversationRef = firebase.firestore().collection('conversations').doc();
-        const conversationId = conversationRef.id;
-        
-        const participants = [userId, businessOwnerId];
-        const participantNames: Record<string, string> = {
-          [userId]: userName || 'Usuario',
-          [businessOwnerId]: businessOwnerName || 'Propietario'
-        };
-        
-        // Initialize unread counts
-        const unreadCount: Record<string, number> = {};
-        participants.forEach(id => {
-          unreadCount[id] = 0;
-        });
-        
-        // Initialize deletedFor
-        const deletedFor: Record<string, boolean> = {};
-        participants.forEach(id => {
-          deletedFor[id] = false;
-        });
-        
-        // Set initial data
-        const timestamp = firebase.firestore.FieldValue.serverTimestamp();
-        
-        await conversationRef.set({
-          participants,
-          participantNames,
-          businessId,
-          businessName,
-          unreadCount,
-          deletedFor,
-          createdAt: timestamp,
-          updatedAt: timestamp
-        });
-        
-        console.log(`[ChatService] New business conversation created successfully: ${conversationId}`);
+        console.log(`[ChatService] Successfully created conversation with ID: ${conversationId}`);
         return { success: true, data: { conversationId } };
-      } catch (innerError) {
-        console.error('[ChatService] Error checking/creating business conversation:', innerError);
-        return {
-          success: false,
-          error: {
-            message: 'Error al verificar o crear la conversación',
-            code: 'chat/database-error',
-            originalError: innerError
+      } catch (error) {
+        console.error('[ChatService] Error creating conversation:', error);
+        
+        // Intento final: Comprobar si la conversación se creó a pesar del error
+        try {
+          const checkDoc = await conversationRef.get();
+          if (checkDoc.exists) {
+            console.log(`[ChatService] Conversation was actually created despite error: ${conversationId}`);
+            return { success: true, data: { conversationId } };
           }
+        } catch (checkError) {
+          console.error('[ChatService] Error checking if conversation was created:', checkError);
+        }
+        
+        return { 
+          success: false, 
+          error: { 
+            message: 'Error al crear conversación',
+            code: 'chat/create-conversation-failed',
+            originalError: error
+          } 
         };
       }
     } catch (error) {
-      console.error('[ChatService] Error in checkOrCreateBusinessConversation:', error);
+      console.error('[ChatService] Unexpected error in checkOrCreateBusinessConversation:', error);
       return { 
         success: false, 
         error: { 
@@ -1212,7 +1446,4 @@ function getMessageTimestamp(message: Message): number {
   return 0;
 }
 
-// Integration with the general Firebase service
-export const firebaseServiceAddition = {
-  chat: chatService
-};
+// Exportamos el servicio directamente

@@ -45,6 +45,10 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   const [isOffline, setIsOffline] = useState<boolean>(false);
   
+  // Referencia para almacenar IDs de mensajes que ya se notificaron
+  // Usamos useRef para mantener este valor sin causar re-renders
+  const notifiedMessageIds = useRef<Set<string>>(new Set());
+  
   // Initialize network connectivity listener
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
@@ -105,11 +109,20 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         )
       );
       
+      // Limpiar el registro de mensajes ya notificados para esta conversación
+      // porque ya han sido leídos
+      notifiedConversations.current.set(activeConversation.id, 0);
+      
+      // Marcar todos los mensajes como notificados para evitar nuevas notificaciones
+      activeMessages.forEach(msg => {
+        notifiedMessageIds.current.add(msg.id);
+      });
+      
       console.log('[ChatContext] Successfully marked as read');
     } catch (error) {
       console.error('[ChatContext] Error marking conversation as read:', error);
     }
-  }, [user, activeConversation, unreadTotal, isOffline]);
+  }, [user, activeConversation, unreadTotal, isOffline, activeMessages]);
   
   // Effect to automatically clean up duplicate conversations
   useEffect(() => {
@@ -317,10 +330,76 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, conversations]);
 
+  // Referencia para almacenar las conversaciones que ya se han notificado
+  const notifiedConversations = useRef<Map<string, number>>(new Map());
+  
   // Effect to ensure unread count is updated when conversations change
   useEffect(() => {
     updateUnreadCount();
-  }, [updateUnreadCount]);
+    
+    // Detectar si hay conversaciones con mensajes nuevos para mostrar notificaciones
+    if (user && conversations.length > 0) {
+      // Solo notificar si hay conversaciones con mensajes no leídos
+      const conversationsWithUnread = conversations.filter(conv => 
+        (conv.unreadCount?.[user.uid] || 0) > 0);
+      
+      if (conversationsWithUnread.length > 0) {
+        try {
+          // Si hay una conversación activa, no notificar por mensajes en esa conversación
+          const convsToNotify = activeConversationId 
+            ? conversationsWithUnread.filter(conv => conv.id !== activeConversationId)
+            : conversationsWithUnread;
+          
+          // Filtrar para incluir sólo conversaciones con nuevos mensajes no leídos
+          // o que no hayan sido notificadas previamente
+          const conversationsToNotify = convsToNotify.filter(conv => {
+            const currentUnreadCount = conv.unreadCount?.[user.uid] || 0;
+            const previousUnreadCount = notifiedConversations.current.get(conv.id) || 0;
+            
+            // Si hay más mensajes no leídos que antes, o no se ha notificado previamente
+            return currentUnreadCount > previousUnreadCount;
+          });
+          
+          // Si hay conversaciones para notificar, mostrar notificaciones
+          if (conversationsToNotify.length > 0) {
+            // Importar el servicio de notificaciones
+            const notificationService = require('../../services/NotificationService').notificationService;
+            
+            // Mostrar notificación por la primera conversación con mensajes no leídos
+            const firstUnreadConv = conversationsToNotify[0];
+            const senderName = firstUnreadConv.participantNames?.[
+              firstUnreadConv.participants.find(p => p !== user.uid) || ''
+            ] || 'Nuevo mensaje';
+            
+            console.log(`[ChatContext] Showing notification for conversation ${firstUnreadConv.id} with ${firstUnreadConv.unreadCount?.[user.uid]} unread messages`);
+            
+            notificationService.sendLocalNotification(
+              senderName,
+              firstUnreadConv.lastMessage?.text || 'Tienes mensajes nuevos',
+              {
+                type: 'chat',
+                conversationId: firstUnreadConv.id
+              }
+            ).catch((err: Error) => {
+              console.error('[ChatContext] Error sending notification for unread messages:', err);
+            });
+            
+            // Actualizar el contador de notificaciones en el ícono de la app
+            notificationService.setBadgeCount(unreadTotal).catch((err: Error) => {
+              console.error('[ChatContext] Error setting badge count:', err);
+            });
+            
+            // Actualizar los contadores de mensajes no leídos notificados
+            conversationsToNotify.forEach(conv => {
+              notifiedConversations.current.set(conv.id, conv.unreadCount?.[user.uid] || 0);
+            });
+          }
+        } catch (error: unknown) {
+          console.error('[ChatContext] Error showing notifications for unread messages:', error);
+        }
+      }
+    }
+  }, [updateUnreadCount, conversations, user, activeConversationId, unreadTotal]);
   
   // Enhanced method to refresh conversations
   const refreshConversations = useCallback(async () => {
@@ -415,10 +494,16 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, isOffline]);
   
-  // Load a specific conversation
+  // Load a specific conversation - optimizado para mejor rendimiento
   const loadActiveConversation = useCallback(async (conversationId: string) => {
     if (!user) {
       console.error('[ChatContext] Cannot load active conversation: no user logged in');
+      return;
+    }
+    
+    // Una verificación adicional para evitar cargas innecesarias
+    if (activeConversation?.id === conversationId) {
+      console.log(`[ChatContext] Conversation ${conversationId} already loaded, skipping`);
       return;
     }
     
@@ -427,49 +512,142 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     
     try {
       console.log(`[ChatContext] Loading conversation data for ${conversationId}`);
-      // Load conversation data
+      
+      // Cargar datos de conversación
       const convResult = await chatService.getConversation(conversationId);
+      
+      // Comprobar si el ID activo ha cambiado durante la carga
+      if (activeConversationId !== conversationId) {
+        console.log(`[ChatContext] Active conversation changed during loading, aborting load for ${conversationId}`);
+        return;
+      }
+      
       if (convResult.success && convResult.data) {
-        // Check if it's marked as deleted for this user
+        // Verificar si está marcada como eliminada para este usuario
         if (convResult.data.deletedFor && convResult.data.deletedFor[user.uid]) {
           setError('Esta conversación ya no está disponible');
           setLoading(false);
           return;
         }
         
+        // Establecer la conversación activa
         setActiveConversation(convResult.data);
         
-        // Set up message listener
-        const unsubscribe = chatService.listenToMessages(
+        // Configurar oyente de mensajes - con protección para evitar carreras
+        const messageListener = chatService.listenToMessages(
           conversationId,
           (messages) => {
-            console.log(`[ChatContext] Received ${messages.length} messages update`);
-            setActiveMessages(messages);
+            // Solo actualizar mensajes si esta sigue siendo la conversación activa
+            if (activeConversationId === conversationId) {
+              console.log(`[ChatContext] Received ${messages.length} messages update`);
+              
+              // Verificar si hay mensajes nuevos para notificar
+              const lastLocalMessageTime = activeMessages.length > 0 
+                ? getTimestampMillis(activeMessages[activeMessages.length - 1].timestamp)
+                : 0;
+              
+              // Función para convertir diferentes tipos de timestamp a milisegundos
+              function getTimestampMillis(timestamp: any): number {
+                if (!timestamp) return 0;
+                
+                if (timestamp instanceof Date) {
+                  return timestamp.getTime();
+                } else if (typeof timestamp === 'string') {
+                  return new Date(timestamp).getTime();
+                } else if (timestamp && typeof timestamp.toDate === 'function') {
+                  // Para timestamps de Firestore
+                  return timestamp.toDate().getTime();
+                } else if (typeof timestamp === 'number') {
+                  return timestamp;
+                } else {
+                  return 0;
+                }
+              }
+              
+              // Buscar mensajes nuevos que no sean del usuario actual y que no hayan sido notificados previamente
+              const newMessages = messages.filter(msg => {
+                // Convertir timestamp a formato comparable
+                const msgTime = getTimestampMillis(msg.timestamp);
+                
+                // Verificar si es un mensaje nuevo que:
+                // 1. No es del usuario actual
+                // 2. Tiene una marca de tiempo posterior al último mensaje local
+                // 3. No ha sido marcado como leído
+                // 4. No ha sido notificado previamente (comprobamos el ID)
+                return msgTime > lastLocalMessageTime && 
+                       msg.senderId !== user?.uid && 
+                       msg.read !== true && 
+                       !notifiedMessageIds.current.has(msg.id);
+              });
+              
+              // Mostrar notificación para mensajes nuevos cuando la app está abierta pero no en la conversación
+              if (newMessages.length > 0) {
+                try {
+                  // Importar el servicio de notificaciones
+                  const notificationService = require('../../services/NotificationService').notificationService;
+                  
+                  // Para cada mensaje nuevo, generar una notificación
+                  newMessages.forEach(msg => {
+                    // Primero, marcar este mensaje como notificado
+                    notifiedMessageIds.current.add(msg.id);
+                    
+                    console.log(`[ChatContext] Sending notification for message ${msg.id}`);
+                    
+                    notificationService.sendLocalNotification(
+                      msg.senderName || 'Nuevo mensaje',
+                      msg.text || (msg.imageUrl ? 'Te envió una imagen' : 'Nuevo mensaje'),
+                      {
+                        type: 'chat',
+                        conversationId,
+                        messageId: msg.id
+                      }
+                    ).catch((err: Error) => {
+                      console.error('[ChatContext] Error sending notification:', err);
+                    });
+                  });
+                } catch (error: unknown) {
+                  console.error('[ChatContext] Error showing notification:', error);
+                }
+              }
+              
+              setActiveMessages(messages);
+            }
           },
           (error) => {
             console.error('[ChatContext] Error in message listener:', error);
           },
-          50 // Get more messages for history
+          50 // Obtener más mensajes para historial
         );
         
-        // Mark messages as read
-        await markConversationAsRead();
+        // Marcar mensajes como leídos
+        try {
+          await markConversationAsRead();
+        } catch (markError) {
+          console.error('[ChatContext] Error marking conversation as read:', markError);
+        }
         
-        // Return function to cancel subscription
-        return unsubscribe;
+        // Devolver función para cancelar suscripción
+        return messageListener;
       } else {
         console.error('[ChatContext] Failed to load conversation:', convResult.error);
         setError(convResult.error?.message || 'Error al cargar conversación');
       }
     } catch (error) {
       console.error('[ChatContext] Unexpected error loading conversation:', error);
-      setError('Error inesperado al cargar conversación');
+      
+      // Solo establecer error si esta sigue siendo la conversación activa
+      if (activeConversationId === conversationId) {
+        setError('Error inesperado al cargar conversación');
+      }
     } finally {
-      setLoading(false);
+      // Solo actualizar estado de carga si esta sigue siendo la conversación activa
+      if (activeConversationId === conversationId) {
+        setLoading(false);
+      }
     }
-  }, [user, markConversationAsRead]);
+  }, [user, markConversationAsRead, activeConversationId, activeConversation]);
   
-  // Enhanced setActiveConversationId function
+  // Enhanced setActiveConversationId function with debounce protection
   const setActiveConversationId = useCallback(async (id: string | null) => {
     if (!id) {
       console.log('[ChatContext] Clearing active conversation');
@@ -479,6 +657,13 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       return;
     }
     
+    // Protección completa contra configuración de la misma conversación
+    if (activeConversationId === id && activeConversation !== null) {
+      console.log(`[ChatContext] Conversation ${id} is already active, skipping`);
+      return;
+    }
+    
+    // Protección contra navegación offline
     if (isOffline) {
       setError('No hay conexión a internet. No se puede cargar la conversación.');
       return;
@@ -486,14 +671,25 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     
     try {
       console.log(`[ChatContext] Setting active conversation to ${id}`);
+      
+      // IMPORTANTE: Establecer el ID antes de cargar los datos para evitar
+      // problemas de reentrada al montar/desmontar el componente
+      _setActiveConversationId(id);
       setLoading(true);
       
-      // First verify the conversation exists
+      // Verificar que la conversación existe
       const snapshot = await firebase.firestore()
         .collection('conversations')
         .doc(id)
         .get();
       
+      // Si el ID activo ha cambiado mientras se cargaban los datos, no seguir
+      if (activeConversationId !== id) {
+        console.log(`[ChatContext] Active conversation changed during loading, aborting load for ${id}`);
+        return;
+      }
+      
+      // Verificar que la conversación existe
       if (!snapshot.exists) {
         console.error(`[ChatContext] Conversation with ID ${id} not found`);
         setError(`La conversación no existe o fue eliminada`);
@@ -502,24 +698,27 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         return;
       }
       
-      // Set active conversation ID
-      _setActiveConversationId(id);
-      
-      // Preload data
+      // Cargar datos de la conversación
       const conversationData = {
         id,
         ...snapshot.data()
       } as Conversation;
       setActiveConversation(conversationData);
       
-      // Load initial messages
+      // Cargar mensajes iniciales
       const messagesSnapshot = await firebase.firestore()
         .collection('conversations')
         .doc(id)
         .collection('messages')
         .orderBy('timestamp', 'desc')
-        .limit(20)
+        .limit(30)
         .get();
+      
+      // Si el ID activo ha cambiado mientras se cargaban los mensajes, no continuar
+      if (activeConversationId !== id) {
+        console.log(`[ChatContext] Active conversation changed during messages loading, aborting for ${id}`);
+        return;
+      }
       
       if (!messagesSnapshot.empty) {
         const messages = messagesSnapshot.docs.map(doc => ({
@@ -527,9 +726,9 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
           ...doc.data()
         })) as Message[];
         
-        // Sort by timestamp ascending for display
+        // Ordenar por timestamp para mostrar
         const sortedMessages = messages.sort((a, b) => {
-          // Handle different timestamp formats
+          // Manejar diferentes formatos de timestamp
           const getTime = (msg: Message): number => {
             if (!msg.timestamp) return 0;
             if (msg.timestamp instanceof firebase.firestore.Timestamp) {
@@ -554,19 +753,25 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       
       setLoading(false);
       
-      // Mark as read after a short delay
+      // Marcar como leído después de un pequeño retraso
       setTimeout(() => {
-        markConversationAsRead().catch(err => {
-          console.error('[ChatContext] Error marking conversation as read:', err);
-        });
+        // Verificar que la conversación activa no ha cambiado antes de marcar como leída
+        if (activeConversationId === id) {
+          markConversationAsRead().catch(err => {
+            console.error('[ChatContext] Error marking conversation as read:', err);
+          });
+        }
       }, 1000);
     } catch (error) {
-      console.error('[ChatContext] Error setting active conversation:', error);
-      setError('Error al cargar la conversación');
-      _setActiveConversationId(null);
-      setLoading(false);
+      // Solo actualizar el estado de error si esta sigue siendo la conversación activa
+      if (activeConversationId === id) {
+        console.error('[ChatContext] Error setting active conversation:', error);
+        setError('Error al cargar la conversación');
+        // No limpiar el ID activo en caso de error para evitar ciclos de carga
+        setLoading(false);
+      }
     }
-  }, [isOffline, markConversationAsRead]);
+  }, [isOffline, markConversationAsRead, activeConversationId, activeConversation]);
   
   // Enhanced send message function
   const sendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
@@ -746,30 +951,10 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       return null;
     }
     
-    // Validate essential parameters
-    if (!recipientId || recipientId.trim() === '') {
-      console.error('[ChatContext] Cannot create conversation: Invalid recipient ID');
-      return null;
-    }
-    
-    // Prevent creating conversation with self
-    if (recipientId === user.uid) {
-      console.error('[ChatContext] Cannot create conversation with yourself');
-      return null;
-    }
-    
-    // Clean recipient name
-    const cleanRecipientName = recipientName?.trim() || 'Usuario';
-    
-    // Business validation
-    if (businessId && !businessName) {
-      console.error('[ChatContext] Business ID provided but missing business name');
-      return null;
-    }
-    
     try {
-      console.log(`[ChatContext] Creating conversation with ${cleanRecipientName} (${recipientId})`);
-      console.log(`[ChatContext] Business context: ${businessId || 'none'}, ${businessName || 'none'}`);
+      console.log(`[ChatContext] Creating conversation with ${recipientName} (${recipientId})`);
+      console.log(`[ChatContext] Business details: ID=${businessId}, Name=${businessName}`);
+      console.log(`[ChatContext] Current user: ID=${user.uid}, Name=${user.displayName || 'Sin nombre'}`);
       
       // Implement retry (up to 3 times)
       const MAX_RETRIES = 3;
@@ -777,61 +962,79 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       
       for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
+          console.log(`[ChatContext] Attempt ${attempt} to create conversation`);
+          
           // If it's a business conversation, use the specific method
           if (businessId && businessName) {
-            console.log(`[ChatContext] Creating business conversation for business ${businessId} (attempt ${attempt})`);
+            console.log(`[ChatContext] Creating business conversation for business ${businessId}`);
+            
+            // Make sure all parameters are valid
+            if (!recipientId.trim()) {
+              throw new Error('Invalid recipient ID');
+            }
             
             const result = await chatService.checkOrCreateBusinessConversation(
               user.uid,
               user.displayName || 'Usuario',
               recipientId,
-              cleanRecipientName,
+              recipientName,
               businessId,
               businessName
             );
             
-            if (result.success && result.data) {
+            // Log the result for debugging
+            console.log(`[ChatContext] Service result:`, 
+                       result.success ? 'Success' : 'Failure', 
+                       result.data?.conversationId || 'No ID',
+                       result.error?.message || 'No error message');
+            
+            if (result.success && result.data && result.data.conversationId) {
               const conversationId = result.data.conversationId;
               console.log(`[ChatContext] Business conversation created/found: ${conversationId}`);
               
               // If there's an initial message, send it
               if (initialMessage && initialMessage.trim()) {
-                console.log('[ChatContext] Sending initial message for business conversation');
-                await chatService.sendMessage(
-                  conversationId, 
-                  user.uid, 
-                  { text: initialMessage.trim() },
-                  user.displayName || 'Usuario',
-                  user.photoURL || undefined
-                );
+                console.log('[ChatContext] Sending initial message');
+                try {
+                  await chatService.sendMessage(
+                    conversationId, 
+                    user.uid, 
+                    { text: initialMessage.trim() },
+                    user.displayName || 'Usuario',
+                    user.photoURL || undefined
+                  );
+                } catch (msgError) {
+                  console.error('[ChatContext] Error sending initial message:', msgError);
+                  // Don't fail the entire operation if just the initial message fails
+                }
               }
               
-              // Refresh conversations in background
+              // Refresh conversations immediately in the background
               setTimeout(() => {
                 refreshConversations().catch(err => {
                   console.error('[ChatContext] Background refresh error:', err);
                 });
-              }, 500);
+              }, 200);
               
               return conversationId;
             }
             
             lastError = result.error || new Error('Error creating business conversation');
-            console.error(`[ChatContext] Business conversation attempt ${attempt} failed:`, lastError);
+            console.error(`[ChatContext] Attempt ${attempt} failed:`, 
+                         lastError.message, 
+                         lastError.code || 'No code');
             
             // If it's an error that can't be resolved by retrying, exit loop
-            if (result.error?.code === 'chat/same-user-conversation' || 
-                result.error?.code === 'chat/invalid-business' ||
-                result.error?.code === 'chat/permission-denied') {
-              console.log('[ChatContext] Non-recoverable business conversation error, stopping retries');
+            if (result.error?.code === 'chat/same-user-conversation') {
+              console.log('[ChatContext] Non-retryable error, breaking retry loop');
               break;
             }
             
             // Wait before retrying (exponential backoff)
             if (attempt < MAX_RETRIES) {
-              const backoffTime = Math.min(1000 * Math.pow(2, attempt), 8000); // max 8 seconds
-              console.log(`[ChatContext] Waiting ${backoffTime}ms before retry ${attempt+1} for business conversation`);
-              await new Promise(resolve => setTimeout(resolve, backoffTime));
+              const delay = 1000 * attempt;
+              console.log(`[ChatContext] Waiting ${delay}ms before retry`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             }
           } else {
             // Regular conversation between users
@@ -840,7 +1043,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
             const participants = [user.uid, recipientId];
             const participantNames: Record<string, string> = {
               [user.uid]: user.displayName || 'Usuario',
-              [recipientId]: cleanRecipientName
+              [recipientId]: recipientName
             };
             
             // Prepare profile photos
@@ -849,6 +1052,43 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
               participantPhotos[user.uid] = user.photoURL;
             }
             
+            // If this is a conversation with a business owner, try to fetch business image
+            if (recipientId.startsWith('business_owner_')) {
+              try {
+                // Extract business ID from owner ID if possible (assuming format: business_owner_[businessId])
+                const ownerBusinessId = recipientId.replace('business_owner_', '');
+                
+                if (ownerBusinessId) {
+                  console.log(`[ChatContext] Fetching business image for owner of business: ${ownerBusinessId}`);
+                  
+                  const businessDoc = await firebase.firestore()
+                    .collection('businesses')
+                    .doc(ownerBusinessId)
+                    .get();
+                  
+                  if (businessDoc.exists) {
+                    const businessData = businessDoc.data();
+                    if (businessData?.images && Array.isArray(businessData.images) && businessData.images.length > 0) {
+                      // First look for the main image
+                      const mainImage = businessData.images.find((img: any) => img && img.isMain);
+                      if (mainImage && mainImage.url) {
+                        participantPhotos[recipientId] = mainImage.url;
+                        console.log(`[ChatContext] Using business main image for owner's avatar: ${mainImage.url}`);
+                      } else if (businessData.images[0].url) {
+                        // If no main image is marked, use the first one
+                        participantPhotos[recipientId] = businessData.images[0].url;
+                        console.log(`[ChatContext] Using first business image for owner's avatar: ${businessData.images[0].url}`);
+                      }
+                    }
+                  }
+                }
+              } catch (imageError) {
+                console.error('[ChatContext] Error fetching business image for owner:', imageError);
+                // Continue without image if there's an error
+              }
+            }
+            
+            console.log('[ChatContext] Calling chatService.createConversation with photos:', Object.keys(participantPhotos).length);
             const result = await chatService.createConversation(
               participants,
               participantNames,
@@ -858,14 +1098,11 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
               initialMessage
             );
             
+            console.log('[ChatContext] Result from createConversation:', 
+                       result.success ? 'Success' : 'Failure',
+                       result.data?.conversationId || 'No conversation ID');
+            
             if (result.success && result.data) {
-              // Refresh conversations in background
-              setTimeout(() => {
-                refreshConversations().catch(err => {
-                  console.error('[ChatContext] Background refresh error:', err);
-                });
-              }, 500);
-              
               return result.data.conversationId;
             }
             
@@ -874,16 +1111,26 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
             
             // Wait before retrying
             if (attempt < MAX_RETRIES) {
-              await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+              const delay = 1000 * attempt;
+              console.log(`[ChatContext] Waiting ${delay}ms before retry`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             }
           }
         } catch (retryError) {
           lastError = retryError;
           console.error(`[ChatContext] Error in attempt ${attempt}:`, retryError);
           
+          // Get detailed error info
+          if (retryError instanceof Error) {
+            console.error('Error message:', retryError.message);
+            console.error('Error stack:', retryError.stack);
+          }
+          
           // Wait before retrying
           if (attempt < MAX_RETRIES) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            const delay = 1000 * attempt;
+            console.log(`[ChatContext] Waiting ${delay}ms before retry`);
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
@@ -892,10 +1139,17 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       console.error('[ChatContext] All attempts to create conversation failed');
       throw lastError || new Error('Failed to create conversation after multiple attempts');
     } catch (error) {
-      console.error('[ChatContext] Unexpected error creating conversation:', error);
+      console.error('[ChatContext] Final error creating conversation:', error);
+      
+      // Get more detailed error info
+      if (error instanceof Error) {
+        console.error('Error message:', error.message);
+        console.error('Error stack:', error.stack);
+      }
+      
       return null;
     }
-  }, [user, refreshConversations, isOffline]);
+  }, [user, refreshConversations, isOffline, chatService]);
 
   // Delete conversation (soft delete)
   const deleteConversation = useCallback(async (conversationId: string): Promise<boolean> => {
@@ -1054,11 +1308,39 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   );
 };
 
-// Custom hook to use chat context
+// Custom hook to use chat context con protección contra ciclos de renderizado
 export const useChat = () => {
   const context = useContext(ChatContext);
+  
+  // Si el contexto no está definido, devolvemos un contexto falso
+  // pero evitamos alertas en la consola que pueden causar ciclos de renderizado
   if (context === undefined) {
-    throw new Error('useChat debe ser usado dentro de un ChatProvider');
+    // Solo mostramos el aviso en desarrollo, no en producción
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('useChat debe ser usado dentro de un ChatProvider');
+    }
+    
+    // Devolvemos un contexto stub para evitar errores
+    return {
+      conversations: [],
+      activeConversation: null,
+      activeMessages: [],
+      loading: false,
+      error: null,
+      unreadTotal: 0,
+      isOffline: false,
+      setActiveConversationId: () => {},
+      sendMessage: async () => false,
+      createConversation: async () => null,
+      markConversationAsRead: async () => {},
+      refreshConversations: async () => {},
+      deleteConversation: async () => false,
+      resendFailedMessage: async () => false,
+      uploadImage: async () => null,
+      updateNotificationToken: async () => {},
+      clearNotificationToken: async () => {}
+    } as ChatContextType;
   }
+  
   return context;
 };

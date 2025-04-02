@@ -29,6 +29,21 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   useEffect(() => {
     console.log('AuthProvider initialized, checking for existing session...');
     
+    // Cargar dinámicamente el servicio de notificaciones para evitar dependencias circulares
+    let notificationService;
+    try {
+      notificationService = require('../../services/NotificationService').notificationService;
+      
+      // Inicializar notificaciones si el servicio está disponible
+      if (notificationService) {
+        notificationService.configureNotifications().catch(err => {
+          console.error('Error configuring notifications:', err);
+        });
+      }
+    } catch (err) {
+      console.error('Error loading notification service:', err);
+    }
+    
     // Guardamos la referencia al suscriptor para limpiarla después
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
       console.log('Auth state changed:', firebaseUser?.uid);
@@ -42,6 +57,23 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
           await AsyncStorage.setItem('user_email', firebaseUser.email || '');
           await AsyncStorage.setItem('user_display_name', firebaseUser.displayName || '');
           console.log('Session info saved to AsyncStorage');
+          
+          // Registrar para notificaciones push después de iniciar sesión
+          if (notificationService) {
+            try {
+              const permissionResult = await notificationService.requestNotificationPermissions();
+              if (permissionResult.success && permissionResult.data?.granted) {
+                const tokenResult = await notificationService.registerForPushNotifications();
+                if (tokenResult.success && tokenResult.data?.token) {
+                  // Guardar token en Firestore
+                  await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
+                }
+              }
+            } catch (notificationError) {
+              console.error('Error setting up notifications:', notificationError);
+              // No fallar el login por problemas con notificaciones
+            }
+          }
         } catch (error) {
           console.error('Error saving session info to AsyncStorage:', error);
         }
@@ -124,6 +156,25 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // Función para cerrar sesión
   const logout = async (): Promise<void> => {
     try {
+      // Eliminar token de notificación antes de cerrar sesión
+      if (user) {
+        try {
+          // Cargar dinámicamente el servicio de notificaciones
+          const notificationService = require('../../services/NotificationService').notificationService;
+          if (notificationService) {
+            // Obtener token actual
+            const tokenResult = await notificationService.registerForPushNotifications();
+            if (tokenResult.success && tokenResult.data?.token) {
+              // Eliminar token de Firestore
+              await notificationService.removeTokenFromFirestore(user.uid, tokenResult.data.token);
+            }
+          }
+        } catch (notificationError) {
+          console.error('Error removing notification token:', notificationError);
+          // Continuar con el cierre de sesión aunque falle la eliminación del token
+        }
+      }
+      
       await firebase.auth().signOut();
       console.log('Logout successful');
       // No necesitamos setUser aquí, ya que el onAuthStateChanged lo hará

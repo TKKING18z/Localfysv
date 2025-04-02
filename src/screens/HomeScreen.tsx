@@ -31,6 +31,7 @@ type ExtendedStackParamList = RootStackParamList & {
   Favorites: undefined;
   Profile: undefined;
   Conversations: undefined;
+  Notifications: undefined;
 };
 
 type NavigationProps = StackNavigationProp<ExtendedStackParamList>;
@@ -278,8 +279,20 @@ const HomeScreen: React.FC = () => {
         </View>
         
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.iconButton} onPress={() => {}}>
-            <MaterialIcons name="notifications-none" size={24} color="#007AFF" />
+          <TouchableOpacity 
+            style={styles.iconButton} 
+            onPress={() => navigation.navigate('Notifications')}
+          >
+            <View>
+              <MaterialIcons name="notifications-none" size={24} color="#007AFF" />
+              {unreadTotal > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {unreadTotal > 9 ? '9+' : unreadTotal}
+                  </Text>
+                </View>
+              )}
+            </View>
           </TouchableOpacity>
           
           <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
@@ -697,6 +710,24 @@ const styles = StyleSheet.create({
   chatBadgeText: {
     color: 'white',
     fontSize: 10,
+    fontWeight: 'bold',
+  },
+  // Styles for notification badge on the bell icon
+  notificationBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 16,
+    height: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  notificationBadgeText: {
+    color: 'white',
+    fontSize: 9,
     fontWeight: 'bold',
   },
 });

@@ -25,8 +25,10 @@ const BusinessHoursView: React.FC<BusinessHoursViewProps> = ({ hours }) => {
     return (
       <View style={styles.container}>
         <View style={styles.headerRow}>
-          <MaterialIcons name="access-time" size={20} color="#007AFF" />
-          <Text style={styles.headerText}>Horarios</Text>
+          <View style={styles.headerIcon}>
+            <MaterialIcons name="schedule" size={22} color="#007aff" />
+          </View>
+          <Text style={styles.headerText}>Horarios de Atención</Text>
         </View>
         <Text style={styles.noDataText}>Horarios no disponibles</Text>
       </View>
@@ -36,8 +38,10 @@ const BusinessHoursView: React.FC<BusinessHoursViewProps> = ({ hours }) => {
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <MaterialIcons name="access-time" size={20} color="#007AFF" />
-        <Text style={styles.headerText}>Horarios</Text>
+        <View style={styles.headerIcon}>
+          <MaterialIcons name="schedule" size={22} color="#007aff" />
+        </View>
+        <Text style={styles.headerText}>Horarios de Atención</Text>
       </View>
       
       <View style={styles.hoursContainer}>
@@ -69,50 +73,80 @@ const BusinessHoursView: React.FC<BusinessHoursViewProps> = ({ hours }) => {
 };
 
 const styles = StyleSheet.create({
+  headerIcon: {
+    width: 36,
+    height: 36,
+    backgroundColor: 'rgba(0,122,255,0.1)',
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   container: {
-    marginBottom: 16,
+    marginBottom: 20,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   headerText: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginLeft: 8,
-    color: '#333333',
+    marginLeft: 10,
+    color: '#007aff',
   },
   hoursContainer: {
-    backgroundColor: '#F5F7FF',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007aff',
   },
   dayRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
+    borderBottomColor: 'rgba(0,122,255,0.08)',
   },
   dayLabel: {
     fontSize: 15,
-    fontWeight: '500',
-    color: '#333333',
+    fontWeight: '600',
+    color: '#2C3E50',
   },
   hoursText: {
     fontSize: 15,
-    color: '#007AFF',
+    color: '#007aff',
+    fontWeight: '500',
+    backgroundColor: 'rgba(0,122,255,0.08)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   closedText: {
     fontSize: 15,
     color: '#8E8E93',
+    fontWeight: '500',
     fontStyle: 'italic',
+    backgroundColor: 'rgba(142,142,147,0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
   },
   noDataText: {
     fontSize: 14,
     color: '#8E8E93',
     fontStyle: 'italic',
+    padding: 12,
+    backgroundColor: 'rgba(142,142,147,0.05)',
+    borderRadius: 8,
+    textAlign: 'center',
   }
 });
 

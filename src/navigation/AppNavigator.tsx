@@ -1,11 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet, AppState, Platform } from 'react-native';
 import { useAuth } from '../context/AuthContext';
-import { useChat } from '../context/ChatContext'; // Añadir esta importación
+import { useChat, ChatProvider } from '../context/ChatContext';
+import * as Notifications from 'expo-notifications';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -36,7 +37,12 @@ import ReservationsScreen from '../screens/business/ReservationsScreen';
 // Importar pantallas de chat
 import ConversationsScreen from '../screens/chat/ConversationsScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
-import { ChatProvider } from '../context/ChatContext';
+
+// Importar las pantallas del Centro de Ayuda
+import FAQsScreen from '../screens/FAQsScreen';
+import SupportScreen from '../screens/SupportScreen';
+import TermsConditionsScreen from '../screens/TermsConditionsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
@@ -44,7 +50,7 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
-  MainTabs: undefined;  // No params needed for tab navigator
+  MainTabs: { screen?: keyof MainTabParamList };  // Allow specifying which tab to navigate to
   BusinessDetail: { businessId: string };
   // Business enhancement screens
   BusinessHours: { initialHours?: any; callbackId?: string };
@@ -75,6 +81,13 @@ export type RootStackParamList = {
   // Rutas para el chat
   Conversations: undefined;
   Chat: { conversationId: string };
+  // Ruta para notificaciones
+  Notifications: undefined;
+  // Nuevas rutas para el Centro de Ayuda
+  FAQs: undefined;
+  Support: undefined;
+  Tutorials: undefined;
+  TermsConditions: undefined;
 };
 
 // Define tab navigator parameter list
@@ -117,16 +130,15 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
   </TouchableOpacity>
 );
 
+// Hook useChat ya importado arriba
+
 // Bottom Tab Navigator
 function MainTabs() {
-  // Add a try-catch to safely handle the useChat hook
-  let unreadTotal = 0;
-  try {
-    const chatContext = useChat();
-    unreadTotal = chatContext?.unreadTotal || 0;
-  } catch (error) {
-    console.log('Chat context not available:', error);
-  }
+  // Usamos el hook de chat, pero nos aseguramos que sea seguro
+  // Definimos un valor por defecto para evitar errores
+  const chatContext = useChat();
+  // Obtenemos el número de mensajes no leídos directamente del contexto
+  const unreadTotal = chatContext?.unreadTotal || 0;
   
   return (
     <Tab.Navigator
@@ -227,8 +239,211 @@ const AuthStack = () => (
 
 // Main App Navigator
 const AppNavigator = () => {
-  // Usar el hook de autenticación en lugar de manejar el estado directamente
+  // Usar el hook de autenticación
   const { user, isLoading } = useAuth();
+  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>();
+  const appState = useRef(AppState.currentState);
+  // Estados para manejar funciones del contexto
+  const [updateNotificationToken, setUpdateNotificationToken] = React.useState<((token: string) => Promise<void>) | undefined>(undefined);
+
+  // Configurar manejadores de notificaciones
+  useEffect(() => {
+    // Configurar cómo se manejarán las notificaciones cuando se reciban
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        priority: Notifications.AndroidNotificationPriority.HIGH,
+      }),
+    });
+    
+    // Escuchar cuando se reciben notificaciones mientras la app está abierta
+    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+      console.log('[AppNavigator] Notification received in foreground:', notification);
+      // Aquí podrías reproducir un sonido, mostrar una alerta, etc.
+    });
+
+    // Escuchar cuando el usuario interactúa con una notificación
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('[AppNavigator] User tapped on notification:', response);
+      
+      // Obtener datos de la notificación
+      const data = response.notification.request.content.data;
+      console.log('[AppNavigator] Notification data:', data);
+      
+      // Navegar basado en el tipo de notificación
+      if (data && data.type === 'chat') {
+        // Navegar a la conversación específica
+        if (data.conversationId) {
+          // Aquí necesitaríamos tener acceso al objeto de navegación
+          // Esto se implementaría con una función separada o usando un contexto de navegación
+          console.log('[AppNavigator] Should navigate to conversation:', data.conversationId);
+          // navigation.navigate('Chat', { conversationId: data.conversationId });
+        } else {
+          // Navegar a la lista de conversaciones
+          console.log('[AppNavigator] Should navigate to conversations list');
+          // navigation.navigate('Conversations');
+        }
+      }
+    });
+    
+    // Configurar listener para cambios en el estado de la app
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      if (
+        appState.current.match(/inactive|background/) && 
+        nextAppState === 'active' && 
+        user
+      ) {
+        console.log('[AppNavigator] App has come to the foreground, refreshing notification token');
+        // Volver a registrar el token cuando la app vuelve a primer plano
+        refreshNotificationToken();
+      }
+      
+      appState.current = nextAppState;
+    });
+
+    return () => {
+      // Limpiar listeners al desmontar
+      Notifications.removeNotificationSubscription(notificationListener.current);
+      Notifications.removeNotificationSubscription(responseListener.current);
+      subscription.remove();
+    };
+  }, [user]);
+  
+  // Función para refrescar token de notificaciones
+  const refreshNotificationToken = async () => {
+    if (!user) return;
+    
+    try {
+      // Cargar dinámicamente el servicio de notificaciones
+      const notificationService = require('../../services/NotificationService').notificationService;
+      if (!notificationService) {
+        console.log('[AppNavigator] Notification service not available');
+        return;
+      }
+      
+      // Verificar permisos
+      const permissionResult = await notificationService.requestNotificationPermissions();
+      if (permissionResult.success && permissionResult.data?.granted) {
+        // Registrar para notificaciones
+        const tokenResult = await notificationService.registerForPushNotifications();
+        if (tokenResult.success && tokenResult.data?.token) {
+          // Actualizar token en Firestore
+          await notificationService.saveTokenToFirestore(user.uid, tokenResult.data.token);
+          if (updateNotificationToken) {
+            updateNotificationToken(tokenResult.data.token);
+          }
+          console.log('[AppNavigator] Notification token refreshed successfully');
+        }
+      }
+    } catch (error) {
+      console.error('[AppNavigator] Error refreshing notification token:', error);
+    }
+  };
+  
+  // Componente interno para manejar el token de notificaciones
+  const AppWithChat = () => {
+    // Usar el hook de chat dentro del contexto
+    const chatContext = useChat();
+    
+    // Actualizar el token cuando el contexto cambie
+    useEffect(() => {
+      if (chatContext && chatContext.updateNotificationToken) {
+        setUpdateNotificationToken(() => chatContext.updateNotificationToken);
+      }
+    }, [chatContext]);
+    
+    return (
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {user ? (
+          <>
+            <Stack.Screen name="MainTabs" component={MainTabs} />
+            <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
+            
+            {/* Agregar las nuevas pantallas */}
+            <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
+            <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
+            <Stack.Screen name="Promotions" component={PromotionsScreen} />
+            <Stack.Screen name="Reservations" component={ReservationsScreen} />
+            
+            {/* New Business Detail Enhancement Screens */}
+            <Stack.Screen 
+              name="BusinessHours" 
+              component={BusinessHoursScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Horarios de Atención',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="PaymentMethods" 
+              component={PaymentMethodsScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Métodos de Pago',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="SocialLinks" 
+              component={SocialLinksScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Redes Sociales',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="MenuEditor" 
+              component={MenuEditorScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Editor de Menú',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="VideoManager" 
+              component={VideoManagerScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Gestionar Videos',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            
+            {/* Añadir las pantallas del Centro de Ayuda */}
+            <Stack.Screen name="FAQs" component={FAQsScreen} />
+            <Stack.Screen name="Support" component={SupportScreen} />
+            <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
+            
+            {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
+            <Stack.Screen name="Map" component={MapScreen} />
+            <Stack.Screen name="Favorites" component={FavoritesScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
+            
+            {/* Chat screens */}
+            <Stack.Screen name="Conversations" component={ConversationsScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+            
+            {/* Notifications screen */}
+            <Stack.Screen name="Notifications" component={NotificationsScreen} />
+          </>
+        ) : (
+          <Stack.Screen name="Auth" component={AuthStack} />
+        )}
+      </Stack.Navigator>
+    );
+  };
 
   if (isLoading) {
     return (
@@ -239,87 +454,12 @@ const AppNavigator = () => {
     );
   }
 
+  // ChatProvider ya está importado
+
   return (
     <NavigationContainer>
       <ChatProvider>
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {user ? (
-            <>
-              <Stack.Screen name="MainTabs" component={MainTabs} />
-              <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
-              
-              {/* Agregar las nuevas pantallas */}
-              <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
-              <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
-              <Stack.Screen name="Promotions" component={PromotionsScreen} />
-              <Stack.Screen name="Reservations" component={ReservationsScreen} />
-              
-              {/* New Business Detail Enhancement Screens */}
-              <Stack.Screen 
-                name="BusinessHours" 
-                component={BusinessHoursScreen}
-                options={{ 
-                  headerShown: true,
-                  title: 'Horarios de Atención',
-                  headerStyle: { backgroundColor: '#FFFFFF' },
-                  headerTintColor: '#007AFF'
-                }} 
-              />
-              <Stack.Screen 
-                name="PaymentMethods" 
-                component={PaymentMethodsScreen}
-                options={{ 
-                  headerShown: true,
-                  title: 'Métodos de Pago',
-                  headerStyle: { backgroundColor: '#FFFFFF' },
-                  headerTintColor: '#007AFF'
-                }} 
-              />
-              <Stack.Screen 
-                name="SocialLinks" 
-                component={SocialLinksScreen}
-                options={{ 
-                  headerShown: true,
-                  title: 'Redes Sociales',
-                  headerStyle: { backgroundColor: '#FFFFFF' },
-                  headerTintColor: '#007AFF'
-                }} 
-              />
-              <Stack.Screen 
-                name="MenuEditor" 
-                component={MenuEditorScreen}
-                options={{ 
-                  headerShown: true,
-                  title: 'Editor de Menú',
-                  headerStyle: { backgroundColor: '#FFFFFF' },
-                  headerTintColor: '#007AFF'
-                }} 
-              />
-              <Stack.Screen 
-                name="VideoManager" 
-                component={VideoManagerScreen}
-                options={{ 
-                  headerShown: true,
-                  title: 'Gestionar Videos',
-                  headerStyle: { backgroundColor: '#FFFFFF' },
-                  headerTintColor: '#007AFF'
-                }} 
-              />
-              
-              {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
-              <Stack.Screen name="Map" component={MapScreen} />
-              <Stack.Screen name="Favorites" component={FavoritesScreen} />
-              <Stack.Screen name="Profile" component={ProfileScreen} />
-              <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
-              
-              {/* Chat screens */}
-              <Stack.Screen name="Conversations" component={ConversationsScreen} />
-              <Stack.Screen name="Chat" component={ChatScreen} />
-            </>
-          ) : (
-            <Stack.Screen name="Auth" component={AuthStack} />
-          )}
-        </Stack.Navigator>
+        <AppWithChat />
       </ChatProvider>
     </NavigationContainer>
   );

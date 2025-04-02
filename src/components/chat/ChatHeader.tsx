@@ -12,7 +12,6 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Conversation } from '../../../models/chatTypes';
 import { useNavigation } from '@react-navigation/native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { getNameInitial, getAvatarColor } from '../../../src/utils/chatUtils';
 import * as Haptics from 'expo-haptics';
 
@@ -86,12 +85,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
   if (!conversation) {
     return (
       <View style={styles.loadingContainer}>
-        <LinearGradient
-          colors={['#007AFF', '#00C2FF']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
-          style={styles.loadingGradient}
-        >
+        <View style={styles.loadingBackground}>
           <TouchableOpacity 
             style={styles.backButton} 
             onPress={handleBack}
@@ -100,7 +94,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
           </TouchableOpacity>
           <ActivityIndicator size="small" color="#FFFFFF" />
           <Text style={styles.loadingText}>Cargando conversación...</Text>
-        </LinearGradient>
+        </View>
       </View>
     );
   }
@@ -128,12 +122,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
         }
       ]}
     >
-      <LinearGradient
-        colors={businessMode ? ['#FF9500', '#FF2D55'] : ['#007AFF', '#00C2FF']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 0 }}
-        style={styles.headerGradient}
-      >
+      <View style={styles.headerBackground}>
         <View style={styles.container}>
           <TouchableOpacity 
             style={styles.backButton} 
@@ -192,7 +181,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
             </TouchableOpacity>
           )}
         </View>
-      </LinearGradient>
+      </View>
       
       {/* Nice shadow on iOS */}
       {Platform.OS === 'ios' && (
@@ -204,27 +193,36 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
 
 const styles = StyleSheet.create({
   containerWrapper: {
-    elevation: 4,
+    elevation: 6,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
     zIndex: 10,
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    overflow: 'hidden',
   },
-  headerGradient: {
+  headerBackground: {
     width: '100%',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    backgroundColor: '#007AFF',
   },
   container: {
-    height: 70,
+    height: 80,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingTop: 8,
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    padding: 10,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   userInfo: {
     flex: 1,
@@ -233,23 +231,33 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    marginRight: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    marginRight: 14,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   defaultAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: '#FFFFFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.4)',
+    marginRight: 14,
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.6)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
   },
   avatarText: {
     color: '#007AFF',
@@ -278,12 +286,13 @@ const styles = StyleSheet.create({
   loadingContainer: {
     height: 70,
   },
-  loadingGradient: {
+  loadingBackground: {
     width: '100%',
     height: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
+    backgroundColor: '#007AFF',
   },
   loadingText: {
     color: '#FFFFFF',
@@ -302,10 +311,10 @@ const styles = StyleSheet.create({
     borderColor: 'white',
   },
   onlineIndicator: {
-    backgroundColor: '#34C759',
+    backgroundColor: '#007AFF',
   },
   typingIndicator: {
-    backgroundColor: '#FF9500',
+    backgroundColor: '#007AFF',
   },
   shadowLine: {
     height: 1,

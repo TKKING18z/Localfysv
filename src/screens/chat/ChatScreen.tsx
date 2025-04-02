@@ -1,5 +1,5 @@
 // React and React Native imports
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
 import {
   View,
   FlatList,
@@ -16,8 +16,7 @@ import {
   Alert,
   Animated,
   BackHandler,
-  Keyboard,
-  ScrollView
+  Keyboard
 } from 'react-native';
 
 // Navigation imports
@@ -33,6 +32,8 @@ import * as Haptics from 'expo-haptics';
 // Context and utilities
 import { useAuth } from '../../context/AuthContext';
 import { useChat } from '../../context/ChatContext';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 
 // Components
 import ChatHeader from '../../components/chat/ChatHeader';
@@ -40,12 +41,11 @@ import ChatMessage from '../../components/chat/ChatMessage';
 import ChatInput from '../../components/chat/ChatInput';
 
 // Types
-import { Message, Conversation } from '../../../models/chatTypes';
+import { Message, MessageType, MessageStatus } from '../../../models/chatTypes';
 
 // Detailed type definitions
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
-type MessageListRef = React.RefObject<FlatList<Message>>;
 
 const ChatScreen: React.FC = () => {
   // Navigation and route params
@@ -65,8 +65,32 @@ const ChatScreen: React.FC = () => {
     uploadImage,
     resendFailedMessage,
     refreshConversations,
-    isOffline
+    isOffline,
+    setActiveConversationId
   } = useChat();
+  
+  // Inicializar conversación cuando la pantalla se monta - con protección mejorada
+  useLayoutEffect(() => {
+    // Variable para controlar si el componente está montado
+    let isMounted = true;
+    
+    // Para evitar race conditions, envolvemos la inicialización en un timeout
+    const initTimer = setTimeout(() => {
+      if (isMounted && conversationId) {
+        console.log(`[ChatScreen] Setting active conversation on mount: ${conversationId}`);
+        setActiveConversationId(conversationId);
+      }
+    }, 50); // Pequeño delay para asegurar estabilidad en la navegación
+    
+    return () => {
+      // Limpiar timeout y marcar como desmontado
+      isMounted = false;
+      clearTimeout(initTimer);
+      
+      // NO limpiamos la conversación activa aquí para evitar problemas de navegación
+      console.log('[ChatScreen] Unmounting');
+    };
+  }, [conversationId, setActiveConversationId]);
 
   // Local state
   const [imageModalVisible, setImageModalVisible] = useState(false);
@@ -74,6 +98,11 @@ const ChatScreen: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [scrollToBottom, setScrollToBottom] = useState(true);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [loadRetries, setLoadRetries] = useState(0);
+  const [isLoadingData, setIsLoadingData] = useState(true);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const maxRetries = 5;
 
   // Refs
   const messagesListRef = useRef<FlatList>(null);
@@ -123,12 +152,117 @@ const ChatScreen: React.FC = () => {
     }).start();
   }, [fadeAnim]);
   
+  // Enhanced conversation loading - evitando reintentos excesivos y listeners duplicados
+  useEffect(() => {
+    // Verificar los requisitos básicos
+    if (!conversationId || !user || activeConversation?.id === conversationId) {
+      if (activeConversation?.id === conversationId) {
+        // Si ya tenemos la conversación activa correcta, solo actualizar el estado de carga
+        setIsLoadingData(false);
+      }
+      return;
+    }
+    
+    console.log(`[ChatScreen] Loading messages for conversation: ${conversationId}`);
+    
+    // Variables para control y limpieza
+    let isMounted = true;
+    let messageListener: (() => void) | null = null;
+    
+    // Configurar suscripción a los mensajes
+    const subscribeToMessages = () => {
+      if (!isMounted || !conversationId) return null;
+      
+      try {
+        console.log(`[ChatService] Setting up message listener for conversation: ${conversationId}`);
+        
+        const messagesRef = firebase.firestore()
+          .collection('conversations')
+          .doc(conversationId)
+          .collection('messages')
+          .orderBy('timestamp', 'desc')
+          .limit(50);
+          
+        return messagesRef.onSnapshot(snapshot => {
+          if (!isMounted) return;
+          
+          if (!snapshot.metadata.hasPendingWrites) {
+            const messages = snapshot.docs.map(doc => {
+              const msgData = doc.data();
+              return {
+                id: doc.id,
+                text: msgData.text || '',
+                senderId: msgData.senderId || user.uid,
+                senderName: msgData.senderName || '',
+                senderPhoto: msgData.senderPhoto || '',
+                timestamp: msgData.timestamp?.toDate ? msgData.timestamp.toDate() : new Date(),
+                status: msgData.status || MessageStatus.SENT,
+                read: msgData.read === true,
+                type: msgData.type || MessageType.TEXT,
+                imageUrl: msgData.imageUrl,
+                metadata: msgData.metadata
+              } as Message;
+            });
+            
+            // Ordenar por timestamp
+            const sortedMessages = messages.sort((a, b) => {
+              const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : 0;
+              const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : 0;
+              return aTime - bTime;
+            });
+            
+            console.log(`[ChatScreen] Successfully loaded conversation: ${conversationId}`);
+            setLocalMessages(sortedMessages);
+            setIsLoadingData(false);
+            
+            // Marcar mensajes como leídos una vez que estén cargados
+            if (sortedMessages.length > 0) {
+              markConversationAsRead().catch(err => {
+                console.error('[ChatScreen] Error marking as read:', err);
+              });
+            }
+          }
+        }, error => {
+          if (!isMounted) return;
+          console.error('[ChatScreen] Error in messages listener:', error);
+          setLocalError('Error al cargar mensajes. Intente más tarde.');
+          setIsLoadingData(false);
+        });
+      } catch (error) {
+        console.error('[ChatScreen] Error setting up message listener:', error);
+        return null;
+      }
+    };
+    
+    // Iniciar suscripción
+    setIsLoadingData(true);
+    messageListener = subscribeToMessages();
+    
+    return () => {
+      // Limpieza al desmontar o cambiar de conversación
+      isMounted = false;
+      
+      if (messageListener) {
+        console.log(`[ChatScreen] Cleaning up message listener for: ${conversationId}`);
+        messageListener();
+      }
+    };
+  }, [conversationId, user, activeConversation, markConversationAsRead]);
+  
   // Mark messages as read when the conversation becomes active
   useEffect(() => {
     const markAsRead = async () => {
-      if (activeConversation) {
+      if (activeConversation && user) {
         try {
           await markConversationAsRead();
+          
+          // Resetear badge de notificaciones cuando la conversación está activa
+          try {
+            const { notificationService } = require('../../../services/NotificationService');
+            await notificationService.resetBadgeCount(user.uid);
+          } catch (notifError) {
+            console.error('[ChatScreen] Error resetting badge count:', notifError);
+          }
         } catch (error) {
           console.error('Error marking conversation as read:', error);
         }
@@ -136,14 +270,20 @@ const ChatScreen: React.FC = () => {
     };
     
     markAsRead();
-  }, [activeConversation, markConversationAsRead]);
+  }, [activeConversation, markConversationAsRead, user]);
+  
+  // Determine which error to display (context or local)
+  const displayError = error || localError;
+  
+  // Determine which messages to display (context or local)
+  const displayMessages = activeMessages.length > 0 ? activeMessages : localMessages;
   
   // Scroll to bottom when new messages are added
   useEffect(() => {
-    if (scrollToBottom && activeMessages.length > 0) {
+    if (scrollToBottom && displayMessages.length > 0) {
       scrollToBottomIfNeeded();
     }
-  }, [activeMessages, scrollToBottom]);
+  }, [displayMessages, scrollToBottom]);
   
   // Scroll to bottom if needed
   const scrollToBottomIfNeeded = useCallback(() => {
@@ -240,39 +380,58 @@ const ChatScreen: React.FC = () => {
   const EmptyStateComponent = useCallback(() => (
     <View style={styles.emptyStateContainer}>
       <LinearGradient
-        colors={['#F4F6FF', '#E8EEFF']}
+        colors={['#F0F9FF', '#DBEAFE']}
         style={styles.emptyStateGradient}
       >
-        <MaterialIcons 
-          name="chat-bubble-outline" 
-          size={120} 
-          color="#B9C5FF" 
-          style={styles.emptyStateIcon}
-        />
-        <Text style={styles.emptyText}>No hay mensajes</Text>
+        <View style={styles.emptyIconContainer}>
+          <LinearGradient
+            colors={['#0A84FF', '#2ECDF1']}
+            style={styles.emptyIconGradient}
+          >
+            <MaterialIcons 
+              name="chat-bubble-outline" 
+              size={80} 
+              color="#FFFFFF" 
+              style={styles.emptyStateIcon}
+            />
+          </LinearGradient>
+        </View>
+        <Text style={styles.emptyText}>No hay mensajes todavía</Text>
         <Text style={styles.emptySubtext}>
-          Sé el primero en enviar un mensaje
+          Sé el primero en enviar un mensaje para iniciar la conversación
         </Text>
+        <View style={styles.emptyArrow}>
+          <MaterialIcons name="arrow-downward" size={36} color="#0A84FF" />
+        </View>
       </LinearGradient>
     </View>
   ), []);
   
-  // Loading state
-  if (loading && !activeConversation) {
+  // Loading state with retry information
+  if ((loading && !activeConversation) || isLoadingData) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Cargando conversación...</Text>
+        <Text style={styles.loadingText}>
+          {loadRetries > 0 
+            ? `Cargando conversación (intento ${loadRetries}/${maxRetries})...` 
+            : 'Cargando conversación...'}
+        </Text>
+        {loadRetries >= 2 && (
+          <Text style={styles.retryText}>
+            Puede tomar un momento para nuevas conversaciones
+          </Text>
+        )}
       </View>
     );
   }
 
   // Error state
-  if (error && !activeConversation) {
+  if (displayError && !activeConversation) {
     return (
       <View style={styles.centerContainer}>
         <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
-        <Text style={styles.errorText}>{error}</Text>
+        <Text style={styles.errorText}>{displayError}</Text>
         <TouchableOpacity 
           style={styles.retryButton}
           onPress={handleGoBack}
@@ -299,8 +458,8 @@ const ChatScreen: React.FC = () => {
       {/* Offline indicator */}
       {isOffline && (
         <View style={styles.offlineBar}>
-          <MaterialIcons name="cloud-off" size={16} color="#FFF" />
-          <Text style={styles.offlineText}>Sin conexión</Text>
+          <MaterialIcons name="wifi-off" size={18} color="#E53935" />
+          <Text style={styles.offlineText}>Sin conexión a internet</Text>
         </View>
       )}
       
@@ -312,9 +471,9 @@ const ChatScreen: React.FC = () => {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
         >
           {/* Error banner */}
-          {error && (
+          {displayError && (
             <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>{error}</Text>
+              <Text style={styles.errorBannerText}>{displayError}</Text>
               <TouchableOpacity onPress={() => refreshConversations()}>
                 <Text style={styles.errorBannerRetry}>Reintentar</Text>
               </TouchableOpacity>
@@ -324,7 +483,7 @@ const ChatScreen: React.FC = () => {
           {/* Messages list */}
           <FlatList
             ref={messagesListRef}
-            data={activeMessages}
+            data={displayMessages} 
             keyExtractor={(item) => item.id}
             renderItem={({ item, index }) => (
               <ChatMessage 
@@ -332,7 +491,7 @@ const ChatScreen: React.FC = () => {
                 isMine={item.senderId === user?.uid}
                 onImagePress={handleImagePress}
                 onRetry={handleRetryMessage}
-                previousMessage={index > 0 ? activeMessages[index - 1] : null}
+                previousMessage={index > 0 ? displayMessages[index - 1] : null}
               />
             )}
             contentContainerStyle={styles.messagesContainer}
@@ -394,16 +553,19 @@ const ChatScreen: React.FC = () => {
       </Modal>
       
       {/* Scroll to bottom button */}
-      {!scrollToBottom && activeMessages.length > 10 && (
+      {!scrollToBottom && displayMessages.length > 10 && (
         <TouchableOpacity
           style={styles.scrollToBottomButton}
           onPress={scrollToBottomIfNeeded}
+          activeOpacity={0.9}
         >
           <LinearGradient
-            colors={['#007AFF', '#00C2FF']}
+            colors={['#0A84FF', '#2ECDF1']}
+            start={{x: 0, y: 0}}
+            end={{x: 1, y: 1}}
             style={styles.scrollToBottomGradient}
           >
-            <MaterialIcons name="arrow-downward" size={22} color="#FFFFFF" />
+            <MaterialIcons name="arrow-downward" size={28} color="#FFFFFF" />
           </LinearGradient>
         </TouchableOpacity>
       )}
@@ -414,39 +576,59 @@ const ChatScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FF',
+    backgroundColor: '#EFF6FF',
   },
   contentContainer: {
     flex: 1,
+    backgroundColor: '#EFF6FF',
   },
   keyboardContainer: {
     flex: 1,
+    backgroundColor: '#EFF6FF',
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#EFF6FF',
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#333333',
+    color: '#0A84FF',
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  retryText: {
+    marginTop: 12,
+    fontSize: 15,
+    color: '#64748B',
+    textAlign: 'center',
+    maxWidth: '80%',
+    lineHeight: 22,
   },
   errorText: {
     marginTop: 16,
     fontSize: 16,
     color: '#FF3B30',
     textAlign: 'center',
+    fontWeight: '600',
+    maxWidth: '90%',
   },
   retryButton: {
-    marginTop: 20,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    minWidth: 120,
+    marginTop: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    backgroundColor: '#0A84FF',
+    borderRadius: 16,
+    minWidth: 140,
     alignItems: 'center',
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 5,
   },
   retryButtonText: {
     color: 'white',
@@ -484,79 +666,130 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
-    minHeight: 300,
+    minHeight: 400,
   },
   emptyStateGradient: {
     padding: 40,
-    borderRadius: 20,
+    borderRadius: 24,
     alignItems: 'center',
-    width: '90%',
+    width: '96%',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 5,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  emptyIconContainer: {
+    marginBottom: 24,
+    borderRadius: 40,
+    padding: 10,
+    backgroundColor: 'rgba(10, 132, 255, 0.1)',
+  },
+  emptyIconGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    elevation: 6,
   },
   emptyStateIcon: {
-    marginBottom: 16,
+    marginBottom: 0,
   },
   emptyText: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-    color: '#333333',
-    marginTop: 8,
+    color: '#0A1629',
+    marginTop: 10,
+    letterSpacing: 0.3,
   },
   emptySubtext: {
-    marginTop: 8,
+    marginTop: 12,
     fontSize: 16,
-    color: '#8E8E93',
+    color: '#64748B',
     textAlign: 'center',
+    lineHeight: 24,
+    maxWidth: '90%',
+  },
+  emptyArrow: {
+    marginTop: 30,
+    backgroundColor: 'rgba(10, 132, 255, 0.1)',
+    borderRadius: 30,
+    padding: 8,
   },
   errorBanner: {
-    backgroundColor: '#FFEBE9',
-    padding: 12,
+    backgroundColor: '#FFF1F0',
+    padding: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: '#FF3B30',
+    borderBottomColor: '#FFCDD2',
+    shadowColor: '#FF3B30',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
   },
   errorBannerText: {
-    color: '#FF3B30',
-    fontSize: 14,
+    color: '#E53935',
+    fontSize: 15,
     flex: 1,
+    fontWeight: '500',
   },
   errorBannerRetry: {
-    color: '#007AFF',
+    color: '#0A84FF',
     fontWeight: 'bold',
-    marginLeft: 10,
-    fontSize: 14,
+    marginLeft: 14,
+    fontSize: 15,
+    padding: 6,
   },
   scrollToBottomButton: {
     position: 'absolute',
     right: 20,
     bottom: 80,
-    borderRadius: 25,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    borderRadius: 28,
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 8,
     overflow: 'hidden',
+    borderWidth: 3,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
   },
   scrollToBottomGradient: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
   },
   offlineBar: {
-    backgroundColor: '#FF3B30',
-    padding: 8,
+    backgroundColor: '#FFF5F5',
+    padding: 10,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FFCDD2',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   offlineText: {
-    color: 'white',
+    color: '#E53935',
     marginLeft: 8,
-    fontWeight: '500',
+    fontWeight: '600',
+    fontSize: 15,
   }
 });
 

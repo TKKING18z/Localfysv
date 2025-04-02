@@ -103,8 +103,8 @@ const FavoritesScreen: React.FC = () => {
       </Text>
       <TouchableOpacity 
         style={styles.exploreButton}
-        // Fix: Navigate to MainTabs without extra params
-        onPress={() => navigation.navigate('MainTabs')}
+        // Fix: Navigate to MainTabs with proper params
+        onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
       >
         <Text style={styles.exploreButtonText}>Explorar negocios</Text>
       </TouchableOpacity>
@@ -210,8 +210,8 @@ const FavoritesScreen: React.FC = () => {
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          // Fix: Navigate to MainTabs and not try to use nested navigation directly
-          onPress={() => navigation.navigate('MainTabs')}
+          // Fix: Navigate to MainTabs with proper params
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Inicio</Text>

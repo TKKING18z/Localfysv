@@ -26,6 +26,9 @@ import ConversationItem from '../../components/chat/ConversationItem';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { Conversation } from '../../../models/chatTypes';
 import * as Haptics from 'expo-haptics';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type NavigationProp = StackNavigationProp<RootStackParamList, 'Conversations'>;
 
@@ -198,23 +201,195 @@ const ConversationsScreen: React.FC = () => {
     }
   }, [user, contextRefreshConversations, isOffline]);
   
-  // Refresh when screen comes into focus
+  // Función para actualizar fotos de perfil de negocios
+  const updateBusinessAvatars = useCallback(async () => {
+    if (!user || conversations.length === 0 || isOffline) return;
+    
+    try {
+      console.log('[ConversationsScreen] Verificando avatares de negocios en conversaciones...');
+      const db = firebase.firestore();
+      let updatedCount = 0;
+      
+      // Solo procesar conversaciones con businessId
+      const businessConversations = conversations.filter(
+        conv => conv.businessId && conv.participants.length >= 2
+      );
+      
+      console.log(`[ConversationsScreen] Encontradas ${businessConversations.length} conversaciones de negocios`);
+      
+      for (const conv of businessConversations) {
+        try {
+          // Identificar el ID del propietario del negocio
+          let businessOwnerId = '';
+          for (const participantId of conv.participants) {
+            if (participantId.includes('business_owner_') || participantId === conv.businessId) {
+              businessOwnerId = participantId;
+              break;
+            }
+          }
+          
+          // Si no lo encontramos, asumimos que es el otro participante que no es el usuario actual
+          if (!businessOwnerId) {
+            businessOwnerId = conv.participants.find(id => id !== user.uid) || '';
+          }
+          
+          // Verificar si ya tiene una foto de perfil
+          if (!businessOwnerId || 
+              (conv.participantPhotos && conv.participantPhotos[businessOwnerId])) {
+            continue;
+          }
+          
+          // Buscar la imagen principal del negocio
+          const businessDoc = await db.collection('businesses').doc(conv.businessId).get();
+          if (!businessDoc.exists) continue;
+          
+          const businessData = businessDoc.data();
+          if (!businessData?.images || !Array.isArray(businessData.images) || 
+              businessData.images.length === 0) continue;
+          
+          // Buscar la imagen principal o usar la primera disponible
+          let businessImageUrl = null;
+          const mainImage = businessData.images.find(img => img && img.isMain);
+          
+          if (mainImage && mainImage.url) {
+            businessImageUrl = mainImage.url;
+          } else if (businessData.images[0].url) {
+            businessImageUrl = businessData.images[0].url;
+          }
+          
+          if (!businessImageUrl) continue;
+          
+          // Actualizar la conversación con la imagen del negocio
+          const participantPhotos = conv.participantPhotos || {};
+          const updatedPhotos = { ...participantPhotos };
+          updatedPhotos[businessOwnerId] = businessImageUrl;
+          
+          // Actualizar en Firestore
+          await db.collection('conversations').doc(conv.id).update({
+            participantPhotos: updatedPhotos,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          
+          updatedCount++;
+        } catch (convError) {
+          console.error(`[ConversationsScreen] Error procesando conversación ${conv.id}:`, convError);
+        }
+      }
+      
+      if (updatedCount > 0) {
+        console.log(`[ConversationsScreen] Actualizadas ${updatedCount} fotos de perfil de negocios`);
+        // Refrescar conversaciones para ver los cambios
+        refreshConversations();
+      }
+    } catch (error) {
+      console.error('[ConversationsScreen] Error actualizando avatares:', error);
+    }
+  }, [user, conversations, isOffline, refreshConversations]);
+  
+  // Utilizamos un ref para controlar si ya se hizo la carga inicial
+  const initialLoadDone = useRef(false);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Cargar datos cuando el componente se monta (una sola vez)
+  useEffect(() => {
+    // Solo cargar si no se ha hecho ya
+    if (!initialLoadDone.current) {
+      console.log('[ConversationsScreen] Carga inicial de conversaciones');
+      
+      const loadInitialData = async () => {
+        try {
+          // Primero cargamos las conversaciones
+          await refreshConversations();
+          
+          // Sincronizar badge count al iniciar la pantalla
+          if (user) {
+            try {
+              const { notificationService } = require('../../../services/NotificationService');
+              await notificationService.syncBadgeCount(user.uid);
+              console.log('[ConversationsScreen] Badge count sincronizado correctamente');
+            } catch (badgeErr) {
+              console.error('[ConversationsScreen] Error sincronizando badge count:', badgeErr);
+            }
+          }
+          
+          // Verificamos si necesitamos actualizar avatares (máximo una vez al día)
+          try {
+            const lastAvatarUpdateStr = await AsyncStorage.getItem('last_avatar_update');
+            const lastUpdate = lastAvatarUpdateStr ? new Date(lastAvatarUpdateStr) : null;
+            const now = new Date();
+            
+            // Solo actualizar si han pasado más de 24 horas desde la última vez
+            if (!lastUpdate || (now.getTime() - lastUpdate.getTime() > 24 * 60 * 60 * 1000)) {
+              console.log('[ConversationsScreen] Primera actualización de avatares del día');
+              await updateBusinessAvatars();
+              await AsyncStorage.setItem('last_avatar_update', now.toISOString());
+            } else {
+              console.log('[ConversationsScreen] No es necesario actualizar avatares hoy');
+            }
+          } catch (avatarErr) {
+            console.error('[ConversationsScreen] Error en actualización de avatares:', avatarErr);
+          }
+          
+          // Marcar como completada la carga inicial
+          initialLoadDone.current = true;
+        } catch (err) {
+          console.error('[ConversationsScreen] Error en carga inicial:', err);
+        }
+      };
+      
+      loadInitialData();
+    }
+    
+    // Limpiar cualquier timeout al desmontar
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    };
+  }, [refreshConversations, updateBusinessAvatars, user]);
+  
+  // Implementamos useFocusEffect pero con protecciones estrictas
   useFocusEffect(
     useCallback(() => {
-      console.log('[ConversationsScreen] Screen focused - refreshing data');
-      
-      refreshConversations().catch(err => {
-        console.error('Error during focus refresh:', err);
-      });
+      // Evitamos la primera carga, ya que eso lo maneja el useEffect
+      if (initialLoadDone.current) {
+        console.log('[ConversationsScreen] Actualización por foco (no es la primera vez)');
+        
+        // Usamos un timeout para evitar múltiples refrescos en secuencia rápida
+        if (refreshTimeoutRef.current) {
+          clearTimeout(refreshTimeoutRef.current);
+        }
+        
+        // Esperar un poco antes de actualizar para asegurar que no hay múltiples refrescos
+        refreshTimeoutRef.current = setTimeout(async () => {
+          try {
+            await refreshConversations();
+            
+            // Sincronizar badge count cuando la pantalla recibe foco
+            if (user) {
+              const { notificationService } = require('../../../services/NotificationService');
+              await notificationService.syncBadgeCount(user.uid);
+              console.log('[ConversationsScreen] Badge count sincronizado al recibir foco');
+            }
+          } catch (err) {
+            console.error('[ConversationsScreen] Error en refresh por foco:', err);
+          }
+        }, 500);
+      }
       
       return () => {
-        // Cleanup when screen loses focus
+        // Limpieza al perder el foco
+        if (refreshTimeoutRef.current) {
+          clearTimeout(refreshTimeoutRef.current);
+          refreshTimeoutRef.current = null;
+        }
         setActiveConversation(null);
       };
-    }, [refreshConversations])
+    }, [refreshConversations, user])
   );
   
-  // Navigate to a specific conversation
+  // Navigate to a specific conversation - con protección contra navegación rápida repetida
   const handleConversationPress = useCallback((conversationId: string) => {
     console.log(`Navigating to conversation: ${conversationId}`);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -222,16 +397,20 @@ const ConversationsScreen: React.FC = () => {
     // Update active conversation to provide immediate visual feedback
     setActiveConversation(conversationId);
     
-    // Set the active conversation in the context
-    setActiveConversationId(conversationId);
-    
-    // Navigate to the Chat screen
+    // Navegar primero, luego establecer la conversación activa
+    // Esta secuencia evita problemas con el montaje/desmontaje del componente
     navigation.navigate('Chat', { conversationId });
+    
+    // Pequeño delay para evitar problemas de timing
+    setTimeout(() => {
+      // Establecer la conversación activa en el contexto después de la navegación
+      setActiveConversationId(conversationId);
+    }, 50);
   }, [navigation, setActiveConversationId]);
   
   // Navigate back
   const handleBackPress = useCallback(() => {
-    navigation.navigate('Home');
+    navigation.navigate('MainTabs', { screen: 'Home' });
   }, [navigation]);
   
   // Confirm deletion
@@ -303,10 +482,10 @@ const ConversationsScreen: React.FC = () => {
           // Show confirmation
           confirmDelete(conversationId);
         }}
-        activeOpacity={0.8}
+        activeOpacity={0.9}
       >
         <View style={styles.deleteActionContent}>
-          <MaterialIcons name="delete" size={24} color="white" />
+          <MaterialIcons name="delete-outline" size={32} color="#E53935" />
           <Text style={styles.deleteActionText}>Eliminar</Text>
         </View>
       </TouchableOpacity>
@@ -322,6 +501,28 @@ const ConversationsScreen: React.FC = () => {
       }
     }
     prevOpenedRow.current = conversationId;
+  }, []);
+  
+  // Función para probar notificaciones locales
+  const testNotification = useCallback(async () => {
+    try {
+      const notificationService = require('../../services/NotificationService').notificationService;
+      
+      // Mostrar una notificación de prueba
+      await notificationService.sendLocalNotification(
+        "Notificación de prueba",
+        "Esta es una notificación local de prueba para Localfy",
+        { type: 'test' }
+      );
+      
+      // Vibración para confirmar
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      
+      console.log('[ConversationsScreen] Notificación de prueba enviada');
+    } catch (error: any) {
+      console.error('[ConversationsScreen] Error enviando notificación de prueba:', error);
+      Alert.alert("Error", "No se pudo enviar la notificación de prueba");
+    }
   }, []);
   
   // Main render conditionals
@@ -386,6 +587,14 @@ const ConversationsScreen: React.FC = () => {
                 width: searchWidth.interpolate({
                   inputRange: [0, 1],
                   outputRange: ['0%', '100%']
+                }),
+                backgroundColor: searchWidth.interpolate({
+                  inputRange: [0, 0.1, 1],
+                  outputRange: ['transparent', '#F0F7FF', '#F0F7FF']
+                }),
+                borderWidth: searchWidth.interpolate({
+                  inputRange: [0, 0.1, 1],
+                  outputRange: [0, 1, 1]
                 })
               }
             ]}
@@ -420,8 +629,8 @@ const ConversationsScreen: React.FC = () => {
       {/* Offline indicator */}
       {isOffline && (
         <View style={styles.offlineBar}>
-          <MaterialIcons name="cloud-off" size={16} color="#FFF" />
-          <Text style={styles.offlineText}>Sin conexión</Text>
+          <MaterialIcons name="wifi-off" size={18} color="#E53935" />
+          <Text style={styles.offlineText}>Sin conexión a internet</Text>
         </View>
       )}
       
@@ -515,6 +724,17 @@ const ConversationsScreen: React.FC = () => {
           />
         )}
       </Animated.View>
+      
+      {/* Botón flotante para probar notificaciones (solo en desarrollo) */}
+      {__DEV__ && (
+        <TouchableOpacity 
+          style={styles.testNotificationButton}
+          onPress={testNotification}
+          activeOpacity={0.8}
+        >
+          <MaterialIcons name="notifications" size={24} color="#FFFFFF" />
+        </TouchableOpacity>
+      )}
     </SafeAreaView>
   );
 };
@@ -535,12 +755,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
     backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-    height: 60,
+    borderBottomWidth: 0,
+    height: 75,
     zIndex: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 5,
+    elevation: 5,
   },
   headerTitleContainer: {
     flex: 1,
@@ -548,70 +772,94 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    height: 40,
+    height: 45,
     overflow: 'hidden',
   },
   backButton: {
-    padding: 8,
-    borderRadius: 20,
+    padding: 10,
+    borderRadius: 22,
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
   },
   headerTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#000',
+    color: '#0A1629',
     textAlign: 'center',
+    letterSpacing: 0.3,
   },
   searchButton: {
-    padding: 8,
-    borderRadius: 20,
+    padding: 10,
+    borderRadius: 22,
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
   },
   searchBar: {
     position: 'absolute',
-    height: 36,
-    backgroundColor: '#F0F0F5',
-    borderRadius: 18,
-    paddingHorizontal: 12,
+    height: 45,
+    borderRadius: 20,
+    paddingHorizontal: 16,
     justifyContent: 'center',
     overflow: 'hidden',
+    borderColor: '#DBEAFE',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
   },
   searchInput: {
     fontSize: 16,
-    color: '#000',
+    color: '#0A1629',
     padding: 0,
     width: '100%',
   },
   unreadBadgeText: {
-    color: '#FF3B30',
+    color: '#0A84FF',
     fontWeight: 'bold',
   },
   contentContainer: {
     flex: 1,
+    backgroundColor: '#EFF6FF',
+    paddingTop: 10,
   },
   centerContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#EFF6FF',
   },
   loadingText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#333333',
+    color: '#0A84FF',
+    fontWeight: '600',
   },
   errorText: {
     marginTop: 16,
     fontSize: 16,
-    color: '#FF3B30',
+    color: '#E53935',
     textAlign: 'center',
+    fontWeight: '600',
+    maxWidth: '90%',
+    lineHeight: 24,
   },
   retryButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    minWidth: 120,
+    marginTop: 24,
+    paddingVertical: 14,
+    paddingHorizontal: 28,
+    backgroundColor: '#0A84FF',
+    borderRadius: 16,
+    minWidth: 140,
     alignItems: 'center',
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 5,
+    elevation: 5,
   },
   retryButtonText: {
     color: 'white',
@@ -620,34 +868,47 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     marginTop: 24,
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#0A1629',
+    letterSpacing: 0.3,
+    textAlign: 'center',
   },
   emptySubtext: {
-    marginTop: 12,
-    fontSize: 15,
-    color: '#8E8E93',
+    marginTop: 16,
+    fontSize: 16,
+    color: '#64748B',
     textAlign: 'center',
     maxWidth: '90%',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   deleteAction: {
-    backgroundColor: '#FF3B30',
+    backgroundColor: '#FEE2E2',
     justifyContent: 'center',
     alignItems: 'center',
-    width: 90,
+    width: 100,
     height: '100%',
+    borderLeftWidth: 1,
+    borderLeftColor: '#FFCDD2',
   },
   deleteActionContent: {
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#FFECEC',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    shadowColor: '#E53935',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 3,
+    elevation: 3,
   },
   deleteActionText: {
-    color: 'white',
-    fontSize: 13,
+    color: '#E53935',
+    fontSize: 14,
     fontWeight: 'bold',
-    marginTop: 4,
+    marginTop: 6,
   },
   actionButton: {
     marginTop: 24,
@@ -671,16 +932,41 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   offlineBar: {
-    backgroundColor: '#FF3B30',
-    padding: 8,
+    backgroundColor: '#FFF5F5',
+    padding: 10,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#FFCDD2',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3,
   },
   offlineText: {
-    color: 'white',
+    color: '#E53935',
     marginLeft: 8,
-    fontWeight: '500',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  testNotificationButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#007AFF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
+    zIndex: 999,
   }
 });
 

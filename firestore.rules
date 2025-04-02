@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Verifica si el usuario está autenticado
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Verifica si el usuario es el propietario de un documento
+    function isOwner() {
+      return request.auth.uid == resource.data.userId || 
+             request.auth.uid == resource.data.ownerId;
+    }
+    
+    // Verifica si el usuario es propietario del negocio
+    function isBusinessOwner(businessId) {
+      return request.auth.uid == get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId;
+    }
+    
+    // Reglas para usuarios
+    match /users/{userId} {
+      // Un usuario puede leer y actualizar su propio perfil
+      allow read: if isAuthenticated() && (request.auth.uid == userId);
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == userId);
+      allow delete: if false; // No permitir eliminación
+    }
+    
+    // Reglas para negocios
+    match /businesses/{businessId} {
+      // Cualquier usuario autenticado puede leer negocios
+      allow read: if isAuthenticated();
+      
+      // Solo el propietario puede crear, actualizar o eliminar un negocio
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && 
+                     (request.auth.uid == resource.data.ownerId);
+      allow delete: if isAuthenticated() && 
+                     (request.auth.uid == resource.data.ownerId);
+    }
+    
+    // Reglas para reservaciones
+    match /reservations/{reservationId} {
+      // Cualquier usuario autenticado puede leer y crear
+      allow read, create, update: if isAuthenticated();
+      
+      // Solo el propietario del negocio puede eliminar
+      allow delete: if isAuthenticated() && 
+                     request.auth.uid == get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.ownerId;
+    }
+    
+    // Reglas para disponibilidad de reservaciones
+    match /reservationAvailability/{businessId} {
+      // Cualquier usuario autenticado puede leer, crear o actualizar
+      allow read, create, update: if isAuthenticated();
+      allow delete: if false; // No permitir eliminación
+    }
+    
+    // Reglas para promociones
+    match /promotions/{promotionId} {
+      // Cualquier usuario autenticado puede leer promociones
+      allow read: if isAuthenticated();
+      // Cualquier usuario autenticado puede crear, actualizar o eliminar
+      allow create, update, delete: if isAuthenticated();
+    }
+    
+    // Reglas para reseñas
+    match /reviews/{reviewId} {
+      // Cualquier usuario autenticado puede leer reseñas
+      allow read: if isAuthenticated();
+      // Cualquier usuario autenticado puede crear una reseña
+      allow create: if isAuthenticated();
+      // Cualquier usuario autenticado puede actualizar o eliminar
+      allow update, delete: if isAuthenticated();
+    }
+    
+    // Reglas para conversaciones
+    match /conversations/{conversationId} {
+      // Cualquier usuario autenticado puede leer, crear o actualizar
+      allow read, create, update: if isAuthenticated();
+      // No permitir eliminación
+      allow delete: if false;
+      
+      // Permitir acceso a la subcollection de mensajes
+      match /messages/{messageId} {
+        // Cualquier usuario autenticado puede leer, crear o actualizar mensajes
+        allow read, create, update: if isAuthenticated();
+        // No permitir eliminación
+        allow delete: if false;
+      }
+    }
+    
+    // Reglas para mensajes de chat como colección separada (mantener por compatibilidad)
+    match /messages/{messageId} {
+      // Cualquier usuario autenticado puede leer, crear o actualizar
+      allow read, create, update: if isAuthenticated();
+      // No permitir eliminación
+      allow delete: if false;
+    }
+    
+    // Regla por defecto - denegar todo lo demás
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

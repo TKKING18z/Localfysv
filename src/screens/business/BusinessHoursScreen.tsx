@@ -237,13 +237,17 @@ const BusinessHoursScreen: React.FC = () => {
         <TouchableOpacity 
           style={styles.backButton}
           onPress={handleBack}
+          accessibilityLabel="Volver atrás"
+          accessibilityRole="button"
         >
-          <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+          <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Horarios de Atención</Text>
         <TouchableOpacity 
           style={styles.saveButton}
           onPress={handleSave}
+          accessibilityLabel="Guardar horarios"
+          accessibilityRole="button"
         >
           <Text style={styles.saveButtonText}>Guardar</Text>
         </TouchableOpacity>
@@ -251,9 +255,9 @@ const BusinessHoursScreen: React.FC = () => {
       
       <ScrollView style={styles.scrollContent}>
         <View style={styles.infoBox}>
-          <MaterialIcons name="info-outline" size={20} color="#007AFF" />
+          <MaterialIcons name="schedule" size={20} color="#007aff" />
           <Text style={styles.infoText}>
-            Configura los horarios de atención de tu negocio. Si está cerrado un día, activa el interruptor "Cerrado".
+            Configura los horarios de atención de tu negocio. Si está cerrado en algún día específico, activa el interruptor "Cerrado".
           </Text>
         </View>
         
@@ -282,27 +286,39 @@ const BusinessHoursScreen: React.FC = () => {
                   <TouchableOpacity 
                     style={styles.timeButton}
                     onPress={() => openTimePicker(dayKey, 'open')}
+                    accessibilityLabel={`Hora de apertura: ${dayHours.open}`}
+                    accessibilityRole="button"
                   >
+                    <View style={styles.timeIconContainer}>
+                      <MaterialIcons name="wb-sunny" size={18} color="#007aff" />
+                    </View>
                     <Text style={styles.timeLabel}>Abrir:</Text>
                     <Text style={styles.timeValue}>{dayHours.open}</Text>
-                    <MaterialIcons name="access-time" size={20} color="#007AFF" />
+                    <MaterialIcons name="access-time" size={20} color="#007aff" />
                   </TouchableOpacity>
                   
                   <TouchableOpacity 
                     style={styles.timeButton}
                     onPress={() => openTimePicker(dayKey, 'close')}
+                    accessibilityLabel={`Hora de cierre: ${dayHours.close}`}
+                    accessibilityRole="button"
                   >
+                    <View style={styles.timeIconContainer}>
+                      <MaterialIcons name="nights-stay" size={18} color="#007aff" />
+                    </View>
                     <Text style={styles.timeLabel}>Cerrar:</Text>
                     <Text style={styles.timeValue}>{dayHours.close}</Text>
-                    <MaterialIcons name="access-time" size={20} color="#007AFF" />
+                    <MaterialIcons name="access-time" size={20} color="#007aff" />
                   </TouchableOpacity>
                   
                   <TouchableOpacity 
                     style={styles.copyButton}
                     onPress={() => copyToAllDays(dayKey)}
+                    accessibilityLabel="Copiar este horario a todos los días"
+                    accessibilityRole="button"
                   >
-                    <MaterialIcons name="content-copy" size={20} color="#007AFF" />
-                    <Text style={styles.copyButtonText}>Copiar a todos</Text>
+                    <MaterialIcons name="content-copy" size={18} color="#007aff" />
+                    <Text style={styles.copyButtonText}>Aplicar a todos los días</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -325,37 +341,46 @@ const BusinessHoursScreen: React.FC = () => {
   );
 };
 
-const styles = StyleSheet.create<BusinessHoursStyles>({
+interface ExtendedBusinessHoursStyles extends BusinessHoursStyles {
+  timeIconContainer: ViewStyle;
+}
+
+const styles = StyleSheet.create<ExtendedBusinessHoursStyles>({
   container: {
     flex: 1,
-    backgroundColor: '#F5F7FF',
+    backgroundColor: '#F0F7FF', // Color de fondo más suave
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: 16,
-    backgroundColor: 'white',
+    backgroundColor: '#007aff', // Color azul para el header
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 2,
+    elevation: 3,
   },
   backButton: {
     padding: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#FFFFFF', // Texto blanco para mejor contraste
   },
   saveButton: {
-    padding: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 16,
   },
   saveButtonText: {
     fontSize: 16,
-    color: '#007AFF',
+    color: '#FFFFFF',
     fontWeight: 'bold',
   },
   scrollContent: {
@@ -364,81 +389,112 @@ const styles = StyleSheet.create<BusinessHoursStyles>({
   },
   infoBox: {
     flexDirection: 'row',
-    backgroundColor: '#E1F5FE',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
+    backgroundColor: 'rgba(0,122,255,0.08)', // Color azul suave que coincide con el tema
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 20,
     alignItems: 'center',
+    borderLeftWidth: 3,
+    borderLeftColor: '#007aff',
   },
   infoText: {
     flex: 1,
-    marginLeft: 8,
+    marginLeft: 10,
     fontSize: 14,
-    color: '#0277BD',
+    color: '#2C3E50', // Color más legible
+    lineHeight: 20,
   },
   dayContainer: {
     backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
+    borderRadius: 12,
+    padding: 18,
+    marginBottom: 16,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+    borderLeftWidth: 3,
+    borderLeftColor: '#007aff', // Borde azul a la izquierda
   },
   dayHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0,122,255,0.08)', // Línea divisoria sutil
   },
   dayLabel: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#007aff', // Día en azul para destacar
   },
   closedContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.03)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
   },
   closedLabel: {
     fontSize: 14,
-    color: '#666666',
+    color: '#5A6877',
     marginRight: 8,
+    fontWeight: '500',
   },
   hoursContainer: {
-    marginTop: 8,
+    marginTop: 12,
   },
   timeButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F0F0F5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 8,
+    backgroundColor: '#F6F8FC',
+    padding: 14,
+    borderRadius: 10,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
   },
   timeLabel: {
-    fontSize: 16,
-    color: '#333333',
+    fontSize: 15,
+    color: '#5A6877',
     width: 60,
+    fontWeight: '500',
   },
   timeValue: {
     flex: 1,
     fontSize: 16,
-    color: '#333333',
+    color: '#2C3E50',
     fontWeight: 'bold',
+  },
+  timeIconContainer: {
+    width: 28,
+    height: 28,
+    backgroundColor: 'rgba(0,122,255,0.1)',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
   },
   copyButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0,122,255,0.08)',
+    borderRadius: 20,
+    marginTop: 4,
   },
   copyButtonText: {
     fontSize: 14,
-    color: '#007AFF',
-    marginLeft: 4,
+    color: '#007aff',
+    marginLeft: 6,
+    fontWeight: '500',
   },
 });
 
