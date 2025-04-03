@@ -37,7 +37,7 @@ import firebase from 'firebase/compat/app';
 import BusinessHoursView from '../components/BusinessHoursView';
 import PaymentMethodsView from '../components/PaymentMethodsView';
 import EnhancedGallery from '../components/EnhancedGallery';
-import VideoPlayer from '../components/VideoPlayer';
+// Removed import for VideoPlayer
 import SocialLinks from '../components/SocialLinks';
 import MenuViewer from '../components/MenuViewer';
 import ReviewForm from '../../components/reviews/ReviewForm';
@@ -475,12 +475,7 @@ const BusinessDetailScreen: React.FC = () => {
     if (business) {
       if (isRestaurant && (business.menu || business.menuUrl)) {
         tabs.push('menu');
-      }
-      
-      if (business.videos && business.videos.length > 0) {
-        tabs.push('videos');
-      }
-      
+      }  
       tabs.push('promociones');
       tabs.push('reseñas');
       
@@ -830,7 +825,6 @@ const BusinessDetailScreen: React.FC = () => {
                     tab === 'info' ? 'info' :
                     tab === 'gallery' ? 'photo-library' :
                     tab === 'menu' ? (isTouristAttraction ? 'hiking' : 'restaurant-menu') :
-                    tab === 'videos' ? 'videocam' : 
                     tab === 'promociones' ? 'local-offer' :
                     tab === 'reservas' ? 'event-available' : 'rate-review'
                   } 
@@ -844,7 +838,6 @@ const BusinessDetailScreen: React.FC = () => {
                   {tab === 'info' ? 'Información' :
                    tab === 'gallery' ? 'Galería' :
                    tab === 'menu' ? (isTouristAttraction ? 'Planes' : 'Menú') :
-                   tab === 'videos' ? 'Videos' : 
                    tab === 'promociones' ? 'Promos' :
                    tab === 'reservas' ? 'Reservas' : 'Reseñas'}
                 </Text>
@@ -999,23 +992,6 @@ const BusinessDetailScreen: React.FC = () => {
             </>
           )}
           
-          {/* Contenido de la pestaña de Videos */}
-          {activeTab === 'videos' && (
-            <>
-              {business.videos && business.videos.length > 0 ? (
-                <View style={styles.card}>
-                  <Text style={styles.cardSectionTitle}>Videos</Text>
-                  <VideoPlayer videos={business.videos} />
-                </View>
-              ) : (
-                <View style={styles.emptyCard}>
-                  <MaterialIcons name="videocam" size={48} color="#E5E5EA" />
-                  <Text style={styles.emptyCardText}>No hay videos disponibles</Text>
-                </View>
-              )}
-            </>
-          )}
-
           {/* Contenido de la pestaña de Promociones */}
           {activeTab === 'promociones' && (
             <View style={styles.card}>

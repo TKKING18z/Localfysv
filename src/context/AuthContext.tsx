@@ -4,43 +4,64 @@ import 'firebase/compat/auth';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
 
+// Definición de tipo para el servicio de notificaciones
+interface NotificationService {
+  configureNotifications: () => Promise<any>;
+  requestNotificationPermissions: () => Promise<{success: boolean; data?: {granted: boolean}}>;
+  registerForPushNotifications: () => Promise<{success: boolean; data?: {token: string}}>;
+  saveTokenToFirestore: (userId: string, token: string) => Promise<any>;
+  removeTokenFromFirestore: (userId: string, token: string) => Promise<any>;
+}
+
 // Define los tipos para nuestro contexto
 interface AuthContextType {
   user: firebase.User | null;
   isLoading: boolean;
-  loading: boolean; // Add alias for loading
+  loading: boolean;
+  isGoogleLoading: boolean; // Nuevo: estado de carga para Google
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, name: string) => Promise<boolean>;
-  signUp: (email: string, password: string, name: string, role?: string) => Promise<boolean>; // Add alias for register
+  signUp: (email: string, password: string, name: string, role?: string) => Promise<boolean>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
+  signInWithGoogle: () => Promise<boolean>; // Nueva función para iniciar sesión con Google
 }
 
 // Crear el contexto
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+// Hook para usar el contexto de autenticación
+export const useAuth = (): AuthContextType => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth debe ser usado dentro de un AuthProvider');
+  }
+  return context;
+};
+
 // Proveedor del contexto
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [user, setUser] = useState<firebase.User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false); // Nuevo estado para Google auth
   
   // Verificar si hay una sesión al iniciar
   useEffect(() => {
     console.log('AuthProvider initialized, checking for existing session...');
     
     // Cargar dinámicamente el servicio de notificaciones para evitar dependencias circulares
-    let notificationService;
+    let notificationService: NotificationService | undefined;
     try {
       notificationService = require('../../services/NotificationService').notificationService;
       
       // Inicializar notificaciones si el servicio está disponible
       if (notificationService) {
-        notificationService.configureNotifications().catch(err => {
+        notificationService.configureNotifications().catch((err: Error) => {
           console.error('Error configuring notifications:', err);
         });
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error('Error loading notification service:', err);
     }
     
@@ -69,12 +90,12 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
                   await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
                 }
               }
-            } catch (notificationError) {
+            } catch (notificationError: unknown) {
               console.error('Error setting up notifications:', notificationError);
               // No fallar el login por problemas con notificaciones
             }
           }
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('Error saving session info to AsyncStorage:', error);
         }
       } else {
@@ -86,7 +107,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
           await AsyncStorage.removeItem('user_email');
           await AsyncStorage.removeItem('user_display_name');
           console.log('Session info removed from AsyncStorage');
-        } catch (error) {
+        } catch (error: unknown) {
           console.error('Error removing session info from AsyncStorage:', error);
         }
       }
@@ -116,6 +137,46 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       return false;
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Nueva función para iniciar sesión con Google
+  const signInWithGoogle = async (): Promise<boolean> => {
+    try {
+      setIsGoogleLoading(true);
+      
+      // Configurar proveedor de Google
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.addScope('profile');
+      provider.addScope('email');
+      
+      // En aplicaciones móviles, usamos signInWithRedirect() o signInWithPopup()
+      // dependiendo de la plataforma y configuración
+      const result = await firebase.auth().signInWithPopup(provider);
+      
+      if (result.user) {
+        console.log('Google login successful:', result.user.uid);
+        // onAuthStateChanged se encargará de actualizar el estado
+        return true;
+      } else {
+        console.error('No user returned from Google sign in');
+        return false;
+      }
+    } catch (error: any) {
+      console.error('Google login error:', error);
+      // Mensajes de error más amigables
+      if (error.code === 'auth/popup-closed-by-user') {
+        Alert.alert('Inicio de sesión cancelado', 'Has cerrado la ventana de inicio de sesión de Google.');
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // No mostrar alerta para este caso, ya que es una operación normal
+        console.log('Popup request cancelled');
+      } else {
+        Alert.alert('Error al iniciar sesión con Google', 
+                    error.message || 'Ocurrió un error durante el inicio de sesión con Google.');
+      }
+      return false;
+    } finally {
+      setIsGoogleLoading(false);
     }
   };
 
@@ -160,7 +221,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       if (user) {
         try {
           // Cargar dinámicamente el servicio de notificaciones
-          const notificationService = require('../../services/NotificationService').notificationService;
+          const notificationService: NotificationService | undefined = require('../../services/NotificationService').notificationService;
           if (notificationService) {
             // Obtener token actual
             const tokenResult = await notificationService.registerForPushNotifications();
@@ -169,7 +230,7 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
               await notificationService.removeTokenFromFirestore(user.uid, tokenResult.data.token);
             }
           }
-        } catch (notificationError) {
+        } catch (notificationError: unknown) {
           console.error('Error removing notification token:', notificationError);
           // Continuar con el cierre de sesión aunque falle la eliminación del token
         }
@@ -209,11 +270,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       await user.reload();
       // Actualizar el estado para reflejar los cambios
       const currentUser = firebase.auth().currentUser;
-if (currentUser) {
-  setUser(currentUser);
-} else {
-  setUser(null);
-}
+      if (currentUser) {
+        setUser(currentUser);
+      } else {
+        setUser(null);
+      }
       console.log('Profile updated successfully');
       return true;
     } catch (error: any) {
@@ -228,13 +289,15 @@ if (currentUser) {
     <AuthContext.Provider value={{
       user,
       isLoading,
-      loading: isLoading, // Add loading as alias for isLoading
+      loading: isLoading,
+      isGoogleLoading,
       login,
       register,
-      signUp, // Add the new signUp alias
+      signUp,
       logout,
       resetPassword,
-      updateProfile
+      updateProfile,
+      signInWithGoogle
     }}>
       {children}
     </AuthContext.Provider>

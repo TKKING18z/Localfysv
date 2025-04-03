@@ -19,6 +19,7 @@ import { RootStackParamList } from '../../navigation/AppNavigator';
 import { Promotion } from '../../types/businessTypes';
 import PromoCard from '../../components/promotions/PromoCard';
 import PromotionForm from '../../components/promotions/PromotionForm';
+import { useStore } from '../../context/StoreContext';
 
 // Definir explícitamente los parámetros que espera esta pantalla
 type PromotionsScreenParams = {
@@ -34,32 +35,49 @@ type NavigationProp = StackNavigationProp<RootStackParamList>;
 const PromotionsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<PromotionsRouteProp>();
-  const { businessId, businessName, isNewBusiness } = route.params;
-  
+  const { businessId, businessName } = route.params;
+  const { setTempData, getTempData } = useStore();
+
   // Estados
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [selectedPromotion, setSelectedPromotion] = useState<Promotion | null>(null);
-  
+
   // Check if this is a temporary business
-  const isTempBusiness = businessId.toString().startsWith('temp_');
-  
+  const isTempBusiness = businessId.toString().startsWith('temp_') || businessId === 'new_business';
+
   // Cargar promociones
   const loadPromotions = useCallback(async () => {
     try {
       setLoading(true);
-      
-      // For temporary businesses, just set empty promotions
+
+      // For temporary businesses, get promotions from StoreContext
       if (isTempBusiness) {
-        setPromotions([]);
+        console.log(`Loading temporary promotions for ${businessId}`);
+        const tempPromotions = getTempData(`promotions_${businessId}`) || [];
+        console.log(`Found ${tempPromotions.length} temporary promotions`);
+        
+        // CAMBIO: Solo actualizar si es necesario
+        setPromotions(tempPromotions);
+        
+        // CAMBIO: Solo actualizar si es nuevo negocio Y hay promociones
+        if (businessId === 'new_business' && tempPromotions.length > 0) {
+          // Actualizar solo si es necesario para evitar bucles
+          const existingData = getTempData('promotions_new_business') || [];
+          if (JSON.stringify(existingData) !== JSON.stringify(tempPromotions)) {
+            setTempData('promotions_new_business', tempPromotions);
+            setTempData('tempPromotions', true);
+          }
+        }
+        
         setLoading(false);
         return;
       }
-      
+
       const result = await firebaseService.promotions.getByBusinessId(businessId);
-      
+
       if (result.success && result.data) {
         setPromotions(result.data);
       } else {
@@ -72,26 +90,26 @@ const PromotionsScreen: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [businessId, isTempBusiness]);
-  
+  }, [businessId, isTempBusiness, getTempData, setTempData]);
+
   // Cargar al montar el componente
   useEffect(() => {
     loadPromotions();
   }, [loadPromotions]);
-  
+
   // Refrescar datos
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadPromotions();
     setRefreshing(false);
   };
-  
+
   // Abrir formulario para editar
   const handleEdit = (promotion: Promotion) => {
     setSelectedPromotion(promotion);
     setShowForm(true);
   };
-  
+
   // Eliminar promoción
   const handleDelete = (promotion: Promotion) => {
     Alert.alert(
@@ -104,6 +122,25 @@ const PromotionsScreen: React.FC = () => {
           style: 'destructive',
           onPress: async () => {
             try {
+              if (isTempBusiness) {
+                // For temporary businesses, delete from StoreContext
+                const currentPromotions = getTempData(`promotions_${businessId}`) || [];
+                const updatedPromotions = currentPromotions.filter((p: Promotion) => p.id !== promotion.id);
+                // Actualizar ambas claves para reactividad
+                setTempData(`promotions_${businessId}`, updatedPromotions);
+                setTempData('promotions_new_business', updatedPromotions);
+
+                // Actualizar el indicador si no quedan promociones
+                if (businessId === 'new_business' && updatedPromotions.length === 0) {
+                  setTempData('tempPromotions', false);
+                }
+
+                setPromotions(updatedPromotions);
+                Alert.alert('Éxito', 'Promoción eliminada correctamente');
+                return;
+              }
+
+              // Regular delete for non-temporary businesses
               const result = await firebaseService.promotions.delete(promotion.id);
               if (result.success) {
                 // Actualizar lista localmente
@@ -121,17 +158,22 @@ const PromotionsScreen: React.FC = () => {
       ]
     );
   };
-  
+
   // Guardar promoción (nueva o editada)
   const handleSave = async (promotionData: any) => {
     try {
-      // For temporary businesses, store in local state only
+      // For temporary businesses, store in StoreContext
       if (isTempBusiness) {
+        console.log(`Saving temporary promotion for ${businessId}`);
+        const currentPromotions = getTempData(`promotions_${businessId}`) || [];
+        let updatedPromotions = [...currentPromotions];
+
         if (selectedPromotion) {
           // Update existing
-          setPromotions(prev => 
-            prev.map(p => p.id === selectedPromotion.id ? { ...p, ...promotionData } : p)
+          updatedPromotions = updatedPromotions.map(p =>
+            p.id === selectedPromotion.id ? { ...p, ...promotionData } : p
           );
+          console.log(`Updated existing temporary promotion: ${selectedPromotion.id}`);
         } else {
           // Add new with temp ID
           const tempPromotion = {
@@ -140,23 +182,35 @@ const PromotionsScreen: React.FC = () => {
             businessId,
             isActive: true,
           };
-          setPromotions(prev => [...prev, tempPromotion]);
+          updatedPromotions.push(tempPromotion);
+          console.log(`Created new temporary promotion: ${tempPromotion.id}`);
         }
-        
+
+        // Save to StoreContext and update local state
+        setTempData(`promotions_${businessId}`, updatedPromotions);
+        setTempData('promotions_new_business', updatedPromotions);
+
+        // Actualizar indicador para AddBusinessScreen
+        if (businessId === 'new_business') {
+          setTempData('tempPromotions', true);
+        }
+
+        setPromotions(updatedPromotions);
+
         setShowForm(false);
         setSelectedPromotion(null);
         Alert.alert('Éxito', 'Promoción guardada localmente. Se creará cuando registre el negocio.');
         return;
       }
-      
+
       let result;
-      
+
       if (selectedPromotion) {
         // Actualizar existente
         result = await firebaseService.promotions.update(selectedPromotion.id, promotionData);
         if (result.success) {
           // Actualizar en la lista local
-          setPromotions(prev => 
+          setPromotions(prev =>
             prev.map(p => p.id === selectedPromotion.id ? { ...p, ...promotionData } : p)
           );
         }
@@ -167,15 +221,15 @@ const PromotionsScreen: React.FC = () => {
           businessId,
           isActive: true,
         };
-        
+
         result = await firebaseService.promotions.create(newPromotion);
-        
+
         if (result.success && result.data) {
           // Recargar para obtener la nueva promoción
           await loadPromotions();
         }
       }
-      
+
       if (result?.success) {
         setShowForm(false);
         setSelectedPromotion(null);
@@ -188,21 +242,21 @@ const PromotionsScreen: React.FC = () => {
       Alert.alert('Error', 'No se pudo guardar la promoción');
     }
   };
-  
+
   // Renderizar cada promoción
   const renderPromotion = ({ item }: { item: Promotion }) => (
     <View style={styles.promoItemContainer}>
       <PromoCard promotion={item} />
       <View style={styles.promoActions}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.editButton}
           onPress={() => handleEdit(item)}
         >
           <MaterialIcons name="edit" size={22} color="#007AFF" />
           <Text style={styles.editButtonText}>Editar</Text>
         </TouchableOpacity>
-        
-        <TouchableOpacity 
+
+        <TouchableOpacity
           style={styles.deleteButton}
           onPress={() => handleDelete(item)}
         >
@@ -212,7 +266,7 @@ const PromotionsScreen: React.FC = () => {
       </View>
     </View>
   );
-  
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -234,12 +288,12 @@ const PromotionsScreen: React.FC = () => {
           <MaterialIcons name="add-circle" size={24} color="#007AFF" />
         </TouchableOpacity>
       </View>
-      
+
       {/* Información del negocio */}
       <View style={styles.businessInfo}>
         <Text style={styles.businessName}>{businessName}</Text>
       </View>
-      
+
       {/* Add info banner for new businesses */}
       {isTempBusiness && (
         <View style={styles.infoBanner}>
@@ -249,7 +303,7 @@ const PromotionsScreen: React.FC = () => {
           </Text>
         </View>
       )}
-      
+
       {/* Lista de promociones */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
@@ -278,7 +332,7 @@ const PromotionsScreen: React.FC = () => {
               <Text style={styles.emptySubtext}>
                 Las promociones atraen más clientes. ¡Crea una ahora!
               </Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.createButton}
                 onPress={() => {
                   setSelectedPromotion(null);
@@ -292,7 +346,7 @@ const PromotionsScreen: React.FC = () => {
           }
         />
       )}
-      
+
       {/* Modal para formulario */}
       <Modal
         visible={showForm}
@@ -309,7 +363,7 @@ const PromotionsScreen: React.FC = () => {
           );
         }}
       >
-        <PromotionForm 
+        <PromotionForm
           businessId={businessId}
           initialValues={selectedPromotion || undefined}
           onSave={handleSave}

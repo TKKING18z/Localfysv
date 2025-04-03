@@ -144,9 +144,10 @@ const BUSINESS_CATEGORIES = [
 ];
 
 const AddBusinessScreen: React.FC = () => {
-  const navigation = useNavigation<AddBusinessScreenNavigationProp>();
-  const store = useStore();
-  const { user } = useAuth();
+const navigation = useNavigation<AddBusinessScreenNavigationProp>();
+const store = useStore();
+const { user } = useAuth();
+const { getTempData, removeTempData, setTempData } = useStore();
   
   // Form state
   const [name, setName] = useState('');
@@ -193,6 +194,9 @@ const AddBusinessScreen: React.FC = () => {
     availableDays: DEFAULT_AVAILABLE_DAYS
   });
 
+  // Añade este estado para forzar un re-render
+  const [forceRender, setForceRender] = useState(0);
+
   // Track form changes - Fix the infinite loop by using a flag
   useEffect(() => {
     // Only update if content actually changed (not just on initial render)
@@ -208,6 +212,36 @@ const AddBusinessScreen: React.FC = () => {
     }
   }, [name, description, category, address, phone, image, 
       location, businessHours, paymentMethods, socialLinks, menu, menuUrl, hasUnsavedChanges]);
+
+  // Añadir este useEffect para verificar promociones existentes al inicio
+  useEffect(() => {
+    // Verificar si hay promociones al iniciar
+    const tempPromotions = getTempData('promotions_new_business');
+    if (tempPromotions && tempPromotions.length > 0 && !getTempData('tempPromotions')) {
+      // Si hay promociones pero no está marcado el indicador, actualizarlo
+      setTempData('tempPromotions', true);
+    }
+  }, [getTempData, setTempData]);
+
+  // Verificación de promociones temporales cada vez que el componente está en foco
+  useFocusEffect(
+    useCallback(() => {
+      // Verificar explícitamente cada vez que el componente está en foco
+      const promotions = getTempData('promotions_new_business') || [];
+      console.log(`[AddBusinessScreen] Focus - Verificando promociones: ${promotions.length} encontradas`);
+      
+      if (promotions.length > 0 && !getTempData('tempPromotions')) {
+        console.log('[AddBusinessScreen] Encontradas promociones pero falta el indicador - actualizando');
+        setTempData('tempPromotions', true);
+      } else if (promotions.length === 0 && getTempData('tempPromotions')) {
+        console.log('[AddBusinessScreen] No hay promociones pero el indicador está activo - corrigiendo');
+        setTempData('tempPromotions', false);
+      }
+      
+      // Forzar re-render al volver a esta pantalla
+      setForceRender(Date.now());
+    }, [])
+  );
 
   // Handle back button to prevent accidental navigation away
   useFocusEffect(
@@ -655,6 +689,46 @@ const AddBusinessScreen: React.FC = () => {
         }
       }
       
+      // Recuperar y crear promociones desde el almacenamiento temporal
+      const tempBusinessId = 'new_business'; // ID para negocios temporales
+      const tempPromotions = getTempData(`promotions_${tempBusinessId}`) || [];
+      
+      if (tempPromotions.length > 0) {
+        console.log(`Creando ${tempPromotions.length} promociones permanentes`);
+        
+        for (const promotion of tempPromotions) {
+          try {
+            // Preparar datos de la promoción
+            const promotionData = {
+              ...promotion,
+              businessId: businessId, // Actualizar a ID permanente
+            };
+            
+            // Eliminar el ID temporal
+            const tempId = promotionData.id;
+            delete promotionData.id;
+            
+            // Crear la promoción permanente
+            const promoResult = await firebaseService.promotions.create(promotionData);
+            
+            if (promoResult.success) {
+              console.log(`Promoción temporal ${tempId} creada permanentemente con ID: ${promoResult.data?.id}`);
+            } else {
+              console.error(`Error al guardar promoción temporal ${tempId}:`, promoResult.error);
+            }
+          } catch (promoError) {
+            console.error('Error al guardar promoción:', promoError);
+            // Continue with other promotions even if one fails
+          }
+        }
+        
+        // Limpiar datos temporales después de guardar
+        removeTempData(`promotions_${tempBusinessId}`);
+        removeTempData('promotions_new_business'); // Asegúrate de limpiar ambas claves
+        removeTempData('tempPromotions');
+        console.log('Datos temporales de promociones eliminados');
+      }
+      
       // Upload main image if available
       if (image) {
         try {
@@ -959,6 +1033,22 @@ const AddBusinessScreen: React.FC = () => {
     }
   };
 
+  // Función para verificar si hay promociones
+  const hasPromotions = () => {
+    // Verificar primero el indicador explícito
+    const hasFlag = getTempData('tempPromotions');
+    if (hasFlag === true) {
+      console.log('[AddBusinessScreen] hasPromotions: true por flag');
+      return true;
+    }
+    
+    // Verificar también los datos reales
+    const promos = getTempData('promotions_new_business');
+    const result = Array.isArray(promos) && promos.length > 0;
+    console.log(`[AddBusinessScreen] hasPromotions: ${result} por datos (${Array.isArray(promos) ? promos.length : 0} promociones)`);
+    return result;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -1220,10 +1310,12 @@ const AddBusinessScreen: React.FC = () => {
                   <MaterialIcons name="local-offer" size={24} color="#007aff" />
                 </View>
                 <Text style={styles.advancedButtonText}>Gestionar Promociones</Text>
+                {/* Forzamos que este componente se re-evalúe con la clave forceRender */}
                 <MaterialIcons 
+                  key={`promo-check-${forceRender}`}
                   name="check-circle" 
                   size={24} 
-                  color={store.getTempData('tempPromotions') ? "#34C759" : "#E5E5EA"} 
+                  color={hasPromotions() ? "#34C759" : "#E5E5EA"} 
                 />
               </TouchableOpacity>
             </View>
@@ -1720,6 +1812,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#A2D1FF',
     shadowOpacity: 0.1,
   },
+
   confirmLocationButtonText: {
     color: 'white',
     fontSize: 16,
@@ -1728,3 +1821,4 @@ const styles = StyleSheet.create({
 });
 
 export default AddBusinessScreen;
+

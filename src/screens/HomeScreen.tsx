@@ -21,8 +21,6 @@ import { useChat } from '../context/ChatContext';
 import BusinessCard from '../components/BusinessCard';
 import SkeletonBusinessCard from '../components/SkeletonBusinessCard';
 import { useLocation } from '../hooks/useLocation';
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
 
 // Extended navigation params type to include all screens used in this component
 type ExtendedStackParamList = RootStackParamList & {
@@ -171,17 +169,6 @@ const HomeScreen: React.FC = () => {
     navigation.navigate('BusinessDetail', { businessId: business.id });
   };
 
-  // Handle logout
-  const handleLogout = async () => {
-    try {
-      await firebase.auth().signOut();
-      // No need to navigate to Login, Auth Navigator will handle this automatically
-    } catch (error) {
-      console.error('Error logging out:', error);
-      Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
-    }
-  };
-
   // Render category item
   const renderCategoryItem = ({ item }: { item: string | null }) => (
     <TouchableOpacity
@@ -294,10 +281,6 @@ const HomeScreen: React.FC = () => {
               )}
             </View>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
-            <MaterialIcons name="logout" size={24} color="#007AFF" />
-          </TouchableOpacity>
         </View>
       </View>
       
@@ -405,55 +388,55 @@ const HomeScreen: React.FC = () => {
         />
       )}
       
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNavigation}>
-        <TouchableOpacity style={styles.navItem}>
-          <MaterialIcons name="home" size={24} color="#007AFF" />
-          <Text style={styles.navItemTextActive}>Inicio</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Conversations')}
-        >
-          <View>
-            <MaterialIcons name="chat" size={24} color="#8E8E93" />
-            {unreadTotal > 0 && (
-              <View style={styles.chatBadge}>
-                <Text style={styles.chatBadgeText}>
-                  {unreadTotal > 99 ? '99+' : unreadTotal}
-                </Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.navItemText}>Mensajes</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItemCenter}
-          onPress={() => navigation.navigate('AddBusiness')}
-        >
-          <View style={styles.navItemCenterButton}>
-            <MaterialIcons name="add" size={28} color="white" />
-          </View>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Favorites')}
-        >
-          <MaterialIcons name="favorite-border" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Favoritos</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Profile')}
-        >
-          <MaterialIcons name="person-outline" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Perfil</Text>
-        </TouchableOpacity>
-      </View>
+      {/* Navegación Inferior */}
+<View style={styles.bottomNavigation}>
+  <TouchableOpacity style={styles.navItem}>
+    <MaterialIcons name="home" size={24} color="#007AFF" />
+    <Text style={styles.navItemTextActive}>Inicio</Text>
+  </TouchableOpacity>
+  
+  <TouchableOpacity 
+    style={styles.navItem} 
+    onPress={() => navigation.navigate('Map')}
+  >
+    <MaterialIcons name="map" size={24} color="#8E8E93" />
+    <Text style={styles.navItemText}>Mapa</Text>
+  </TouchableOpacity>
+  
+  <TouchableOpacity 
+    style={styles.navItemCenter}
+    onPress={() => navigation.navigate('AddBusiness')}
+  >
+    <View style={styles.navItemCenterButton}>
+      <MaterialIcons name="add" size={28} color="white" />
+    </View>
+  </TouchableOpacity>
+  
+  <TouchableOpacity 
+    style={styles.navItem} 
+    onPress={() => navigation.navigate('Favorites')}
+  >
+    <MaterialIcons name="favorite-border" size={24} color="#8E8E93" />
+    <Text style={styles.navItemText}>Favoritos</Text>
+  </TouchableOpacity>
+  
+  <TouchableOpacity 
+    style={styles.navItem} 
+    onPress={() => navigation.navigate('Conversations')}
+  >
+    <View>
+      <MaterialIcons name="chat" size={24} color="#8E8E93" />
+      {unreadTotal > 0 && (
+        <View style={styles.chatBadge}>
+          <Text style={styles.chatBadgeText}>
+            {unreadTotal > 99 ? '99+' : unreadTotal}
+          </Text>
+        </View>
+      )}
+    </View>
+    <Text style={styles.navItemText}>Mensajes</Text>
+  </TouchableOpacity>
+</View>
     </SafeAreaView>
   );
 };

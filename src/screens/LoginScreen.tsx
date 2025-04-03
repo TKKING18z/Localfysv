@@ -13,10 +13,11 @@ import {
     Animated,
     Dimensions,
     StatusBar,
+    ActivityIndicator,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MaterialIcons } from '@expo/vector-icons';
+import { MaterialIcons, AntDesign, FontAwesome } from '@expo/vector-icons';
 import { RootStackParamList } from '../types';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
@@ -28,14 +29,15 @@ const { width } = Dimensions.get('window');
 
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
-    // Usar el hook de autenticación en lugar de Firebase directamente
-    const { login, isLoading } = useAuth();
+    // Usar el hook de autenticación actualizado
+    const { login, signInWithGoogle, isGoogleLoading, loading: authLoading } = useAuth();
     
     // Form state
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [hidePassword, setHidePassword] = useState(true);
     const [rememberMe, setRememberMe] = useState(true); // Por defecto activado
+    const [loading, setLoading] = useState(false);
     
     // Animation values
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -119,6 +121,7 @@ const LoginScreen: React.FC = () => {
             return;
         }
         
+        setLoading(true);
         console.log("Iniciando sesión para:", email);
         
         try {
@@ -151,6 +154,19 @@ const LoginScreen: React.FC = () => {
         } catch (error: any) {
             console.log("Error durante el login:", error);
             Alert.alert('Error', error.message);
+        } finally {
+            setLoading(false);
+        }
+    };
+    
+    // Nueva función para manejar el login con Google
+    const handleGoogleLogin = async () => {
+        try {
+            console.log("Iniciando proceso de login con Google");
+            await signInWithGoogle();
+        } catch (error) {
+            console.error("Error al intentar login con Google:", error);
+            Alert.alert("Error", "No se pudo iniciar sesión con Google");
         }
     };
 
@@ -257,7 +273,7 @@ const LoginScreen: React.FC = () => {
                         <TouchableOpacity
                             activeOpacity={0.8}
                             onPress={handleLogin}
-                            disabled={isLoading}
+                            disabled={loading || authLoading}
                         >
                             <LinearGradient
                                 colors={['#007AFF', '#47A9FF']}
@@ -265,9 +281,13 @@ const LoginScreen: React.FC = () => {
                                 end={{ x: 1, y: 0 }}
                                 style={styles.loginButton}
                             >
-                                <Text style={styles.loginButtonText}>
-                                    {isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
-                                </Text>
+                                {loading ? (
+                                    <ActivityIndicator color="white" size="small" />
+                                ) : (
+                                    <Text style={styles.loginButtonText}>
+                                        Iniciar Sesión
+                                    </Text>
+                                )}
                             </LinearGradient>
                         </TouchableOpacity>
                     </Animated.View>
@@ -278,9 +298,22 @@ const LoginScreen: React.FC = () => {
                         <View style={styles.dividerLine} />
                     </View>
                     
-                    <TouchableOpacity style={styles.socialButton}>
-                        <MaterialIcons name="email" size={20} color="#007AFF" />
-                        <Text style={styles.socialButtonText}>Continuar con Google</Text>
+                    {/* Botón de Google actualizado (con FontAwesome icon) */}
+                    <TouchableOpacity 
+                        style={styles.googleButton}
+                        onPress={handleGoogleLogin}
+                        disabled={isGoogleLoading}
+                    >
+                        {isGoogleLoading ? (
+                            <ActivityIndicator color="#007AFF" size="small" />
+                        ) : (
+                            <>
+                                <View style={styles.googleIconContainer}>
+                                    <FontAwesome name="google" size={20} color="#DB4437" />
+                                </View>
+                                <Text style={styles.socialButtonText}>Continuar con Google</Text>
+                            </>
+                        )}
                     </TouchableOpacity>
                 </Animated.View>
                 
@@ -453,7 +486,8 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         fontSize: 14,
     },
-    socialButton: {
+    // Estilo actualizado para el botón de Google con FontAwesome icon
+    googleButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
@@ -461,7 +495,7 @@ const styles = StyleSheet.create({
         borderWidth: 1.5,
         borderColor: '#E6E8F0',
         borderRadius: 12,
-        height: 50,
+        height: 56,
         marginVertical: 5,
         shadowColor: '#007AFF',
         shadowOffset: { width: 0, height: 2 },
@@ -469,8 +503,14 @@ const styles = StyleSheet.create({
         shadowRadius: 5,
         elevation: 1,
     },
+    googleIconContainer: {
+        width: 30,
+        height: 30,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginRight: 10,
+    },
     socialButtonText: {
-        marginLeft: 10,
         color: '#007AFF',
         fontSize: 15,
         fontWeight: '500',

@@ -24,7 +24,6 @@ import BusinessHoursScreen from '../screens/business/BusinessHoursScreen';
 import PaymentMethodsScreen from '../screens/business/PaymentMethodsScreen';
 import SocialLinksScreen from '../screens/business/SocialLinkScreen';
 import MenuEditorScreen from '../screens/business/MenuEditorScreen';
-import VideoManagerScreen from '../screens/business/VideoManagerScreen';
 
 // Importar la pantalla EditBusiness
 import EditBusinessScreen from '../screens/business/EditBusinessScreen';
@@ -57,7 +56,6 @@ export type RootStackParamList = {
   PaymentMethods: { initialMethods?: string[]; callbackId?: string };
   SocialLinks: { initialLinks?: any; callbackId?: string };
   MenuEditor: { businessId: string; initialMenu?: any[]; menuUrl?: string; callbackId?: string };
-  VideoManager: { businessId: string; initialVideos?: any[]; onSave: (videos: any[]) => void };
   // Individual screens that can be accessed directly
   Home: undefined;
   Map: undefined;
@@ -405,16 +403,6 @@ const AppNavigator = () => {
               options={{ 
                 headerShown: true,
                 title: 'Editor de Menú',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="VideoManager" 
-              component={VideoManagerScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Gestionar Videos',
                 headerStyle: { backgroundColor: '#FFFFFF' },
                 headerTintColor: '#007AFF'
               }} 
