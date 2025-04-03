@@ -1,5 +1,4 @@
 {
-  "$schema": "https://raw.githubusercontent.com/SchemaStore/schemastore/master/src/schemas/json/package.json",
   "name": "localfy-new",
   "version": "1.0.0",
   "main": "index.js",
@@ -7,7 +6,8 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "verify-firestore": "node scripts/verifyFirestore.js"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3",

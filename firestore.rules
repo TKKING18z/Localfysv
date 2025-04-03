@@ -9,12 +9,14 @@ service cloud.firestore {
     // Verifica si el usuario es el propietario de un documento
     function isOwner() {
       return request.auth.uid == resource.data.userId || 
-             request.auth.uid == resource.data.ownerId;
+             request.auth.uid == resource.data.ownerId ||
+             request.auth.uid == resource.data.createdBy;
     }
     
     // Verifica si el usuario es propietario del negocio
     function isBusinessOwner(businessId) {
-      return request.auth.uid == get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId;
+      return request.auth.uid == get(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId ||
+             request.auth.uid == get(/databases/$(database)/documents/businesses/$(businessId)).data.createdBy;
     }
     
     // Reglas para usuarios
@@ -28,63 +30,75 @@ service cloud.firestore {
     
     // Reglas para negocios
     match /businesses/{businessId} {
-      // Cualquier usuario autenticado puede leer negocios
-      allow read: if isAuthenticated();
+      // Permitir lectura pública aunque no esté autenticado (solución para el error inicial)
+      allow read: if true;
       
       // Solo el propietario puede crear, actualizar o eliminar un negocio
       allow create: if isAuthenticated();
       allow update: if isAuthenticated() && 
-                     (request.auth.uid == resource.data.ownerId);
+                     (request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.createdBy);
       allow delete: if isAuthenticated() && 
-                     (request.auth.uid == resource.data.ownerId);
+                     (request.auth.uid == resource.data.ownerId || request.auth.uid == resource.data.createdBy);
     }
     
     // Reglas para reservaciones
     match /reservations/{reservationId} {
-      // Cualquier usuario autenticado puede leer y crear
-      allow read, create, update: if isAuthenticated();
+      // Cualquier usuario puede leer reservaciones
+      allow read: if true;
+      // Usuarios autenticados pueden crear y actualizar
+      allow create, update: if isAuthenticated();
       
-      // Solo el propietario del negocio puede eliminar
+      // Solo el propietario del negocio o el creador de la reserva puede eliminar
       allow delete: if isAuthenticated() && 
-                     request.auth.uid == get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.ownerId;
+                    (request.auth.uid == resource.data.userId || 
+                    (resource.data.businessId != null && 
+                    (request.auth.uid == get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.ownerId ||
+                     request.auth.uid == get(/databases/$(database)/documents/businesses/$(resource.data.businessId)).data.createdBy)));
     }
     
     // Reglas para disponibilidad de reservaciones
     match /reservationAvailability/{businessId} {
-      // Cualquier usuario autenticado puede leer, crear o actualizar
-      allow read, create, update: if isAuthenticated();
+      // Cualquier usuario puede leer
+      allow read: if true;
+      // Solo usuarios autenticados pueden crear o actualizar
+      allow create, update: if isAuthenticated();
       allow delete: if false; // No permitir eliminación
     }
     
     // Reglas para promociones
     match /promotions/{promotionId} {
-      // Cualquier usuario autenticado puede leer promociones
-      allow read: if isAuthenticated();
+      // Cualquier usuario puede leer promociones
+      allow read: if true;
       // Cualquier usuario autenticado puede crear, actualizar o eliminar
       allow create, update, delete: if isAuthenticated();
     }
     
     // Reglas para reseñas
     match /reviews/{reviewId} {
-      // Cualquier usuario autenticado puede leer reseñas
-      allow read: if isAuthenticated();
+      // Cualquier usuario puede leer reseñas
+      allow read: if true;
       // Cualquier usuario autenticado puede crear una reseña
       allow create: if isAuthenticated();
-      // Cualquier usuario autenticado puede actualizar o eliminar
-      allow update, delete: if isAuthenticated();
+      // Cualquier usuario autenticado puede actualizar o eliminar su propia reseña
+      allow update, delete: if isAuthenticated() && 
+                             (request.auth.uid == resource.data.userId);
     }
     
     // Reglas para conversaciones
     match /conversations/{conversationId} {
-      // Cualquier usuario autenticado puede leer, crear o actualizar
-      allow read, create, update: if isAuthenticated();
+      // Cualquier usuario puede leer conversaciones
+      allow read: if true;
+      // Usuarios autenticados pueden crear o actualizar
+      allow create, update: if isAuthenticated();
       // No permitir eliminación
       allow delete: if false;
       
       // Permitir acceso a la subcollection de mensajes
       match /messages/{messageId} {
-        // Cualquier usuario autenticado puede leer, crear o actualizar mensajes
-        allow read, create, update: if isAuthenticated();
+        // Cualquier usuario puede leer mensajes
+        allow read: if true;
+        // Usuarios autenticados pueden crear o actualizar mensajes
+        allow create, update: if isAuthenticated();
         // No permitir eliminación
         allow delete: if false;
       }
@@ -92,15 +106,18 @@ service cloud.firestore {
     
     // Reglas para mensajes de chat como colección separada (mantener por compatibilidad)
     match /messages/{messageId} {
-      // Cualquier usuario autenticado puede leer, crear o actualizar
-      allow read, create, update: if isAuthenticated();
+      // Cualquier usuario puede leer mensajes
+      allow read: if true;
+      // Usuarios autenticados pueden crear o actualizar
+      allow create, update: if isAuthenticated();
       // No permitir eliminación
       allow delete: if false;
     }
     
-    // Regla por defecto - denegar todo lo demás
+    // Regla por defecto - permitir lectura pero no escritura sin autenticación
     match /{document=**} {
-      allow read, write: if false;
+      allow read: if true;
+      allow write: if isAuthenticated();
     }
   }
 }

@@ -202,6 +202,19 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     setError(null);
     
     try {
+      // Verificar si el usuario está autenticado
+      const currentUser = firebase.auth().currentUser;
+      console.log('Current user in fetchBusinesses:', currentUser?.uid);
+      
+      // Asegurarnos que Firebase esté correctamente inicializado
+      if (firebase.apps.length === 0) {
+        console.error('Firebase no está inicializado correctamente');
+        setError('Error en la inicialización de la aplicación. Por favor, reinicia la app.');
+        setLoading(false);
+        return;
+      }
+      
+      // Intentar acceder a la colección de negocios
       const businessesCollection = firebase.firestore().collection('businesses');
       const snapshot = await businessesCollection.get();
       
@@ -215,6 +228,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         businessesList.push(business);
         if (data.category) categoriesSet.add(data.category);
       });
+      
+      console.log(`Negocios cargados: ${businessesList.length}`);
       
       setBusinesses(businessesList);
       setFilteredBusinesses(selectedCategory 
