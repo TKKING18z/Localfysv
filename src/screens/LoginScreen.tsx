@@ -17,11 +17,12 @@ import {
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { MaterialIcons, AntDesign, FontAwesome } from '@expo/vector-icons';
+import { MaterialIcons, AntDesign } from '@expo/vector-icons';
 import { RootStackParamList } from '../types';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import googleLogo from '../../assets/google_logo.png'; // Import the Google PNG logo
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -298,7 +299,7 @@ const LoginScreen: React.FC = () => {
                         <View style={styles.dividerLine} />
                     </View>
                     
-                    {/* Botón de Google actualizado (con FontAwesome icon) */}
+                    {/* Botón de Google actualizado */}
                     <TouchableOpacity 
                         style={styles.googleButton}
                         onPress={handleGoogleLogin}
@@ -309,7 +310,10 @@ const LoginScreen: React.FC = () => {
                         ) : (
                             <>
                                 <View style={styles.googleIconContainer}>
-                                    <FontAwesome name="google" size={20} color="#DB4437" />
+                                    <Image 
+                                        source={googleLogo}
+                                        style={{ width: 32, height: 32, resizeMode: 'contain' }} // Increased size
+                                    />
                                 </View>
                                 <Text style={styles.socialButtonText}>Continuar con Google</Text>
                             </>
@@ -353,15 +357,15 @@ const styles = StyleSheet.create({
     logoWrapper: {
         width: 110,
         height: 110,
-        borderRadius: 55,
-        backgroundColor: 'white',
+        borderRadius: 0,
+        backgroundColor: 'transparent',
         justifyContent: 'center',
         alignItems: 'center',
-        shadowColor: '#007AFF',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 15,
-        elevation: 8,
+        shadowColor: 'transparent',
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        elevation: 0,
     },
     logo: {
         width: 80,
@@ -377,7 +381,7 @@ const styles = StyleSheet.create({
     },
     tagline: {
         fontSize: 14,
-        color: '#66A5FF',
+        color: '#333333',
         marginTop: 5,
         letterSpacing: 0.5,
     },
@@ -486,7 +490,7 @@ const styles = StyleSheet.create({
         paddingHorizontal: 10,
         fontSize: 14,
     },
-    // Estilo actualizado para el botón de Google con FontAwesome icon
+    // Estilo actualizado para el botón de Google con el logo oficial
     googleButton: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -511,7 +515,7 @@ const styles = StyleSheet.create({
         marginRight: 10,
     },
     socialButtonText: {
-        color: '#007AFF',
+        color: '#333333',
         fontSize: 15,
         fontWeight: '500',
     },

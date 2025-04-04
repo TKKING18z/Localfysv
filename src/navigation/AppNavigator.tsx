@@ -202,8 +202,16 @@ function MainTabs() {
         headerShown: false,
       })}
     >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Conversations" component={ConversationsScreen} />
+      <Tab.Screen 
+        name="Home" 
+        component={HomeScreen} 
+        options={{ tabBarLabel: 'Inicio' }} // Updated label to Spanish
+      />
+      <Tab.Screen 
+        name="Conversations" 
+        component={ConversationsScreen} 
+        options={{ tabBarLabel: 'Mensajes' }} // Updated label to Spanish
+      />
       <Tab.Screen 
         name="AddBusiness" 
         component={AddBusinessScreen} 
@@ -218,10 +226,19 @@ function MainTabs() {
               }} 
             />
           ),
+          tabBarLabel: '' // Optionally hide label
         }}
       />
-      <Tab.Screen name="Favorites" component={FavoritesScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen 
+        name="Favorites" 
+        component={FavoritesScreen} 
+        options={{ tabBarLabel: 'Favoritos' }} // Updated label to Spanish
+      />
+      <Tab.Screen 
+        name="Profile" 
+        component={ProfileScreen} 
+        options={{ tabBarLabel: 'Perfil' }} // Updated label to Spanish
+      />
     </Tab.Navigator>
   );
 }

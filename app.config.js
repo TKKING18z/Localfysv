@@ -1,6 +1,6 @@
-import { ExpoConfig } from 'expo/config';
+// Removed: import { ExpoConfig } from 'expo/config';
 
-const config: ExpoConfig = {
+const config = {
   name: "Localfy",
   slug: "localfy-app",
   version: "1.0.0",
@@ -8,7 +8,7 @@ const config: ExpoConfig = {
   icon: "./assets/Icon.png",
   userInterfaceStyle: "light",
   splash: {
-    image: "./assets/splash-icon.png",
+    image: "./assets/Icon.png",
     resizeMode: "contain",
     backgroundColor: "#ffffff"
   },
@@ -17,16 +17,30 @@ const config: ExpoConfig = {
   ],
   ios: {
     supportsTablet: true,
+    bundleIdentifier: "com.zalabsdigital.localfy",
     infoPlist: {
       NSLocationWhenInUseUsageDescription: "Localfy uses your location to find nearby businesses."
     }
   },
   android: {
+    package: "com.zalabsdigital.localfy",
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#ffffff"
     },
-    permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+    permissions: ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+    intentFilters: [
+      {
+        action: "VIEW",
+        autoVerify: true,
+        data: [
+          {
+            scheme: "com.zalabsdigital.localfy"
+          }
+        ],
+        category: ["BROWSABLE", "DEFAULT"]
+      }
+    ]
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -54,6 +68,9 @@ const config: ExpoConfig = {
     EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
     EXPO_PUBLIC_FIREBASE_APP_ID: process.env.EXPO_PUBLIC_FIREBASE_APP_ID,
     EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID: process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID,
+    ANDROID_OAUTH_CLIENT_ID: "281205862532-r81b17icaar84ja153rhnegoslpbph53.apps.googleusercontent.com",
+    IOS_OAUTH_CLIENT_ID: "281205862532-3o2ot4ulh7nbu3vu0q80qd4gbt6q3fi3.apps.googleusercontent.com", 
+    WEB_OAUTH_CLIENT_ID: "281205862532-imt64nhl458nbm9jnf9gff2cb939ngr3.apps.googleusercontent.com"
   },
   newArchEnabled: true,
 };

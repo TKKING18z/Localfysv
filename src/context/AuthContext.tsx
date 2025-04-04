@@ -1,8 +1,10 @@
 import React, { createContext, useState, useEffect, useContext, ReactNode } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
+import { googleAuthService } from '../services/googleAuthService';
 
 // Definición de tipo para el servicio de notificaciones
 interface NotificationService {
@@ -18,14 +20,14 @@ interface AuthContextType {
   user: firebase.User | null;
   isLoading: boolean;
   loading: boolean;
-  isGoogleLoading: boolean; // Nuevo: estado de carga para Google
+  isGoogleLoading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   register: (email: string, password: string, name: string) => Promise<boolean>;
   signUp: (email: string, password: string, name: string, role?: string) => Promise<boolean>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
-  signInWithGoogle: () => Promise<boolean>; // Nueva función para iniciar sesión con Google
+  signInWithGoogle: () => Promise<boolean>;
 }
 
 // Crear el contexto
@@ -44,7 +46,7 @@ export const useAuth = (): AuthContextType => {
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [user, setUser] = useState<firebase.User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false); // Nuevo estado para Google auth
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   
   // Verificar si hay una sesión al iniciar
   useEffect(() => {
@@ -140,40 +142,27 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
-  // Nueva función para iniciar sesión con Google
+  // Función para iniciar sesión con Google
   const signInWithGoogle = async (): Promise<boolean> => {
     try {
       setIsGoogleLoading(true);
+      console.log('Starting Google sign in...');
       
-      // Configurar proveedor de Google
-      const provider = new firebase.auth.GoogleAuthProvider();
-      provider.addScope('profile');
-      provider.addScope('email');
+      const result = await googleAuthService.signInWithGoogle();
       
-      // En aplicaciones móviles, usamos signInWithRedirect() o signInWithPopup()
-      // dependiendo de la plataforma y configuración
-      const result = await firebase.auth().signInWithPopup(provider);
-      
-      if (result.user) {
-        console.log('Google login successful:', result.user.uid);
-        // onAuthStateChanged se encargará de actualizar el estado
+      if (result.success) {
+        console.log('Google sign in successful');
         return true;
       } else {
-        console.error('No user returned from Google sign in');
+        console.error('Google sign in failed:', result.error);
+        if (result.error && result.error !== "Inicio de sesión con Google cancelado") {
+          Alert.alert('Error', result.error || 'No se pudo iniciar sesión con Google');
+        }
         return false;
       }
     } catch (error: any) {
-      console.error('Google login error:', error);
-      // Mensajes de error más amigables
-      if (error.code === 'auth/popup-closed-by-user') {
-        Alert.alert('Inicio de sesión cancelado', 'Has cerrado la ventana de inicio de sesión de Google.');
-      } else if (error.code === 'auth/cancelled-popup-request') {
-        // No mostrar alerta para este caso, ya que es una operación normal
-        console.log('Popup request cancelled');
-      } else {
-        Alert.alert('Error al iniciar sesión con Google', 
-                    error.message || 'Ocurrió un error durante el inicio de sesión con Google.');
-      }
+      console.error('Unexpected error during Google sign in:', error);
+      Alert.alert('Error', 'Ha ocurrido un error inesperado al iniciar sesión con Google');
       return false;
     } finally {
       setIsGoogleLoading(false);
