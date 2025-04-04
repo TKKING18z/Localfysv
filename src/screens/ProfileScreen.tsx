@@ -46,11 +46,11 @@ const ProfileScreen: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [tempProfile, setTempProfile] = useState<Partial<UserProfile>>({});
-  const [notifications, setNotifications] = useState(true);
   const [privateProfile, setPrivateProfile] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [notifications, setNotifications] = useState(true);
 
   // Recent activity data
   const [recentActivity, setRecentActivity] = useState<{
@@ -85,6 +85,7 @@ const ProfileScreen: React.FC = () => {
             // Asegúrate de que la propiedad role se lea correctamente
             // Y se mapee al formato que espera la UI (Cliente/Propietario)
             const userRole = userData.role === 'business_owner' ? 'Propietario' : 'Cliente';
+            console.log('User role mapped as:', userRole); // added for debugging
             
             setProfile({
               uid: user.uid,
@@ -136,10 +137,10 @@ const ProfileScreen: React.FC = () => {
           // Get favorites count
           const favoriteCount = getFavoriteBusinesses().length;
           
-          // Set user stats
+          // Set user stats; include 'reviews' initialized to 0 for later real-time updates
           setUserStats({
             favorites: favoriteCount,
-            reviews: Math.floor(Math.random() * 10),
+            reviews: 0, // agregado para cumplir con el tipo
             businessesOwned: profile?.userType === 'Propietario' ? Math.floor(Math.random() * 5) + 1 : 0,
             totalViews: Math.floor(Math.random() * 200) + 50
           });
@@ -299,6 +300,26 @@ const ProfileScreen: React.FC = () => {
       Alert.alert('Error', 'Hubo un problema al seleccionar la imagen');
     }
   };
+
+  // Real-time listener for reviews count
+  useEffect(() => {
+    const user = firebase.auth().currentUser;
+    if (user) {
+      const unsubscribe = firebase.firestore()
+        .collection('reviews')
+        .where('userId', '==', user.uid)
+        .where('moderationStatus', '==', 'approved')
+        .onSnapshot(snapshot => {
+          setUserStats(prevStats => ({
+            ...prevStats,
+            reviews: snapshot.size
+          }));
+        }, error => {
+          console.error('Error al escuchar reseñas:', error);
+        });
+      return () => unsubscribe();
+    }
+  }, []);
 
   if (loading) {
     return (
@@ -497,7 +518,7 @@ const ProfileScreen: React.FC = () => {
               thumbColor={'#FFFFFF'}
             />
           </View>
-          
+
           <View style={styles.settingItem}>
             <View style={styles.settingInfo}>
               <MaterialIcons name="visibility" size={22} color="#007AFF" />

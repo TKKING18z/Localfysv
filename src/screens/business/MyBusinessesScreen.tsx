@@ -35,6 +35,11 @@ const MyBusinessesScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   
+  // Calcular la fecha de membresía formateada (si está disponible)
+  const memberSince = user && user.metadata.creationTime 
+    ? new Date(user.metadata.creationTime).toLocaleDateString('es-ES') 
+    : '';
+
   // Verificar que el usuario tenga el rol correcto
   useEffect(() => {
     const checkUserRole = async () => {
@@ -44,8 +49,18 @@ const MyBusinessesScreen: React.FC = () => {
         return;
       }
       
-      // Add type assertion to access role property
-      const userWithRole = user as UserWithRole;
+      // Try to obtain role from user object; if missing, fetch from Firestore
+      let userWithRole = user as UserWithRole;
+      if (!userWithRole.role) {
+        const userDoc = await firebase.firestore()
+          .collection('users')
+          .doc(user.uid)
+          .get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          userWithRole.role = userData?.role; // role should be 'business_owner' if applicable
+        }
+      }
       
       // Verificar que el usuario sea de tipo business_owner
       if (userWithRole.role !== 'business_owner') {
@@ -254,6 +269,13 @@ const MyBusinessesScreen: React.FC = () => {
         <View style={styles.placeholder} />
       </View>
       
+      {/* Nueva sección para mostrar "Miembro desde:" */}
+      {memberSince ? (
+        <View style={styles.memberContainer}>
+          <Text style={styles.memberSinceText}>Miembro desde: {memberSince}</Text>
+        </View>
+      ) : null}
+      
       {/* Lista de negocios */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
@@ -366,6 +388,18 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
+  },
+  // Nuevo estilo para el contenedor del miembro desde
+  memberContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  memberSinceText: {
+    fontSize: 14,
+    color: '#8E8E93',
   },
   loadingContainer: {
     flex: 1,

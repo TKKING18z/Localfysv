@@ -40,7 +40,7 @@
     "expo-web-browser": "~14.0.2",
     "firebase": "^10.8.0",
     "geolib": "^3.3.4",
-    "react-native": "^0.76.8",
+    "react-native": "^0.76.9",
     "react-native-gesture-handler": "~2.20.2",
     "react-native-maps": "1.18.0",
     "react-native-reanimated": "~3.16.1",
