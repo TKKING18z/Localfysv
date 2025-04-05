@@ -131,9 +131,6 @@ const ProfileScreen: React.FC = () => {
             });
           }
           
-          // Fetch mock recent activity
-          await fetchRecentActivity(user.uid);
-          
           // Get favorites count
           const favoriteCount = getFavoriteBusinesses().length;
           
@@ -155,31 +152,6 @@ const ProfileScreen: React.FC = () => {
     
     fetchUserProfile();
   }, []);
-
-  // Mock function to fetch recent activity
-  const fetchRecentActivity = async (userId: string) => {
-    // In a real app, this would fetch from Firestore
-    // For now, we'll generate mock data
-    const mockActivity = [
-      {
-        date: new Date(Date.now() - 86400000).toLocaleDateString(),
-        action: 'Marcó como favorito',
-        businessName: 'Café El Salvador'
-      },
-      {
-        date: new Date(Date.now() - 172800000).toLocaleDateString(),
-        action: 'Visitó el perfil de',
-        businessName: 'Artesanías Salvadoreñas'
-      },
-      {
-        date: new Date(Date.now() - 345600000).toLocaleDateString(),
-        action: 'Dejó una reseña en',
-        businessName: 'Pupusería La Bendición'
-      }
-    ];
-    
-    setRecentActivity(mockActivity);
-  };
 
   // Save profile changes
   const saveProfileChanges = async () => {
@@ -411,39 +383,6 @@ const ProfileScreen: React.FC = () => {
           </View>
         </View>
         
-        {/* User Stats Section */}
-        <View style={styles.statsContainer}>
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{userStats.favorites}</Text>
-            <Text style={styles.statLabel}>Favoritos</Text>
-          </View>
-          
-          <View style={styles.statDivider} />
-          
-          <View style={styles.statItem}>
-            <Text style={styles.statNumber}>{userStats.reviews}</Text>
-            <Text style={styles.statLabel}>Reseñas</Text>
-          </View>
-          
-          {profile?.userType === 'Propietario' && (
-            <>
-              <View style={styles.statDivider} />
-              
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{userStats.businessesOwned}</Text>
-                <Text style={styles.statLabel}>Negocios</Text>
-              </View>
-              
-              <View style={styles.statDivider} />
-              
-              <View style={styles.statItem}>
-                <Text style={styles.statNumber}>{userStats.totalViews}</Text>
-                <Text style={styles.statLabel}>Visitas</Text>
-              </View>
-            </>
-          )}
-        </View>
-        
         {/* Personal Information Section */}
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Información Personal</Text>
@@ -576,31 +515,6 @@ const ProfileScreen: React.FC = () => {
             <Text style={styles.menuItemText}>Términos y Condiciones</Text>
             <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
-        </View>
-        
-        {/* Recent Activity Section */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Actividad Reciente</Text>
-          
-          {recentActivity.length > 0 ? (
-            recentActivity.map((activity, index) => (
-              <View key={index} style={styles.activityItem}>
-                <View style={styles.activityDateContainer}>
-                  <Text style={styles.activityDate}>{activity.date}</Text>
-                </View>
-                <View style={styles.activityContent}>
-                  <Text style={styles.activityAction}>
-                    <Text style={styles.activityBold}>{activity.action}</Text>
-                    {activity.businessName && (
-                      <Text style={styles.activityNormal}> {activity.businessName}</Text>
-                    )}
-                  </Text>
-                </View>
-              </View>
-            ))
-          ) : (
-            <Text style={styles.noActivityText}>Sin actividad reciente</Text>
-          )}
         </View>
         
         {/* Logout Button */}
@@ -808,38 +722,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   joinDateText: {
-    fontSize: 14,
-    color: '#8E8E93',
-  },
-  statsContainer: {
-    flexDirection: 'row',
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 16,
-    justifyContent: 'space-around',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 2,
-  },
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statDivider: {
-    width: 1,
-    backgroundColor: '#E5E5EA',
-  },
-  statNumber: {
-    fontSize: 22,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 4,
-  },
-  statLabel: {
     fontSize: 14,
     color: '#8E8E93',
   },
