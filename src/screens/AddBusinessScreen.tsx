@@ -197,6 +197,9 @@ const { getTempData, removeTempData, setTempData } = useStore();
   // Añade este estado para forzar un re-render
   const [forceRender, setForceRender] = useState(0);
 
+  // Add state for managing promotions toggle
+  const [allowsPromotions, setAllowsPromotions] = useState<boolean>(true);
+
   // Track form changes - Fix the infinite loop by using a flag
   useEffect(() => {
     // Only update if content actually changed (not just on initial render)
@@ -1035,6 +1038,7 @@ const { getTempData, removeTempData, setTempData } = useStore();
 
   // Función para verificar si hay promociones
   const hasPromotions = () => {
+    if (!allowsPromotions) return false; // If promotions are disabled, return false
     // Verificar primero el indicador explícito
     const hasFlag = getTempData('tempPromotions');
     if (hasFlag === true) {
@@ -1301,23 +1305,38 @@ const { getTempData, removeTempData, setTempData } = useStore();
                   />
                 </TouchableOpacity>
               )}
-              
-              <TouchableOpacity 
-                style={styles.advancedButton}
-                onPress={navigateToPromotions}
-              >
-                <View style={styles.advancedIconContainer}>
-                  <MaterialIcons name="local-offer" size={24} color="#007aff" />
-                </View>
-                <Text style={styles.advancedButtonText}>Gestionar Promociones</Text>
-                {/* Forzamos que este componente se re-evalúe con la clave forceRender */}
-                <MaterialIcons 
-                  key={`promo-check-${forceRender}`}
-                  name="check-circle" 
-                  size={24} 
-                  color={hasPromotions() ? "#34C759" : "#E5E5EA"} 
+
+              <View style={styles.toggleContainer}>
+                <Text style={styles.toggleLabel}>Permitir promociones</Text>
+                <Switch 
+                  value={allowsPromotions}
+                  onValueChange={(value) => setAllowsPromotions(value)}
+                  trackColor={{ false: '#E5E5EA', true: '#4CD964' }}
+                  thumbColor={Platform.OS === 'android' ? '#f4f3f4' : ''}
                 />
-              </TouchableOpacity>
+              </View>
+              
+              {!allowsPromotions ? (
+                <Text style={styles.warningText}>
+                  Las promociones estarán deshabilitadas. Los clientes no podrán ver promociones para este negocio.
+                </Text>
+              ) : (
+                <TouchableOpacity 
+                  style={styles.advancedButton}
+                  onPress={navigateToPromotions}
+                >
+                  <View style={styles.advancedIconContainer}>
+                    <MaterialIcons name="local-offer" size={24} color="#007aff" />
+                  </View>
+                  <Text style={styles.advancedButtonText}>Gestionar Promociones</Text>
+                  <MaterialIcons 
+                    key={`promo-check-${forceRender}`}
+                    name="check-circle" 
+                    size={24} 
+                    color={hasPromotions() ? "#34C759" : "#E5E5EA"} 
+                  />
+                </TouchableOpacity>
+              )}
             </View>
             
             {/* Image Picker */}
