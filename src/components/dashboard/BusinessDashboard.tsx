@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, ActivityIndicator, Alert } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Business } from '../../context/BusinessContext';
 import { BusinessAnalytics, TimePeriod } from '../../types/analyticsTypes';
@@ -7,6 +7,7 @@ import StatisticCard from './StatisticCard';
 import TrendsChart from './TrendsChart';
 import PerformanceIndicator from './PerformanceIndicator';
 import ActionCenter from './ActionCenter';
+import { analyticsService } from '../../services/analyticsService';
 
 interface BusinessDashboardProps {
   analytics: BusinessAnalytics | null;
@@ -14,6 +15,7 @@ interface BusinessDashboardProps {
   businesses: Business[];
   onSelectBusiness: (businessId: string) => void;
   period: TimePeriod;
+  onRefreshData?: () => void;
 }
 
 const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
@@ -21,21 +23,119 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
   loading,
   businesses,
   onSelectBusiness,
-  period
+  period,
+  onRefreshData
 }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>(period);
   const [expanded, setExpanded] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [actionRefreshing, setActionRefreshing] = useState(false);
   
   if (loading || !analytics) {
     return (
       <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
         <Text style={styles.loadingText}>Cargando estadísticas...</Text>
       </View>
     );
   }
   
+  // Alternar la expansión del panel
   const toggleExpand = () => {
     setExpanded(!expanded);
+  };
+  
+  // Función para reinicializar datos de prueba
+  const handleRefreshData = async () => {
+    if (isRefreshing) return;
+    
+    try {
+      setIsRefreshing(true);
+      
+      // Inicializar datos de prueba para cada negocio
+      const businessIds = businesses.map(b => b.id);
+      console.log("Inicializando datos de prueba para negocios:", businessIds);
+      
+      await Promise.all(businessIds.map(id => analyticsService.initializeTestAnalytics(id)));
+      
+      // Llamar a la función onRefreshData para recargar los datos
+      if (onRefreshData) {
+        onRefreshData();
+      }
+      
+      // Mostrar alerta de éxito
+      Alert.alert(
+        "Datos actualizados", 
+        "Los datos analíticos se han actualizado correctamente.",
+        [{ text: "OK" }]
+      );
+    } catch (error) {
+      console.error("Error al actualizar datos:", error);
+      Alert.alert(
+        "Error", 
+        "No se pudieron actualizar los datos. Intenta nuevamente.",
+        [{ text: "OK" }]
+      );
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+  
+  // Simular actualización de acciones pendientes
+  const refreshPendingActions = async () => {
+    if (actionRefreshing) return;
+    
+    try {
+      setActionRefreshing(true);
+      
+      // Esperar un poco para simular la carga
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Recargar datos completos
+      if (onRefreshData) {
+        onRefreshData();
+      }
+    } catch (error) {
+      console.error("Error al actualizar acciones pendientes:", error);
+    } finally {
+      setActionRefreshing(false);
+    }
+  };
+  
+  // Manejar acciones de los elementos pendientes
+  const handleActionPress = (type: string, id: string) => {
+    console.log(`Acción ${type} seleccionada para id ${id}`);
+    // Implementar navegación o acción según el tipo
+    switch(type) {
+      case 'reservation':
+        Alert.alert(
+          "Reserva seleccionada", 
+          `Has seleccionado la reserva ${id}. ¿Deseas confirmarla?`,
+          [
+            { text: "Cancelar", style: "cancel" },
+            { 
+              text: "Confirmar", 
+              onPress: () => {
+                // Aquí iría la lógica para confirmar la reserva
+                Alert.alert("Reserva confirmada", "La reserva ha sido confirmada correctamente.");
+              }
+            }
+          ]
+        );
+        break;
+      case 'message':
+        Alert.alert(
+          "Mensaje seleccionado", 
+          `Navegando a la conversación ${id}...`
+        );
+        break;
+      case 'review':
+        Alert.alert(
+          "Reseña seleccionada", 
+          `Abriendo la reseña ${id} para responder...`
+        );
+        break;
+    }
   };
   
   const totalVisits = analytics.totalVisits || 0;
@@ -47,24 +147,40 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>Panel de Control</Text>
-        <TouchableOpacity onPress={toggleExpand}>
-          <MaterialIcons 
-            name={expanded ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
-            size={24} 
-            color="#007AFF" 
-          />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          {/* Botón para actualizar datos */}
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={handleRefreshData}
+            disabled={isRefreshing}
+          >
+            {isRefreshing ? (
+              <ActivityIndicator size="small" color="#007AFF" />
+            ) : (
+              <MaterialIcons name="refresh" size={20} color="#007AFF" />
+            )}
+          </TouchableOpacity>
+          
+          <TouchableOpacity onPress={toggleExpand}>
+            <MaterialIcons 
+              name={expanded ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
+              size={24} 
+              color="#007AFF" 
+            />
+          </TouchableOpacity>
+        </View>
       </View>
       
       {expanded && (
         <>
           {/* Selector de período */}
           <View style={styles.periodSelector}>
-            {([TimePeriod.DAY, TimePeriod.WEEK, TimePeriod.MONTH, TimePeriod.YEAR]).map((p) => (
+            {Object.values(TimePeriod).map((p) => (
               <TouchableOpacity 
                 key={p}
                 style={[styles.periodButton, selectedPeriod === p && styles.periodButtonActive]} 
                 onPress={() => setSelectedPeriod(p)}
+                disabled={isRefreshing}
               >
                 <Text style={[styles.periodButtonText, selectedPeriod === p && styles.periodButtonTextActive]}>
                   {p === TimePeriod.DAY ? 'Día' : 
@@ -82,12 +198,14 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
               title="Visitas" 
               value={totalVisits} 
               trend={analytics.visitsTrend || 0} 
+              isLoading={isRefreshing}
             />
             <StatisticCard 
               icon="event-available" 
               title="Reservas" 
               value={totalReservations} 
               trend={analytics.reservationsTrend || 0} 
+              isLoading={isRefreshing}
             />
             <StatisticCard 
               icon="attach-money" 
@@ -95,6 +213,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
               value={`$${estimatedRevenue}`} 
               trend={analytics.revenueTrend || 0} 
               isCurrency
+              isLoading={isRefreshing}
             />
             <StatisticCard 
               icon="star" 
@@ -102,6 +221,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
               value={averageRating.toFixed(1)} 
               trend={0} 
               showTrend={false}
+              isLoading={isRefreshing}
             />
           </ScrollView>
           
@@ -109,11 +229,22 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
           <TrendsChart 
             data={analytics.visitsData?.[selectedPeriod] || []} 
             period={selectedPeriod} 
+            isLoading={isRefreshing}
           />
           
           {/* Indicadores de rendimiento */}
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Rendimiento por negocio</Text>
+            {businesses.length > 3 && (
+              <TouchableOpacity 
+                style={styles.viewAllButton}
+                onPress={() => {
+                  Alert.alert("Ver todos", "Esta función estará disponible próximamente.");
+                }}
+              >
+                <Text style={styles.viewAllText}>Ver todos</Text>
+              </TouchableOpacity>
+            )}
           </View>
           
           {businesses.slice(0, 3).map((business) => (
@@ -122,23 +253,35 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
               business={business}
               analytics={analytics.businessesAnalytics?.[business.id]}
               onPress={() => onSelectBusiness(business.id)}
+              isLoading={isRefreshing}
             />
           ))}
-          
-          {businesses.length > 3 && (
-            <TouchableOpacity style={styles.viewMoreButton}>
-              <Text style={styles.viewMoreText}>Ver todos</Text>
-            </TouchableOpacity>
-          )}
           
           {/* Centro de acción */}
           <ActionCenter 
             pendingActions={analytics.pendingActions || {}}
-            onActionPress={(type, id) => {
-              // Handle action press
-              console.log(`Action ${type} pressed for id ${id}`);
-            }}
+            onActionPress={handleActionPress}
+            isLoading={actionRefreshing}
           />
+          
+          {/* Botón para actualizar acciones pendientes */}
+          <TouchableOpacity 
+            style={styles.actionsRefreshButton}
+            onPress={refreshPendingActions}
+            disabled={actionRefreshing}
+          >
+            <MaterialIcons 
+              name="refresh" 
+              size={16} 
+              color={actionRefreshing ? "#C7C7CC" : "#007AFF"} 
+            />
+            <Text style={[
+              styles.actionsRefreshText,
+              actionRefreshing && { color: "#C7C7CC" }
+            ]}>
+              {actionRefreshing ? "Actualizando..." : "Actualizar acciones pendientes"}
+            </Text>
+          </TouchableOpacity>
         </>
       )}
     </View>
@@ -160,9 +303,15 @@ const styles = StyleSheet.create({
   loadingContainer: {
     padding: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 200,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    margin: 16,
   },
   loadingText: {
     color: '#8E8E93',
+    marginTop: 12,
   },
   headerRow: {
     flexDirection: 'row',
@@ -170,10 +319,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   title: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#333333',
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  refreshButtonText: {
+    fontSize: 12,
+    color: '#007AFF',
+    marginLeft: 4,
   },
   periodSelector: {
     flexDirection: 'row',
@@ -205,6 +367,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     marginBottom: 12,
     marginTop: 8,
   },
@@ -212,6 +375,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
+  },
+  viewAllButton: {
+    padding: 4,
+  },
+  viewAllText: {
+    fontSize: 14,
+    color: '#007AFF',
   },
   viewMoreButton: {
     alignItems: 'center',
@@ -223,6 +393,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
+  actionsRefreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  actionsRefreshText: {
+    color: '#007AFF',
+    fontSize: 14,
+    marginLeft: 4,
+  }
 });
 
 export default BusinessDashboard;

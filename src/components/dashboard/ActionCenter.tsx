@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -8,7 +8,8 @@ import {
   ScrollView, 
   LayoutAnimation, 
   Platform, 
-  UIManager 
+  UIManager,
+  ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { PendingActions } from '../../types/analyticsTypes';
@@ -22,12 +23,14 @@ interface ActionCenterProps {
   pendingActions: PendingActions;
   onActionPress: (type: string, id: string) => void;
   maxVisible?: number;
+  isLoading?: boolean;
 }
 
 const ActionCenter: React.FC<ActionCenterProps> = ({
   pendingActions,
   onActionPress,
-  maxVisible = 3
+  maxVisible = 3,
+  isLoading = false
 }) => {
   const { reservations = [], messages = [], reviews = [] } = pendingActions;
   const [expanded, setExpanded] = useState(false);
@@ -44,9 +47,37 @@ const ActionCenter: React.FC<ActionCenterProps> = ({
     setExpanded(!expanded);
   };
   
-  // Si no hay acciones, no mostrar el componente
-  if (!hasActions) {
-    return null;
+  // Si está cargando, mostrar el indicador
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Acciones Pendientes</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={styles.loadingText}>Cargando acciones pendientes...</Text>
+        </View>
+      </View>
+    );
+  }
+  
+  // Si no hay acciones y no está cargando, mostrar un mensaje
+  if (!hasActions && !isLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.title}>Acciones Pendientes</Text>
+          <View style={[styles.totalBadge, { backgroundColor: '#34C759' }]}>
+            <Text style={styles.totalBadgeText}>0</Text>
+          </View>
+        </View>
+        <View style={styles.emptyContainer}>
+          <MaterialIcons name="check-circle" size={32} color="#34C759" />
+          <Text style={styles.emptyText}>¡No tienes acciones pendientes!</Text>
+        </View>
+      </View>
+    );
   }
   
   // Para determinar cuántas acciones mostrar
@@ -105,18 +136,30 @@ const ActionCenter: React.FC<ActionCenterProps> = ({
               iconColor = '#007AFF';
               title = 'Reserva por confirmar';
               description = `${formatDate(data.date)}`;
+              if (data.customerName) {
+                description += ` - ${data.customerName}`;
+              }
+              if (data.partySize) {
+                description += ` (${data.partySize} personas)`;
+              }
               break;
             case 'message':
               icon = 'chat';
               iconColor = '#34C759';
               title = 'Mensaje sin leer';
               description = `De: ${data.from}`;
+              if (data.preview) {
+                description += ` - "${data.preview.substring(0, 30)}${data.preview.length > 30 ? '...' : ''}"`;
+              }
               break;
             case 'review':
               icon = 'star';
               iconColor = '#FFCC00';
               title = 'Reseña sin responder';
               description = `Calificación: ${data.rating} estrellas`;
+              if (data.preview) {
+                description += ` - "${data.preview.substring(0, 30)}${data.preview.length > 30 ? '...' : ''}"`;
+              }
               break;
           }
           
@@ -132,7 +175,7 @@ const ActionCenter: React.FC<ActionCenterProps> = ({
               </View>
               <View style={styles.actionInfo}>
                 <Text style={styles.actionTitle}>{title}</Text>
-                <Text style={styles.actionDescription}>{description}</Text>
+                <Text style={styles.actionDescription} numberOfLines={2}>{description}</Text>
               </View>
               <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
             </TouchableOpacity>
@@ -255,6 +298,29 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginRight: 4,
   },
+  loadingContainer: {
+    padding: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  emptyContainer: {
+    padding: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9F9F9',
+    borderRadius: 8,
+  },
+  emptyText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  }
 });
 
 export default ActionCenter;

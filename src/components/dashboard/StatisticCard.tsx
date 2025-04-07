@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
 // Usar el tipo correcto para los nombres de iconos
@@ -14,6 +14,7 @@ interface StatisticCardProps {
   valuePrefix?: string;
   valueSuffix?: string;
   onPress?: () => void;
+  isLoading?: boolean;
 }
 
 /**
@@ -29,7 +30,8 @@ const StatisticCard: React.FC<StatisticCardProps> = ({
   iconColor = "#007AFF",
   valuePrefix = "",
   valueSuffix = "",
-  onPress
+  onPress,
+  isLoading = false
 }) => {
   // Determina el color y el ícono para la tendencia
   const trendColor = trend > 0 ? '#34C759' : trend < 0 ? '#FF3B30' : '#8E8E93';
@@ -62,16 +64,23 @@ const StatisticCard: React.FC<StatisticCardProps> = ({
         <MaterialIcons name={icon} size={24} color={iconColor} />
       </View>
       <Text style={styles.title} numberOfLines={1}>{title}</Text>
-      <Text style={styles.value}>
-        {valuePrefix}{formattedValue}{valueSuffix}
-      </Text>
-      {showTrend && (
-        <View style={styles.trendContainer}>
-          <MaterialIcons name={trendIcon} size={14} color={trendColor} />
-          <Text style={[styles.trendText, { color: trendColor }]}>
-            {Math.abs(trend)}%
+      
+      {isLoading ? (
+        <ActivityIndicator size="small" color={iconColor} style={styles.loader} />
+      ) : (
+        <>
+          <Text style={styles.value}>
+            {valuePrefix}{formattedValue}{valueSuffix}
           </Text>
-        </View>
+          {showTrend && (
+            <View style={styles.trendContainer}>
+              <MaterialIcons name={trendIcon as any} size={14} color={trendColor} />
+              <Text style={[styles.trendText, { color: trendColor }]}>
+                {Math.abs(trend)}%
+              </Text>
+            </View>
+          )}
+        </>
       )}
     </>
   );
@@ -83,6 +92,7 @@ const StatisticCard: React.FC<StatisticCardProps> = ({
         style={styles.container} 
         onPress={onPress}
         activeOpacity={0.8}
+        disabled={isLoading}
       >
         <CardContent />
       </TouchableOpacity>
@@ -104,6 +114,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginHorizontal: 6,
     width: 120,
+    height: 136,
     alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -112,6 +123,7 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderWidth: 1,
     borderColor: '#F0F0F0',
+    justifyContent: 'space-between'
   },
   iconContainer: {
     width: 48,
@@ -120,7 +132,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F8FF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   title: {
     fontSize: 14,
@@ -148,6 +160,9 @@ const styles = StyleSheet.create({
     marginLeft: 2,
     fontWeight: '500',
   },
+  loader: {
+    marginVertical: 12,
+  }
 });
 
 export default StatisticCard;

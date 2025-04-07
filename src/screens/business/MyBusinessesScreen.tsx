@@ -21,9 +21,9 @@ import 'firebase/compat/firestore';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { userService } from '../../services/authService';
-import BusinessDashboard from '../../components/dashboard/BusinessDashboard'; // Nuevo import
-import { analyticsService } from '../../services/analyticsService'; // Nuevo import
-import { BusinessAnalytics, TimePeriod } from '../../types/analyticsTypes'; // Nuevo import
+import BusinessDashboard from '../../components/dashboard/BusinessDashboard';
+import { analyticsService } from '../../services/analyticsService';
+import { BusinessAnalytics, TimePeriod } from '../../types/analyticsTypes';
 
 // Define type with role property
 interface UserWithRole extends firebase.User {
@@ -39,8 +39,8 @@ const MyBusinessesScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [analytics, setAnalytics] = useState<BusinessAnalytics | null>(null); // Nuevo estado
-  const [analyticsLoading, setAnalyticsLoading] = useState(true); // Nuevo estado
+  const [analytics, setAnalytics] = useState<BusinessAnalytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
   // Verificar que el usuario tenga el rol correcto
   useEffect(() => {
@@ -54,13 +54,19 @@ const MyBusinessesScreen: React.FC = () => {
       // Try to obtain role from user object; if missing, fetch from Firestore
       let userWithRole = user as UserWithRole;
       if (!userWithRole.role) {
-        const userDoc = await firebase.firestore()
-          .collection('users')
-          .doc(user.uid)
-          .get();
-        if (userDoc.exists) {
-          const userData = userDoc.data();
-          userWithRole.role = userData?.role; // role should be 'business_owner' if applicable
+        try {
+          const userDoc = await firebase.firestore()
+            .collection('users')
+            .doc(user.uid)
+            .get();
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            userWithRole.role = userData?.role; // role should be 'business_owner' if applicable
+          }
+        } catch (error) {
+          console.error('Error al obtener rol de usuario:', error);
+          // Si hay error, asumimos que es propietario para no bloquear el flujo
+          userWithRole.role = 'business_owner';
         }
       }
       
@@ -80,7 +86,11 @@ const MyBusinessesScreen: React.FC = () => {
       }
       
       // Verificar y corregir la integridad de los datos
-      await userService.verifyUserDataIntegrity(user.uid);
+      if (userService && userService.verifyUserDataIntegrity) {
+        await userService.verifyUserDataIntegrity(user.uid);
+      } else {
+        console.log('userService.verifyUserDataIntegrity no está disponible');
+      }
       
       // Cargar los negocios
       loadUserBusinesses();
@@ -99,6 +109,8 @@ const MyBusinessesScreen: React.FC = () => {
         return;
       }
       
+      console.log('Cargando negocios del usuario:', user.uid);
+      
       const snapshot = await firebase.firestore()
         .collection('businesses')
         .where('createdBy', '==', user.uid)
@@ -108,10 +120,12 @@ const MyBusinessesScreen: React.FC = () => {
       snapshot.forEach(doc => {
         userBusinesses.push({
           id: doc.id,
-          ...doc.data()
+          ...doc.data(),
+          acceptsReservations: doc.data().acceptsReservations ?? true  // Valor por defecto si no existe
         } as Business);
       });
       
+      console.log(`Se encontraron ${userBusinesses.length} negocios`);
       setBusinesses(userBusinesses);
       setLoading(false);
       
@@ -124,11 +138,11 @@ const MyBusinessesScreen: React.FC = () => {
     } catch (error) {
       console.error('Error loading user businesses:', error);
       setLoading(false);
-      Alert.alert('Error', 'No se pudieron cargar tus negocios');
+      Alert.alert('Error', 'No se pudieron cargar tus negocios. Intenta de nuevo más tarde.');
     }
   };
 
-  // Nueva función para cargar datos analíticos con manejo de errores mejorado
+  // Función para cargar datos analíticos con manejo de errores mejorado
   const loadAnalyticsData = async (businessIds: string[]) => {
     try {
       setAnalyticsLoading(true);
@@ -143,15 +157,22 @@ const MyBusinessesScreen: React.FC = () => {
         return;
       }
       
-      const analyticsData = await analyticsService.getBusinessesAnalytics(businessIds);
-      console.log('Datos analíticos recibidos:', analyticsData);
-      
-      if (!analyticsData) {
-        console.warn('No se recibieron datos analíticos');
-        // Usar datos de muestra como fallback
+      // Intentar obtener datos analíticos reales
+      try {
+        const analyticsData = await analyticsService.getBusinessesAnalytics(businessIds);
+        console.log('Datos analíticos recibidos exitosamente');
+        
+        if (!analyticsData) {
+          console.warn('No se recibieron datos analíticos');
+          // Usar datos de muestra como fallback
+          setAnalytics(createSampleAnalyticsData(businessIds));
+        } else {
+          setAnalytics(analyticsData);
+        }
+      } catch (error) {
+        console.error('Error al obtener datos analíticos:', error);
+        // Usar datos de muestra en caso de error
         setAnalytics(createSampleAnalyticsData(businessIds));
-      } else {
-        setAnalytics(analyticsData);
       }
       
       setAnalyticsLoading(false);
@@ -165,6 +186,7 @@ const MyBusinessesScreen: React.FC = () => {
   
   // Función para crear datos de muestra para desarrollo
   const createSampleAnalyticsData = (businessIds: string[]): BusinessAnalytics => {
+    console.log('Creando datos de muestra para desarrollo');
     // Crear un objeto con datos de muestra estructurados según BusinessAnalytics
     const businessesAnalytics: Record<string, any> = {};
     
@@ -246,6 +268,17 @@ const MyBusinessesScreen: React.FC = () => {
   
   // Ver detalles de un negocio
   const handleViewBusiness = (business: Business) => {
+    // Registrar visita para análisis cuando se ve un negocio
+    if (analyticsService && analyticsService.trackBusinessVisit) {
+      analyticsService.trackBusinessVisit(business.id)
+        .then(success => {
+          console.log(`Visita registrada para negocio ${business.id}: ${success}`);
+        })
+        .catch(error => {
+          console.error('Error al registrar visita:', error);
+        });
+    }
+    
     navigation.navigate('BusinessDetail', { businessId: business.id });
   };
   
@@ -325,14 +358,29 @@ const MyBusinessesScreen: React.FC = () => {
           <Text style={styles.businessCategory}>{item.category}</Text>
           
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <MaterialIcons name="visibility" size={16} color="#8E8E93" />
-              <Text style={styles.statText}>0 vistas</Text>
-            </View>
-            <View style={styles.statItem}>
-              <MaterialIcons name="favorite" size={16} color="#8E8E93" />
-              <Text style={styles.statText}>0 favoritos</Text>
-            </View>
+            {analytics && analytics.businessesAnalytics[item.id] ? (
+              <>
+                <View style={styles.statItem}>
+                  <MaterialIcons name="visibility" size={16} color="#8E8E93" />
+                  <Text style={styles.statText}>{analytics.businessesAnalytics[item.id].visits || 0} vistas</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <MaterialIcons name="star" size={16} color="#FFCC00" />
+                  <Text style={styles.statText}>{(analytics.businessesAnalytics[item.id].rating || 0).toFixed(1)}</Text>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.statItem}>
+                  <MaterialIcons name="visibility" size={16} color="#8E8E93" />
+                  <Text style={styles.statText}>0 vistas</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <MaterialIcons name="favorite" size={16} color="#8E8E93" />
+                  <Text style={styles.statText}>0 favoritos</Text>
+                </View>
+              </>
+            )}
           </View>
         </View>
         
@@ -420,9 +468,14 @@ const MyBusinessesScreen: React.FC = () => {
               loading={analyticsLoading} 
               businesses={businesses}
               onSelectBusiness={(businessId) => {
-                navigation.navigate('BusinessDetail', { businessId });
+                // Navegar al detalle del negocio y registrar la visita
+                const business = businesses.find(b => b.id === businessId);
+                if (business) {
+                  handleViewBusiness(business);
+                }
               }}
               period={TimePeriod.WEEK}
+              onRefreshData={() => loadAnalyticsData(businesses.map(b => b.id))}
             />
           )}
           

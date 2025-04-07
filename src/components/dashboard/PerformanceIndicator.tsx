@@ -6,7 +6,8 @@ import {
   TouchableOpacity, 
   Image, 
   Animated,
-  Easing 
+  Easing,
+  ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Business } from '../../context/BusinessContext';
@@ -16,12 +17,14 @@ interface PerformanceIndicatorProps {
   business: Business;
   analytics?: BusinessAnalyticsData;
   onPress: () => void;
+  isLoading?: boolean;
 }
 
 const PerformanceIndicator: React.FC<PerformanceIndicatorProps> = ({
   business,
   analytics,
-  onPress
+  onPress,
+  isLoading = false
 }) => {
   // Animación para la barra de progreso
   const progressAnimation = useState(new Animated.Value(0))[0];
@@ -65,6 +68,17 @@ const PerformanceIndicator: React.FC<PerformanceIndicatorProps> = ({
   // Determinar si el indicador es interactivo
   const isInteractive = typeof onPress === 'function';
 
+  // Obtener la imagen principal del negocio
+  const getBusinessImage = () => {
+    if (business.images && business.images.length > 0) {
+      const mainImage = business.images.find(img => img.isMain) || business.images[0];
+      return mainImage.url;
+    }
+    return null;
+  };
+
+  const imageUrl = getBusinessImage();
+
   return (
     <TouchableOpacity 
       style={[
@@ -73,11 +87,26 @@ const PerformanceIndicator: React.FC<PerformanceIndicatorProps> = ({
       ]} 
       onPress={onPress}
       activeOpacity={isInteractive ? 0.7 : 1}
-      disabled={!isInteractive}
+      disabled={!isInteractive || isLoading}
     >
-      {/* Updated placeholder instead of photo */}
+      {/* Imagen o placeholder */}
       <View style={styles.imageContainer}>
-        <MaterialIcons name="store" size={32} color="#007AFF" />
+        {imageUrl ? (
+          <Image 
+            source={{ uri: imageUrl }} 
+            style={styles.image}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={[
+            styles.placeholderImage, 
+            { backgroundColor: getLetterColor(business.name) }
+          ]}>
+            <Text style={styles.placeholderText}>
+              {business.name.charAt(0).toUpperCase()}
+            </Text>
+          </View>
+        )}
       </View>
       
       {/* Información del negocio */}
@@ -87,39 +116,45 @@ const PerformanceIndicator: React.FC<PerformanceIndicatorProps> = ({
         {/* Subtítulo con categoría */}
         <Text style={styles.categoryText} numberOfLines={1}>{business.category}</Text>
         
-        {/* Barra de progreso */}
-        <View style={styles.progressBarContainer}>
-          <Animated.View 
-            style={[
-              styles.progressBar, 
-              { 
-                width: progressAnimation.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: ['0%', '100%']
-                }),
-                backgroundColor: getProgressColor()
-              }
-            ]} 
-          />
-        </View>
-        
-        {/* Métricas */}
-        <View style={styles.metricsContainer}>
-          <View style={styles.metric}>
-            <MaterialIcons name="visibility" size={14} color="#8E8E93" />
-            <Text style={styles.metricValue}>{formatVisits(visits)}</Text>
-          </View>
-          
-          <View style={styles.metric}>
-            <MaterialIcons name="star" size={14} color="#FFCC00" />
-            <Text style={styles.metricValue}>{getRating()}</Text>
-          </View>
-          
-          <View style={styles.metric}>
-            <MaterialIcons name="event-available" size={14} color="#007AFF" />
-            <Text style={styles.metricValue}>{analytics?.reservations || 0}</Text>
-          </View>
-        </View>
+        {isLoading ? (
+          <ActivityIndicator size="small" color="#007AFF" style={styles.loader} />
+        ) : (
+          <>
+            {/* Barra de progreso */}
+            <View style={styles.progressBarContainer}>
+              <Animated.View 
+                style={[
+                  styles.progressBar, 
+                  { 
+                    width: progressAnimation.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: ['0%', '100%']
+                    }),
+                    backgroundColor: getProgressColor()
+                  }
+                ]} 
+              />
+            </View>
+            
+            {/* Métricas */}
+            <View style={styles.metricsContainer}>
+              <View style={styles.metric}>
+                <MaterialIcons name="visibility" size={14} color="#8E8E93" />
+                <Text style={styles.metricValue}>{formatVisits(visits)}</Text>
+              </View>
+              
+              <View style={styles.metric}>
+                <MaterialIcons name="star" size={14} color="#FFCC00" />
+                <Text style={styles.metricValue}>{getRating()}</Text>
+              </View>
+              
+              <View style={styles.metric}>
+                <MaterialIcons name="event-available" size={14} color="#007AFF" />
+                <Text style={styles.metricValue}>{analytics?.reservations || 0}</Text>
+              </View>
+            </View>
+          </>
+        )}
       </View>
       
       <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
@@ -171,6 +206,7 @@ const styles = StyleSheet.create({
     elevation: 2,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#F0F0F5',
   },
   image: {
     width: '100%',
@@ -229,6 +265,9 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontWeight: '500',
   },
+  loader: {
+    marginVertical: 10,
+  }
 });
 
 export default PerformanceIndicator;
