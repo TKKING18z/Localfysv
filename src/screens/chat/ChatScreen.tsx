@@ -493,10 +493,7 @@ const ChatScreen: React.FC = () => {
           keyboardVerticalOffset={Platform.OS === 'ios' ? (isModernIphone ? 120 : 90) : 0}
           enabled={true}
         >
-          <View style={[
-            styles.messagesWrapper, 
-            { paddingBottom: bottomPadding }
-          ]}>
+          <View style={styles.messagesWrapper}>
             {/* Error banner */}
             {displayError && (
               <View style={styles.errorBanner}>
@@ -533,24 +530,16 @@ const ChatScreen: React.FC = () => {
               }}
               showsVerticalScrollIndicator={true}
             />
-            
-            {/* Input area - pass explicit bottom padding */}
-            <View style={[
-              styles.inputWrapper, 
-              { 
-                paddingBottom: Platform.OS === 'android' && keyboardVisibleHook ? keyboardHeight / 3 : 0,
-                marginBottom: Platform.OS === 'ios' && keyboardVisibleHook ? safeBottomPadding : 0
-              }
-            ]}>
-              <ChatInput 
-                onSend={handleSendMessage}
-                uploadImage={uploadImage}
-                disabled={loading || isOffline}
-                keyboardVisible={keyboardVisibleHook}
-                isModernIphone={isModernIphone}
-              />
-            </View>
           </View>
+          
+          {/* Input component - simplificado */}
+          <ChatInput 
+            onSend={handleSendMessage}
+            uploadImage={uploadImage}
+            disabled={loading || isOffline}
+            keyboardVisible={keyboardVisibleHook}
+            isModernIphone={isModernIphone}
+          />
         </KeyboardAvoidingView>
       </Animated.View>
       
@@ -629,12 +618,6 @@ const styles = StyleSheet.create({
     display: 'flex',
     flexDirection: 'column',
     justifyContent: 'space-between',
-  },
-  inputWrapper: {
-    width: '100%',
-    backgroundColor: '#FFFFFF',
-    position: 'relative',
-    zIndex: 10,
   },
   centerContainer: {
     flex: 1,

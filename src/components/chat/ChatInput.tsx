@@ -17,7 +17,7 @@ interface ChatInputProps {
   uploadImage?: (uri: string) => Promise<string | null | undefined>;
   disabled?: boolean;
   keyboardVisible?: boolean;
-  isModernIphone?: boolean; // Add this prop
+  isModernIphone?: boolean;
 }
 
 const ChatInput: React.FC<ChatInputProps> = ({ 
@@ -25,17 +25,15 @@ const ChatInput: React.FC<ChatInputProps> = ({
   uploadImage, 
   disabled = false, 
   keyboardVisible = false,
-  isModernIphone = false // Use this new prop
+  isModernIphone = false
 }) => {
   const [text, setText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
-  const { height: screenHeight } = Dimensions.get('window');
   
   // Focus the input when keyboard appears
   useEffect(() => {
     if (keyboardVisible && inputRef.current && Platform.OS === 'ios') {
-      // Small delay to ensure keyboard is fully shown
       setTimeout(() => {
         inputRef.current?.focus();
       }, 100);
@@ -50,13 +48,11 @@ const ChatInput: React.FC<ChatInputProps> = ({
     setText('');
     
     try {
-      console.log('Sending message:', trimmedText.substring(0, 20));
       await onSend(trimmedText);
     } catch (error) {
       console.error('Error sending message:', error);
     } finally {
       setIsLoading(false);
-      // Re-focus the input after sending - helps with keyboard staying open
       if (inputRef.current) {
         inputRef.current.focus();
       }
@@ -102,16 +98,13 @@ const ChatInput: React.FC<ChatInputProps> = ({
         try {
           const imageUri = result.assets[0].uri;
           const compressedUri = await compressAndResizeImage(imageUri);
-          console.log('Subiendo imagen comprimida...');
           
           const imageUrl = await uploadImage(compressedUri);
           
           if (imageUrl) {
-            console.log('Imagen subida exitosamente');
             await onSend(text.trim() || '', imageUrl);
             setText('');
           } else {
-            console.error('Error al subir imagen');
             Alert.alert('Error', 'No se pudo subir la imagen. Verifique su conexión e intente nuevamente.');
           }
         } catch (error) {
@@ -140,10 +133,7 @@ const ChatInput: React.FC<ChatInputProps> = ({
   return (
     <View style={[
       styles.container,
-      keyboardVisible && styles.containerWithKeyboard,
-      Platform.OS === 'ios' && keyboardVisible && styles.iosKeyboardContainer,
-      // Add extra padding for modern iPhones
-      Platform.OS === 'ios' && isModernIphone && keyboardVisible && styles.modernIphoneContainer,
+      // Simplificamos los estilos para evitar exceso de padding
       Platform.OS === 'android' && styles.androidContainer
     ]}>
       {uploadImage && (
@@ -197,7 +187,7 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
+    padding: 10,
     backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
     borderTopColor: '#E9E9EB',
@@ -206,20 +196,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 5,
     elevation: 5,
-  },
-  containerWithKeyboard: {
-    borderTopWidth: 0,
-    shadowOpacity: 0,
-    paddingBottom: Platform.OS === 'android' ? 12 : 8,
-  },
-  iosKeyboardContainer: {
-    paddingBottom: 8, 
-    borderTopWidth: 0.5,
-    borderTopColor: '#D1D1D6',
-  },
-  modernIphoneContainer: {
-    paddingBottom: 12, // Extra padding for iPhone with notch/dynamic island
-    borderTopWidth: 0.5,
   },
   androidContainer: {
     backgroundColor: '#FFFFFF',
