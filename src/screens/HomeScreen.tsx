@@ -195,13 +195,15 @@ const HomeScreen: React.FC = () => {
     const distance = getFormattedDistance(item);
     
     return (
-      <BusinessCard
-        business={item}
-        isFavorite={isFavorite(item.id)}
-        onPress={() => navigateToBusinessDetail(item)}
-        onFavoritePress={() => toggleFavorite(item.id)}
-        distance={distance}
-      />
+      <View style={styles.gridItemContainer}>
+        <BusinessCard
+          business={item}
+          isFavorite={isFavorite(item.id)}
+          onPress={() => navigateToBusinessDetail(item)}
+          onFavoritePress={() => toggleFavorite(item.id)}
+          distance={distance}
+        />
+      </View>
     );
   }, [isFavorite, navigateToBusinessDetail, toggleFavorite, getFormattedDistance]);
 
@@ -316,11 +318,8 @@ const HomeScreen: React.FC = () => {
           keyExtractor={(item) => item.id}
           renderItem={renderBusinessItem}
           numColumns={2}
-          columnWrapperStyle={styles.businessRow}
-          contentContainerStyle={[
-            styles.listContent,
-            displayedBusinesses.length === 0 ? { flex: 1 } : {}
-          ]}
+          columnWrapperStyle={styles.businessRow} // Apply horizontal spacing
+          contentContainerStyle={styles.listContent} // Apply padding to the list
           ListHeaderComponent={
             <>
               {/* Welcome Message */}
@@ -574,18 +573,24 @@ const styles = StyleSheet.create({
   },
   businessGrid: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 16, // Add padding to the grid
     marginTop: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'space-between', // Ensure cards are spaced horizontally
   },
   businessRow: {
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
+    justifyContent: 'space-between', // Ensure cards are spaced horizontally
+    paddingHorizontal: 16, // Add horizontal padding
+    marginBottom: 16, // Add vertical spacing between rows
   },
   listContent: {
     paddingBottom: 80,
+    paddingTop: 16, // Add padding at the top
+  },
+  gridItemContainer: {
+    width: '48%', // Ensure two cards fit in a row with spacing
+    marginBottom: 16, // Add vertical spacing between cards
   },
   noResultsContainer: {
     alignItems: 'center',

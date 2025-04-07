@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,9 @@ import {
   StatusBar,
   ActivityIndicator,
   RefreshControl,
+  TextInput,
+  Share,
+  Dimensions
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -19,6 +22,8 @@ import BusinessCard from '../components/BusinessCard';
 import { useLocation } from '../hooks/useLocation';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
+
+const { width } = Dimensions.get('window');
 
 const FavoritesScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -35,17 +40,44 @@ const FavoritesScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [favoriteBusinesses, setFavoriteBusinesses] = useState<Business[]>([]);
   const [sortOrder, setSortOrder] = useState<'default' | 'nameAsc' | 'rating'>('default');
-  
-  // Update favorite businesses when the list changes
+  const [searchText, setSearchText] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  const categories = useMemo(() => {
+    const uniqueCategories = Array.from(new Set(
+      favoriteBusinesses.flatMap(business => {
+        if (!business.category) return [];
+        if (typeof business.category === 'string') return [business.category];
+        if (Array.isArray(business.category)) return business.category;
+        return [];
+      })
+    ));
+    return uniqueCategories;
+  }, [favoriteBusinesses]);
+
+  const filteredBusinesses = useMemo(() => {
+    return favoriteBusinesses.filter(business => {
+      const matchesSearch = !searchText || 
+        business.name.toLowerCase().includes(searchText.toLowerCase());
+      
+      const matchesCategory = !selectedCategory || 
+        (business.category && (
+          typeof business.category === 'string' ? 
+            business.category === selectedCategory : 
+            Array.isArray(business.category) && (business.category as string[]).includes(selectedCategory)
+        ));
+        
+      return matchesSearch && matchesCategory;
+    });
+  }, [favoriteBusinesses, searchText, selectedCategory]);
+
   useEffect(() => {
     updateFavoriteBusinesses();
   }, [sortOrder]);
-  
-  // Function to update favorite businesses with sorting
+
   const updateFavoriteBusinesses = () => {
     let favorites = getFavoriteBusinesses();
     
-    // Apply sorting
     if (sortOrder === 'nameAsc') {
       favorites = [...favorites].sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortOrder === 'rating') {
@@ -55,7 +87,6 @@ const FavoritesScreen: React.FC = () => {
     setFavoriteBusinesses(favorites);
   };
 
-  // Handle refresh
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await refreshBusinesses();
@@ -63,37 +94,46 @@ const FavoritesScreen: React.FC = () => {
     setRefreshing(false);
   }, [refreshBusinesses]);
 
-  // Navigate to business detail
   const navigateToBusinessDetail = (business: Business) => {
     navigation.navigate('BusinessDetail', { businessId: business.id });
   };
   
-  // Handle removing from favorites
   const handleRemoveFavorite = (businessId: string) => {
     toggleFavorite(businessId);
-    // Update the list immediately after toggling favorite
     setTimeout(() => {
       updateFavoriteBusinesses();
     }, 0);
   };
-  
-  // Render business item
+
+  const shareBusiness = async (business: Business) => {
+    try {
+      await Share.share({
+        message: `¡Mira este negocio que me encanta! ${business.name} - Descárgate Localfy para más detalles.`,
+        title: `Recomendación: ${business.name}`,
+      });
+    } catch (error) {
+      console.error('Error al compartir:', error);
+    }
+  };
+
   const renderBusinessItem = ({ item }: { item: Business }) => {
-    // Get distance to business if location is available
     const distance = getFormattedDistance(item);
     
     return (
-      <BusinessCard
-        business={item}
-        isFavorite={true} // In favorites screen, all items are favorites
-        onPress={() => navigateToBusinessDetail(item)}
-        onFavoritePress={() => handleRemoveFavorite(item.id)}
-        distance={distance}
-      />
+      <View style={styles.gridItemContainer}>
+        <BusinessCard
+          business={item}
+          isFavorite={true}
+          onPress={() => navigateToBusinessDetail(item)}
+          onFavoritePress={() => handleRemoveFavorite(item.id)}
+          distance={distance}
+          showOpenStatus={true}
+          style={styles.gridItem}
+        />
+      </View>
     );
   };
-  
-  // Render empty state
+
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <MaterialIcons name="favorite" size={80} color="#C7C7CC" />
@@ -103,7 +143,6 @@ const FavoritesScreen: React.FC = () => {
       </Text>
       <TouchableOpacity 
         style={styles.exploreButton}
-        // Fix: Navigate to MainTabs with proper params
         onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
       >
         <Text style={styles.exploreButtonText}>Explorar negocios</Text>
@@ -111,11 +150,20 @@ const FavoritesScreen: React.FC = () => {
     </View>
   );
 
+  const renderEmptySearchState = () => (
+    <View style={styles.emptyContainer}>
+      <MaterialIcons name="search" size={80} color="#C7C7CC" />
+      <Text style={styles.emptyTitle}>No se encontraron resultados</Text>
+      <Text style={styles.emptySubtitle}>
+        Intenta buscar con otro término o elimina el filtro de búsqueda
+      </Text>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FF" />
       
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
@@ -124,77 +172,70 @@ const FavoritesScreen: React.FC = () => {
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>Mis Favoritos</Text>
-        <View style={styles.placeholderButton} />
       </View>
       
-      {/* Sort Controls */}
-      {favoriteBusinesses.length > 0 && (
-        <View style={styles.sortContainer}>
-          <Text style={styles.sortLabel}>Ordenar por:</Text>
-          <TouchableOpacity
-            style={[
-              styles.sortButton, 
-              sortOrder === 'default' ? styles.sortButtonActive : {}
-            ]}
-            onPress={() => setSortOrder('default')}
-          >
-            <Text style={[
-              styles.sortButtonText,
-              sortOrder === 'default' ? styles.sortButtonTextActive : {}
-            ]}>
-              Predeterminado
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[
-              styles.sortButton, 
-              sortOrder === 'nameAsc' ? styles.sortButtonActive : {}
-            ]}
-            onPress={() => setSortOrder('nameAsc')}
-          >
-            <Text style={[
-              styles.sortButtonText,
-              sortOrder === 'nameAsc' ? styles.sortButtonTextActive : {}
-            ]}>
-              Nombre A-Z
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[
-              styles.sortButton, 
-              sortOrder === 'rating' ? styles.sortButtonActive : {}
-            ]}
-            onPress={() => setSortOrder('rating')}
-          >
-            <Text style={[
-              styles.sortButtonText,
-              sortOrder === 'rating' ? styles.sortButtonTextActive : {}
-            ]}>
-              Calificación
-            </Text>
-          </TouchableOpacity>
+      <View style={styles.searchContainer}>
+        <View style={styles.searchBar}>
+          <MaterialIcons name="search" size={20} color="#8E8E93" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar en favoritos"
+            value={searchText}
+            onChangeText={setSearchText}
+          />
+          {searchText ? (
+            <TouchableOpacity onPress={() => setSearchText('')}>
+              <MaterialIcons name="close" size={20} color="#8E8E93" />
+            </TouchableOpacity>
+          ) : null}
         </View>
-      )}
+        
+        <Text style={styles.favoritesCount}>
+          {favoriteBusinesses.length} {favoriteBusinesses.length === 1 ? 'Favorito' : 'Favoritos'}
+        </Text>
+      </View>
       
-      {/* Content */}
+      <View style={styles.categoriesContainer}>
+        <FlatList
+          horizontal
+          data={['Todos', ...categories]}
+          keyExtractor={(item) => item}
+          renderItem={({item}) => (
+            <TouchableOpacity
+              style={[
+                styles.categoryChip,
+                selectedCategory === (item === 'Todos' ? null : item) && styles.categoryChipActive
+              ]}
+              onPress={() => setSelectedCategory(item === 'Todos' ? null : item)}
+            >
+              <Text style={[
+                styles.categoryChipText,
+                selectedCategory === (item === 'Todos' ? null : item) && styles.categoryChipTextActive
+              ]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          )}
+          contentContainerStyle={styles.categoriesList}
+          showsHorizontalScrollIndicator={false}
+        />
+      </View>
+      
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
         </View>
       ) : (
         <FlatList
-          data={favoriteBusinesses}
+          data={filteredBusinesses}
           keyExtractor={(item) => item.id}
           renderItem={renderBusinessItem}
           numColumns={2}
           columnWrapperStyle={styles.businessRow}
-          contentContainerStyle={[
-            styles.listContent,
-            favoriteBusinesses.length === 0 ? { flex: 1 } : {}
-          ]}
-          ListEmptyComponent={renderEmptyState}
+          contentContainerStyle={[styles.listContent, { paddingBottom: 80 }]}
+          ListEmptyComponent={filteredBusinesses.length === 0 && searchText 
+            ? renderEmptySearchState 
+            : renderEmptyState}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -206,11 +247,9 @@ const FavoritesScreen: React.FC = () => {
         />
       )}
       
-      {/* Bottom Navigation */}
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          // Fix: Navigate to MainTabs with proper params
           onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
@@ -256,6 +295,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#F5F7FF',
   },
+  categoriesContainer: {
+    backgroundColor: 'white',
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -276,38 +320,58 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333333',
+    textAlign: 'center', // Center-align the text
+    flex: 1, // Ensure the title takes up available space to center properly
   },
-  placeholderButton: {
-    width: 40,
+  searchContainer: {
+    padding: 16,
+    backgroundColor: 'white',
   },
-  sortContainer: {
+  searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: 'white',
-    marginBottom: 8,
-  },
-  sortLabel: {
-    fontSize: 14,
-    color: '#666666',
-    marginRight: 12,
-  },
-  sortButton: {
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    marginRight: 8,
-    backgroundColor: '#F0F0F5',
+    height: 40,
   },
-  sortButtonActive: {
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    fontSize: 16,
+    color: '#333',
+  },
+  favoritesCount: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  categoriesList: {
+    paddingHorizontal: 16,
+  },
+  categoryChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    backgroundColor: '#F2F2F7',
+    borderRadius: 16,
+    marginRight: 10,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 60,
+  },
+  categoryChipActive: {
     backgroundColor: '#007AFF',
   },
-  sortButtonText: {
-    fontSize: 12,
-    color: '#666666',
+  categoryChipText: {
+    fontSize: 14,
+    color: '#333',
+    textAlign: 'center',
   },
-  sortButtonTextActive: {
+  categoryChipTextActive: {
     color: 'white',
   },
   loadingContainer: {
@@ -318,11 +382,20 @@ const styles = StyleSheet.create({
   businessRow: {
     justifyContent: 'space-between',
     paddingHorizontal: 16,
+  },
+  gridItemContainer: {
+    width: '50%',
+    paddingHorizontal: 8,
     marginBottom: 16,
+  },
+  gridItem: {
+    width: '100%',
+    aspectRatio: 0.8,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
   listContent: {
     paddingTop: 8,
-    paddingBottom: 80,
   },
   emptyContainer: {
     flex: 1,

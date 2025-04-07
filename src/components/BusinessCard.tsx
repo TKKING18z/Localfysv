@@ -10,6 +10,8 @@ interface BusinessCardProps {
   distance?: string;
   onPress: () => void;
   onFavoritePress: () => void;
+  showOpenStatus?: boolean; // Added property
+  style?: any; // Added style property
 }
 
 const { width } = Dimensions.get('window');
@@ -20,7 +22,9 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
   isFavorite,
   distance,
   onPress,
-  onFavoritePress
+  onFavoritePress,
+  style, // Use the style prop
+  showOpenStatus  // Add the showOpenStatus prop
 }) => {
   // Determinar la imagen a mostrar
   const getBusinessImage = () => {
@@ -64,7 +68,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
 
   return (
     <TouchableOpacity
-      style={styles.container}
+      style={[styles.container, style]} // Apply external style
       onPress={onPress}
       activeOpacity={0.9}
     >
@@ -122,10 +126,9 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    width: cardWidth,
+    flex: 1, // Take up all available space in parent container
     borderRadius: 16,
     backgroundColor: 'white',
-    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -134,7 +137,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   imageContainer: {
-    height: cardWidth * 0.8,
+    height: 120, // Fixed height for image container
     position: 'relative',
   },
   image: {
