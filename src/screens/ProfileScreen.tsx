@@ -533,7 +533,7 @@ const ProfileScreen: React.FC = () => {
       <View style={styles.bottomNavigation}>
         <TouchableOpacity 
           style={styles.navItem}
-          onPress={() => navigation.navigate('Home')}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
         >
           <MaterialIcons name="home" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Inicio</Text>

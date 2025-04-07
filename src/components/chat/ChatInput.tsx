@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, 
   TextInput, 
@@ -6,21 +6,41 @@ import {
   StyleSheet, 
   Platform, 
   ActivityIndicator,
-  Alert
+  Alert,
+  Dimensions
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 
 interface ChatInputProps {
   onSend: (text: string, imageUrl?: string) => Promise<boolean | void>;
-  uploadImage?: (uri: string) => Promise<string | null | undefined>; // Updated type to allow undefined
+  uploadImage?: (uri: string) => Promise<string | null | undefined>;
   disabled?: boolean;
+  keyboardVisible?: boolean;
+  isModernIphone?: boolean; // Add this prop
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = false }) => {
+const ChatInput: React.FC<ChatInputProps> = ({ 
+  onSend, 
+  uploadImage, 
+  disabled = false, 
+  keyboardVisible = false,
+  isModernIphone = false // Use this new prop
+}) => {
   const [text, setText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<TextInput>(null);
+  const { height: screenHeight } = Dimensions.get('window');
+  
+  // Focus the input when keyboard appears
+  useEffect(() => {
+    if (keyboardVisible && inputRef.current && Platform.OS === 'ios') {
+      // Small delay to ensure keyboard is fully shown
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+    }
+  }, [keyboardVisible]);
   
   const handleSend = async () => {
     if (text.trim().length === 0 || isLoading) return;
@@ -34,40 +54,22 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
       await onSend(trimmedText);
     } catch (error) {
       console.error('Error sending message:', error);
-      // Opcionalmente restaurar el texto en caso de error
-      // setText(trimmedText);
     } finally {
       setIsLoading(false);
+      // Re-focus the input after sending - helps with keyboard staying open
+      if (inputRef.current) {
+        inputRef.current.focus();
+      }
     }
   };
   
-  // Agregar función para comprimir imágenes antes de subir
   const compressAndResizeImage = async (uri: string): Promise<string> => {
     try {
-      // En un escenario real, aquí implementarías la compresión de imágenes
-      // con una librería como react-native-image-resizer
-      
-      // Para este ejemplo, simplemente devolvemos la misma URI
-      // En una implementación real, reemplazarías esto con la compresión real
       console.log('Comprimiendo imagen antes de subir...');
       return uri;
-      
-      /* Ejemplo con react-native-image-resizer:
-      const result = await ImageResizer.createResizedImage(
-        uri,
-        1200, // maxWidth
-        1200, // maxHeight
-        'JPEG',
-        70, // quality (0-100)
-        0, // rotation
-        undefined, // outputPath
-        false // keepMeta
-      );
-      return result.uri;
-      */
     } catch (error) {
       console.error('Error comprimiendo imagen:', error);
-      return uri; // Devolver original en caso de error
+      return uri;
     }
   };
   
@@ -87,7 +89,6 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         }
       }
       
-      // Usar MediaTypeOptions en lugar de MediaType para compatibilidad
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -100,8 +101,6 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
         
         try {
           const imageUri = result.assets[0].uri;
-          
-          // Comprimir imagen antes de subir
           const compressedUri = await compressAndResizeImage(imageUri);
           console.log('Subiendo imagen comprimida...');
           
@@ -117,10 +116,8 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
           }
         } catch (error) {
           console.error('Error subiendo imagen:', error);
-          // Mensaje de error más detallado para ayudar al usuario
           let errorMessage = 'No se pudo subir la imagen.';
           
-          // Si es un problema de permisos
           if (error instanceof Error && error.message.includes('permission')) {
             errorMessage += ' No tienes permisos para subir imágenes en este momento.';
           } else if (error instanceof Error && error.message.includes('network')) {
@@ -141,7 +138,14 @@ const ChatInput: React.FC<ChatInputProps> = ({ onSend, uploadImage, disabled = f
   };
   
   return (
-    <View style={styles.container}>
+    <View style={[
+      styles.container,
+      keyboardVisible && styles.containerWithKeyboard,
+      Platform.OS === 'ios' && keyboardVisible && styles.iosKeyboardContainer,
+      // Add extra padding for modern iPhones
+      Platform.OS === 'ios' && isModernIphone && keyboardVisible && styles.modernIphoneContainer,
+      Platform.OS === 'android' && styles.androidContainer
+    ]}>
       {uploadImage && (
         <TouchableOpacity 
           style={[styles.attachButton, isLoading && styles.disabledButton]} 
@@ -202,6 +206,28 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 5,
     elevation: 5,
+  },
+  containerWithKeyboard: {
+    borderTopWidth: 0,
+    shadowOpacity: 0,
+    paddingBottom: Platform.OS === 'android' ? 12 : 8,
+  },
+  iosKeyboardContainer: {
+    paddingBottom: 8, 
+    borderTopWidth: 0.5,
+    borderTopColor: '#D1D1D6',
+  },
+  modernIphoneContainer: {
+    paddingBottom: 12, // Extra padding for iPhone with notch/dynamic island
+    borderTopWidth: 0.5,
+  },
+  androidContainer: {
+    backgroundColor: '#FFFFFF',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   inputContainer: {
     flex: 1,

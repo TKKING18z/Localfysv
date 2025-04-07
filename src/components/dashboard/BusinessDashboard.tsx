@@ -46,7 +46,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.title}>Dashboard</Text>
+        <Text style={styles.title}>Panel de Control</Text>
         <TouchableOpacity onPress={toggleExpand}>
           <MaterialIcons 
             name={expanded ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
@@ -67,7 +67,9 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
                 onPress={() => setSelectedPeriod(p)}
               >
                 <Text style={[styles.periodButtonText, selectedPeriod === p && styles.periodButtonTextActive]}>
-                  {p.charAt(0).toUpperCase() + p.slice(1)}
+                  {p === TimePeriod.DAY ? 'Día' : 
+                   p === TimePeriod.WEEK ? 'Semana' : 
+                   p === TimePeriod.MONTH ? 'Mes' : 'Año'}
                 </Text>
               </TouchableOpacity>
             ))}

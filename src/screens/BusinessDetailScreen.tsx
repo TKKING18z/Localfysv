@@ -48,7 +48,7 @@ import ReviewList from '../components/ReviewList'; // Use the component we updat
 const HEADER_HEIGHT = 350;
 const GRADIENT_COLORS = {
   primary: ['#007aff', '#0066CC'] as readonly [string, string],
-  call: ['#007aff', '#4CD964'] as readonly [string, string],
+  call: ['#007aff', '#007aff'] as readonly [string, string], // Updated to uniform blue
   email: ['#007aff', '#64D2FF'] as readonly [string, string],
   chat: ['#007aff', '#5E5CE6'] as readonly [string, string],
   reserve: ['#007aff', '#0066CC'] as readonly [string, string]
@@ -831,10 +831,11 @@ const BusinessDetailScreen: React.FC = () => {
                   size={24} 
                   color={activeTab === tab ? "#FFFFFF" : "#007aff"} 
                 />
-                <Text style={[
-                  styles.tabText, 
-                  activeTab === tab && styles.activeTabText
-                ]}>
+                <Text 
+                  numberOfLines={tab === 'info' ? 1 : undefined}  // Ensure "Información" stays on one line
+                  ellipsizeMode="tail"
+                  style={[styles.tabText, activeTab === tab && styles.activeTabText]}
+                >
                   {tab === 'info' ? 'Información' :
                    tab === 'gallery' ? 'Galería' :
                    tab === 'menu' ? (isTouristAttraction ? 'Planes' : 'Menú') :
@@ -1124,98 +1125,80 @@ const BusinessDetailScreen: React.FC = () => {
       </Animated.ScrollView>
       
       {/* Botones de acción con animación de entrada */}
-      {(business.phone || business.email || business.createdBy) && (
+      {(business.phone || business.createdBy) && (
         <Animated.View style={[
           styles.actionButtonsContainer,
           { transform: [{ translateY: actionButtonsY }] }
         ]}>
-          {business.phone && (
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleCallBusiness}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Llamar al negocio"
-            >
-              <LinearGradient
-                colors={GRADIENT_COLORS.call}
-                style={styles.actionButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
+          <View style={styles.actionButtonsWrapper}>
+            {business.phone && (
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.smallActionButton]}
+                onPress={handleCallBusiness}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Llamar al negocio"
               >
-                <MaterialIcons name="phone" size={28} color="white" />
-                <Text style={styles.actionButtonText}>Llamar</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          
-          {business.email && (
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleEmailBusiness}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Enviar correo al negocio"
-            >
-              <LinearGradient
-                colors={GRADIENT_COLORS.email}
-                style={styles.actionButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
+                <LinearGradient
+                  colors={GRADIENT_COLORS.email}
+                  style={styles.actionButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                >
+                  <MaterialIcons name="phone" size={28} color="white" />
+                  <Text style={styles.actionButtonText} numberOfLines={1}>Llamar</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            
+            {/* Add new Chat button */}
+            {business.createdBy && business.createdBy !== user?.uid && (
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.smallActionButton]} 
+                onPress={handleStartChat}
+                activeOpacity={0.8}
+                disabled={isLoading}
+                accessibilityRole="button"
+                accessibilityLabel="Chatear con el negocio"
               >
-                <MaterialIcons name="email" size={28} color="white" />
-                <Text style={styles.actionButtonText}>Correo</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          
-          {/* Add new Chat button */}
-          {business.createdBy && business.createdBy !== user?.uid && (
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={handleStartChat}
-              activeOpacity={0.8}
-              disabled={isLoading}
-              accessibilityRole="button"
-              accessibilityLabel="Chatear con el negocio"
-            >
-              <LinearGradient
-                colors={GRADIENT_COLORS.chat}
-                style={styles.actionButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
+                <LinearGradient
+                  colors={GRADIENT_COLORS.email}
+                  style={styles.actionButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <>
+                      <MaterialIcons name="chat" size={28} color="white" />
+                      <Text style={styles.actionButtonText} numberOfLines={1}>Chatear</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            
+            {business.acceptsReservations !== false && (
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.smallActionButton]}
+                onPress={navigateToReservations}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Hacer reservación"
               >
-                {isLoading ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <>
-                    <MaterialIcons name="chat" size={28} color="white" />
-                    <Text style={styles.actionButtonText}>Chatear</Text>
-                  </>
-                )}
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-          
-          {business.acceptsReservations !== false && (
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={navigateToReservations}
-              activeOpacity={0.8}
-              accessibilityRole="button"
-              accessibilityLabel="Hacer reservación"
-            >
-              <LinearGradient
-                colors={GRADIENT_COLORS.reserve}
-                style={styles.actionButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-              >
-                <MaterialIcons name="event-available" size={28} color="white" />
-                <Text style={styles.actionButtonText}>Reservar</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
+                <LinearGradient
+                  colors={GRADIENT_COLORS.email}
+                  style={styles.actionButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                >
+                  <MaterialIcons name="event-available" size={28} color="white" />
+                  <Text style={styles.actionButtonText} numberOfLines={1}>Reservar</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+          </View>
         </Animated.View>
       )}
 
@@ -1672,9 +1655,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   actionButtonsContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    paddingHorizontal: 20,
     backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -3 },
@@ -1683,19 +1663,40 @@ const styles = StyleSheet.create({
     elevation: 5,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    justifyContent: 'space-evenly',
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    paddingHorizontal: 10,
+    marginBottom: -5,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    width: '100%',
+  },
+  actionButtonsWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-evenly', // Change to space-evenly for better distribution
+    alignItems: 'center',
+    width: '100%', // Ensure it takes full width
   },
   actionButton: {
-    width: 76,
-    height: 76,
-    borderRadius: 20,
-    marginHorizontal: 6,
+    width: 70,
+    height: 70,
+    borderRadius: 18,
+    margin: 5,
     overflow: 'hidden',
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
     shadowRadius: 4,
+  },
+  smallActionButton: {
+    width: 72, // Slightly wider to accommodate text
+    height: 60,
+    borderRadius: 16,
+    marginHorizontal: -44, // Increased horizontal margin for more separation
   },
   actionButtonGradient: {
     flexDirection: 'column',
@@ -1711,6 +1712,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 6,
     textAlign: 'center',
+    width: '100%', // Ensure text has full width of button
   },
   reviewFormOverlay: {
     position: 'absolute',

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, StatusBar, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, StatusBar, Platform, TextInput, FlatList } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MapView, { Marker, PROVIDER_GOOGLE, Region, Callout } from 'react-native-maps';
@@ -8,6 +8,7 @@ import { useLocationContext } from '../context/LocationContext';
 import { useBusinesses, Business } from '../context/BusinessContext';
 import { formatDistance, calculateDistance } from '../services/LocationService';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // Define location interface
 interface Location {
@@ -28,9 +29,14 @@ const MapScreen: React.FC = () => {
   const { userLocation, isLoading } = useLocationContext();
   const { filteredBusinesses } = useBusinesses();
   const mapRef = useRef<MapView>(null);
+  const insets = useSafeAreaInsets();
   
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
   const [mapReady, setMapReady] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState<string>('');
+  const [searchResults, setSearchResults] = useState<Business[]>([]);
+  const [isSearchActive, setIsSearchActive] = useState<boolean>(false);
+  const [showSuggestions, setShowSuggestions] = useState<boolean>(false);
   const [region, setRegion] = useState<Region>({
     latitude: 13.6929, // Default to El Salvador
     longitude: -89.2182,
@@ -38,6 +44,11 @@ const MapScreen: React.FC = () => {
     longitudeDelta: 0.05,
   });
 
+  // Calculate search container height based on device
+  const searchContainerHeight = 60;
+  // Calculate appropriate top padding for search bar
+  const dynamicTopPadding = Platform.OS === 'ios' ? 5 : 10;
+  
   // Set initial region based on user location
   useEffect(() => {
     if (userLocation) {
@@ -49,6 +60,28 @@ const MapScreen: React.FC = () => {
       });
     }
   }, [userLocation]);
+
+  // Filter businesses based on search term
+  useEffect(() => {
+    if (searchTerm.trim() === '') {
+      setSearchResults([]);
+      setIsSearchActive(false);
+      setShowSuggestions(false);
+      return;
+    }
+    
+    setIsSearchActive(true);
+    setShowSuggestions(true);
+    const term = searchTerm.toLowerCase().trim();
+    
+    // Filter by name and category only
+    const results = filteredBusinesses.filter(business => 
+      business.name?.toLowerCase().includes(term) || 
+      business.category?.toLowerCase().includes(term)
+    );
+    
+    setSearchResults(results);
+  }, [searchTerm, filteredBusinesses]);
 
   // Function to focus on user location
   const focusOnUserLocation = () => {
@@ -65,6 +98,36 @@ const MapScreen: React.FC = () => {
   // Function to handle marker press
   const handleMarkerPress = (business: Business) => {
     setSelectedBusiness(business);
+    setShowSuggestions(false);
+  };
+
+  // Function to handle suggestion item press
+  const handleSuggestionPress = (business: Business) => {
+    // Always set the new business as selected
+    setSelectedBusiness(business);
+    
+    // Hide suggestions
+    setShowSuggestions(false);
+    
+    // Clear search to keep UI clean
+    setSearchTerm('');
+    setIsSearchActive(false);
+    
+    // Focus map on selected business
+    if (business.location && mapRef.current) {
+      const businessLocation = typeof business.location === 'string' 
+        ? JSON.parse(business.location) as Location
+        : business.location as Location;
+        
+      if (businessLocation.latitude && businessLocation.longitude) {
+        mapRef.current.animateToRegion({
+          latitude: businessLocation.latitude,
+          longitude: businessLocation.longitude,
+          latitudeDelta: 0.01,
+          longitudeDelta: 0.01,
+        });
+      }
+    }
   };
 
   // Calculate distance to selected business
@@ -92,6 +155,31 @@ const MapScreen: React.FC = () => {
     return formatDistance(distance);
   };
 
+  // Calculate distance to any business (for suggestions list)
+  const getDistanceToBusiness = (business: Business): string | undefined => {
+    if (!userLocation || !business?.location) {
+      return undefined;
+    }
+    
+    // Handle location whether it's an object or needs to be parsed
+    const businessLocation = typeof business.location === 'string' 
+      ? JSON.parse(business.location) as Location
+      : business.location as Location;
+      
+    if (!businessLocation.latitude || !businessLocation.longitude) {
+      return undefined;
+    }
+    
+    const distance = calculateDistance(
+      userLocation.latitude,
+      userLocation.longitude,
+      businessLocation.latitude,
+      businessLocation.longitude
+    );
+    
+    return formatDistance(distance);
+  };
+
   // Navigate to business detail
   const navigateToBusinessDetail = () => {
     if (selectedBusiness) {
@@ -102,6 +190,14 @@ const MapScreen: React.FC = () => {
   // Go back to home screen
   const goBack = () => {
     navigation.goBack();
+  };
+
+  // Clear search input
+  const clearSearch = () => {
+    setSearchTerm('');
+    setIsSearchActive(false);
+    setShowSuggestions(false);
+    // Don't clear selected business when clearing search
   };
 
   // Get marker color based on category
@@ -128,12 +224,99 @@ const MapScreen: React.FC = () => {
     }
   };
 
+  // Handle search input focus
+  const handleSearchFocus = () => {
+    if (searchTerm.trim() !== '') {
+      setShowSuggestions(true);
+    }
+    // Keep the selected business - don't clear it on search focus
+  };
+
+  // Handle touch on map to dismiss suggestion list but keep selected business
+  const handleMapTouch = () => {
+    setShowSuggestions(false);
+    // Don't clear search when touching map - just hide suggestions
+  };
+
+  // Determine which businesses to display on the map
+  const businessesToDisplay = isSearchActive ? searchResults : filteredBusinesses;
+
   // Determine if we should show the map
   const shouldShowMap = !isLoading || Platform.OS === 'ios';
 
+  // Render item for suggestion list
+  const renderSuggestionItem = ({ item }: { item: Business }) => (
+    <TouchableOpacity 
+      style={styles.suggestionItem} 
+      onPress={() => handleSuggestionPress(item)}
+    >
+      <View style={styles.suggestionContent}>
+        <View style={[styles.categoryIndicator, { backgroundColor: getMarkerColor(item.category || '') }]} />
+        <View style={styles.suggestionTextContainer}>
+          <Text style={styles.suggestionTitle}>{item.name}</Text>
+          <Text style={styles.suggestionCategory}>{item.category}</Text>
+        </View>
+        {getDistanceToBusiness(item) && (
+          <Text style={styles.suggestionDistance}>{getDistanceToBusiness(item)}</Text>
+        )}
+      </View>
+    </TouchableOpacity>
+  );
+
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <StatusBar barStyle="dark-content" />
+      
+      {/* Map */}
+      {shouldShowMap && (
+        <View style={styles.mapContainer}>
+          <MapView
+            ref={mapRef}
+            provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
+            style={styles.map}
+            region={region}
+            onRegionChangeComplete={setRegion}
+            showsUserLocation
+            showsMyLocationButton={false}
+            showsCompass={true}
+            showsScale={true}
+            onMapReady={handleMapReady}
+            toolbarEnabled={false}
+            onTouchStart={handleMapTouch}
+          >
+            {/* Only show markers after map is ready */}
+            {mapReady && businessesToDisplay.map((business) => {
+              if (!business.location) return null;
+              
+              // Handle location whether it's an object or needs to be parsed
+              const businessLocation = typeof business.location === 'string' 
+                ? JSON.parse(business.location) as Location
+                : business.location as Location;
+                
+              if (!businessLocation.latitude || !businessLocation.longitude) return null;
+              
+              return (
+                <Marker
+                  key={business.id}
+                  coordinate={{
+                    latitude: businessLocation.latitude,
+                    longitude: businessLocation.longitude,
+                  }}
+                  onPress={() => handleMarkerPress(business)}
+                  pinColor={getMarkerColor(business.category || '')}
+                >
+                  <Callout tooltip>
+                    <View style={styles.calloutContainer}>
+                      <Text style={styles.calloutTitle}>{business.name}</Text>
+                      <Text style={styles.calloutCategory}>{business.category}</Text>
+                    </View>
+                  </Callout>
+                </Marker>
+              );
+            })}
+          </MapView>
+        </View>
+      )}
       
       {/* Loading indicator */}
       {isLoading && (
@@ -142,72 +325,109 @@ const MapScreen: React.FC = () => {
           <Text style={styles.loadingText}>Obteniendo ubicación...</Text>
         </View>
       )}
+      
+      {/* Search Bar - positioned with safe area insets */}
+      <View style={[
+        styles.searchContainer, 
+        { 
+          top: insets.top + dynamicTopPadding,  // Position just below Dynamic Island
+          paddingLeft: Math.max(16, insets.left),
+          paddingRight: Math.max(16, insets.right),
+          width: '92%', // Use percentage for width for better responsiveness
+          alignSelf: 'center' // Center horizontally
+        }
+      ]}>
+        <TouchableOpacity style={styles.backButton} onPress={goBack}>
+          <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
+        </TouchableOpacity>
+        
+        <View style={styles.searchInputContainer}>
+          <MaterialIcons name="search" size={20} color="#999" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar negocios..."
+            placeholderTextColor="#999"
+            value={searchTerm}
+            onChangeText={setSearchTerm}
+            returnKeyType="search"
+            autoCapitalize="none"
+            onFocus={handleSearchFocus}
+          />
+          {searchTerm.length > 0 && (
+            <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+              <MaterialIcons name="close" size={20} color="#999" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
 
-      {/* Map */}
-      {shouldShowMap && (
-        <MapView
-          ref={mapRef}
-          provider={Platform.OS === 'ios' ? undefined : PROVIDER_GOOGLE}
-          style={styles.map}
-          region={region}
-          onRegionChangeComplete={setRegion}
-          showsUserLocation
-          showsMyLocationButton={false}
-          showsCompass={true}
-          showsScale={true}
-          onMapReady={handleMapReady}
-          toolbarEnabled={false}
-        >
-          {/* Only show markers after map is ready */}
-          {mapReady && filteredBusinesses.map((business) => {
-            if (!business.location) return null;
-            
-            // Handle location whether it's an object or needs to be parsed
-            const businessLocation = typeof business.location === 'string' 
-              ? JSON.parse(business.location) as Location
-              : business.location as Location;
-              
-            if (!businessLocation.latitude || !businessLocation.longitude) return null;
-            
-            return (
-              <Marker
-                key={business.id}
-                coordinate={{
-                  latitude: businessLocation.latitude,
-                  longitude: businessLocation.longitude,
-                }}
-                onPress={() => handleMarkerPress(business)}
-                pinColor={getMarkerColor(business.category || '')}
-              >
-                <Callout tooltip>
-                  <View style={styles.calloutContainer}>
-                    <Text style={styles.calloutTitle}>{business.name}</Text>
-                    <Text style={styles.calloutCategory}>{business.category}</Text>
-                  </View>
-                </Callout>
-              </Marker>
-            );
-          })}
-        </MapView>
+      {/* Suggestions List - positioned relative to search bar */}
+      {showSuggestions && searchResults.length > 0 && (
+        <View style={[
+          styles.suggestionsContainer, 
+          { 
+            top: insets.top + searchContainerHeight + dynamicTopPadding,
+            paddingLeft: Math.max(0, insets.left),
+            paddingRight: Math.max(0, insets.right),
+            width: '92%', // Match search container width
+            alignSelf: 'center' // Center horizontally
+          }
+        ]}>
+          <FlatList
+            data={searchResults}
+            renderItem={renderSuggestionItem}
+            keyExtractor={(item) => item.id}
+            keyboardShouldPersistTaps="handled"
+            maxToRenderPerBatch={10}
+            initialNumToRender={10}
+            showsVerticalScrollIndicator={true}
+            style={styles.suggestionsList}
+            contentContainerStyle={styles.suggestionsContent}
+          />
+        </View>
       )}
 
-      {/* Back button */}
-      <TouchableOpacity style={styles.backButton} onPress={goBack}>
-        <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
-      </TouchableOpacity>
+      {/* No Results Message */}
+      {showSuggestions && searchTerm.trim() !== '' && searchResults.length === 0 && (
+        <View style={[
+          styles.noResultsContainer, 
+          { 
+            top: insets.top + searchContainerHeight + dynamicTopPadding,
+            paddingLeft: Math.max(16, insets.left),
+            paddingRight: Math.max(16, insets.right),
+            width: '92%', // Match search container width
+            alignSelf: 'center' // Center horizontally
+          }
+        ]}>
+          <Text style={styles.noResultsText}>No se encontraron negocios</Text>
+        </View>
+      )}
       
-      {/* My location button */}
+      {/* My location button - positioned with safe area insets */}
       <TouchableOpacity 
-        style={styles.myLocationButton} 
+        style={[
+          styles.myLocationButton,
+          {
+            bottom: 160 + insets.bottom,
+            right: Math.max(16, insets.right)
+          }
+        ]} 
         onPress={focusOnUserLocation}
         disabled={!mapReady}
       >
         <MaterialIcons name="my-location" size={24} color={mapReady ? "#007AFF" : "#AAAAAA"} />
       </TouchableOpacity>
 
-      {/* Business info panel */}
+      {/* Business info panel - positioned with safe area insets */}
       {selectedBusiness && (
-        <View style={styles.businessInfoPanel}>
+        <View style={[
+          styles.businessInfoPanel,
+          {
+            bottom: 24 + insets.bottom,
+            left: Math.max(16, insets.left),
+            right: Math.max(16, insets.right)
+          }
+        ]}>
           <View style={styles.businessContent}>
             <View style={styles.businessTextInfo}>
               <Text style={styles.businessName}>{selectedBusiness.name}</Text>
@@ -229,7 +449,7 @@ const MapScreen: React.FC = () => {
           </View>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -238,9 +458,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#FFFFFF',
   },
+  mapContainer: {
+    flex: 1,
+    position: 'relative',
+  },
   map: {
-    width: width,
-    height: height,
+    ...StyleSheet.absoluteFillObject,
   },
   loadingContainer: {
     position: 'absolute',
@@ -258,14 +481,126 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
   },
-  backButton: {
+  searchContainer: {
     position: 'absolute',
-    top: 16,
-    left: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
+    zIndex: 5,
+    borderRadius: 12, // Increased border radius for modern look
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
+    elevation: 6,
+    height: Platform.OS === 'ios' ? 56 : 60, // Adjusted height for iOS vs Android
+  },
+  searchInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F2F2F7',
+    borderRadius: 10,
+    marginLeft: 10,
+    paddingHorizontal: 12,
+    height: 40,
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    height: 40,
+    fontSize: 16,
+    color: '#333',
+    paddingVertical: 0,
+  },
+  clearButton: {
+    padding: 4,
+  },
+  suggestionsContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    maxHeight: height * 0.4,
+    backgroundColor: '#FFFFFF',
+    zIndex: 4,
+    marginHorizontal: 10,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  suggestionsList: {
+    maxHeight: height * 0.4,
+  },
+  suggestionsContent: {
+    paddingBottom: 8,
+  },
+  suggestionItem: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  suggestionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 12,
+  },
+  suggestionTextContainer: {
+    flex: 1,
+  },
+  suggestionTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    marginBottom: 2,
+  },
+  suggestionCategory: {
+    fontSize: 14,
+    color: '#666',
+  },
+  suggestionDistance: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  noResultsContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: '#FFFFFF',
+    zIndex: 4,
+    padding: 16,
+    marginHorizontal: 10,
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 4,
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+  },
+  backButton: {
     backgroundColor: 'white',
     borderRadius: 24,
-    width: 48,
-    height: 48,
+    width: 40,
+    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -276,8 +611,6 @@ const styles = StyleSheet.create({
   },
   myLocationButton: {
     position: 'absolute',
-    bottom: 160,
-    right: 16,
     backgroundColor: 'white',
     borderRadius: 24,
     width: 48,
@@ -312,9 +645,6 @@ const styles = StyleSheet.create({
   },
   businessInfoPanel: {
     position: 'absolute',
-    bottom: 24,
-    left: 16,
-    right: 16,
     backgroundColor: 'white',
     borderRadius: 12,
     shadowColor: '#000',
@@ -323,6 +653,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
     padding: 16,
+    zIndex: 3,
   },
   businessContent: {
     flexDirection: 'row',

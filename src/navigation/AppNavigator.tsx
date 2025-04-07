@@ -43,6 +43,9 @@ import SupportScreen from '../screens/SupportScreen';
 import TermsConditionsScreen from '../screens/TermsConditionsScreen';
 import NotificationsScreen from '../screens/NotificationsScreen';
 
+// Importar la pantalla de pagos
+import PaymentScreen from '../screens/PaymentScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -86,6 +89,12 @@ export type RootStackParamList = {
   Support: undefined;
   Tutorials: undefined;
   TermsConditions: undefined;
+  // Nueva ruta para pagos
+  Payment: {
+    businessId?: string;
+    businessName?: string;
+    amount?: number;
+  };
 };
 
 // Define tab navigator parameter list
@@ -442,6 +451,9 @@ const AppNavigator = () => {
             
             {/* Notifications screen */}
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
+            
+            {/* Payment screen */}
+            <Stack.Screen name="Payment" component={PaymentScreen} />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthStack} />

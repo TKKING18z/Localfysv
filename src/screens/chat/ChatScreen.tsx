@@ -40,6 +40,9 @@ import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessage from '../../components/chat/ChatMessage';
 import ChatInput from '../../components/chat/ChatInput';
 
+// Hooks
+import useKeyboard from '../../hooks/useKeyboard';
+
 // Types
 import { Message, MessageType, MessageStatus } from '../../../models/chatTypes';
 
@@ -107,7 +110,26 @@ const ChatScreen: React.FC = () => {
   // Refs
   const messagesListRef = useRef<FlatList>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // Usar el hook personalizado para detectar el teclado
+  const { 
+    keyboardHeight, 
+    keyboardVisible: keyboardVisibleHook, 
+    safeBottomPadding,
+    isModernIphone 
+  } = useKeyboard();
   
+  // Calculate bottom padding based on keyboard visibility and platform
+  const bottomPadding = useMemo(() => {
+    if (!keyboardVisibleHook) return 0;
+    // Enhanced padding for iPhone 15 Pro and similar devices
+    if (Platform.OS === 'ios') {
+      return safeBottomPadding;
+    }
+    // Android padding
+    return 10;
+  }, [keyboardVisibleHook, safeBottomPadding]);
+
   // Handle back button press
   useFocusEffect(
     useCallback(() => {
@@ -468,51 +490,67 @@ const ChatScreen: React.FC = () => {
         <KeyboardAvoidingView
           style={styles.keyboardContainer}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? (isModernIphone ? 120 : 90) : 0}
+          enabled={true}
         >
-          {/* Error banner */}
-          {displayError && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>{displayError}</Text>
-              <TouchableOpacity onPress={() => refreshConversations()}>
-                <Text style={styles.errorBannerRetry}>Reintentar</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* Messages list */}
-          <FlatList
-            ref={messagesListRef}
-            data={displayMessages} 
-            keyExtractor={(item) => item.id}
-            renderItem={({ item, index }) => (
-              <ChatMessage 
-                message={item} 
-                isMine={item.senderId === user?.uid}
-                onImagePress={handleImagePress}
-                onRetry={handleRetryMessage}
-                previousMessage={index > 0 ? displayMessages[index - 1] : null}
-              />
+          <View style={[
+            styles.messagesWrapper, 
+            { paddingBottom: bottomPadding }
+          ]}>
+            {/* Error banner */}
+            {displayError && (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>{displayError}</Text>
+                <TouchableOpacity onPress={() => refreshConversations()}>
+                  <Text style={styles.errorBannerRetry}>Reintentar</Text>
+                </TouchableOpacity>
+              </View>
             )}
-            contentContainerStyle={styles.messagesContainer}
-            inverted={false}
-            ListEmptyComponent={EmptyStateComponent}
-            onScroll={handleScroll}
-            scrollEventThrottle={16}
-            onContentSizeChange={() => {
-              if (scrollToBottom) {
-                scrollToBottomIfNeeded();
+
+            {/* Messages list */}
+            <FlatList
+              ref={messagesListRef}
+              data={displayMessages} 
+              keyExtractor={(item) => item.id}
+              renderItem={({ item, index }) => (
+                <ChatMessage 
+                  message={item} 
+                  isMine={item.senderId === user?.uid}
+                  onImagePress={handleImagePress}
+                  onRetry={handleRetryMessage}
+                  previousMessage={index > 0 ? displayMessages[index - 1] : null}
+                />
+              )}
+              contentContainerStyle={styles.messagesContainer}
+              inverted={false}
+              ListEmptyComponent={EmptyStateComponent}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              onContentSizeChange={() => {
+                if (scrollToBottom) {
+                  scrollToBottomIfNeeded();
+                }
+              }}
+              showsVerticalScrollIndicator={true}
+            />
+            
+            {/* Input area - pass explicit bottom padding */}
+            <View style={[
+              styles.inputWrapper, 
+              { 
+                paddingBottom: Platform.OS === 'android' && keyboardVisibleHook ? keyboardHeight / 3 : 0,
+                marginBottom: Platform.OS === 'ios' && keyboardVisibleHook ? safeBottomPadding : 0
               }
-            }}
-            showsVerticalScrollIndicator={true}
-          />
-          
-          {/* Input area */}
-          <ChatInput 
-            onSend={handleSendMessage}
-            uploadImage={uploadImage}
-            disabled={loading || isOffline}
-          />
+            ]}>
+              <ChatInput 
+                onSend={handleSendMessage}
+                uploadImage={uploadImage}
+                disabled={loading || isOffline}
+                keyboardVisible={keyboardVisibleHook}
+                isModernIphone={isModernIphone}
+              />
+            </View>
+          </View>
         </KeyboardAvoidingView>
       </Animated.View>
       
@@ -585,6 +623,18 @@ const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
     backgroundColor: '#EFF6FF',
+  },
+  messagesWrapper: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'space-between',
+  },
+  inputWrapper: {
+    width: '100%',
+    backgroundColor: '#FFFFFF',
+    position: 'relative',
+    zIndex: 10,
   },
   centerContainer: {
     flex: 1,
