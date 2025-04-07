@@ -42,11 +42,6 @@ const MyBusinessesScreen: React.FC = () => {
   const [analytics, setAnalytics] = useState<BusinessAnalytics | null>(null); // Nuevo estado
   const [analyticsLoading, setAnalyticsLoading] = useState(true); // Nuevo estado
 
-  // Calcular la fecha de membresía formateada (si está disponible)
-  const memberSince = user && user.metadata.creationTime 
-    ? new Date(user.metadata.creationTime).toLocaleDateString('es-ES') 
-    : '';
-
   // Verificar que el usuario tenga el rol correcto
   useEffect(() => {
     const checkUserRole = async () => {
@@ -400,13 +395,6 @@ const MyBusinessesScreen: React.FC = () => {
         />
       </View>
       
-      {/* Nueva sección para mostrar "Miembro desde:" */}
-      {memberSince ? (
-        <View style={styles.memberContainer}>
-          <Text style={styles.memberSinceText}>Miembro desde: {memberSince}</Text>
-        </View>
-      ) : null}
-      
       {/* Main scrollable content */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
@@ -531,18 +519,6 @@ const styles = StyleSheet.create({
   },
   placeholder: {
     width: 40,
-  },
-  // Nuevo estilo para el contenedor del miembro desde
-  memberContainer: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E5EA',
-  },
-  memberSinceText: {
-    fontSize: 14,
-    color: '#8E8E93',
   },
   // Nuevo estilo para el contenedor de búsqueda
   searchContainer: {
