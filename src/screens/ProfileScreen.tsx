@@ -444,6 +444,16 @@ const ProfileScreen: React.FC = () => {
             </TouchableOpacity>
           )}
           
+          {/* Add Favorites Link */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('Favorites')}
+          >
+            <MaterialIcons name="favorite" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>Mis Favoritos</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
           <View style={styles.settingItem}>
             <View style={styles.settingInfo}>
               <MaterialIcons name="notifications" size={22} color="#007AFF" />
@@ -544,10 +554,10 @@ const ProfileScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItem}
-          onPress={() => navigation.navigate('Favorites')}
+          onPress={() => navigation.navigate('Conversations')}
         >
-          <MaterialIcons name="favorite-border" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Favoritos</Text>
+          <MaterialIcons name="chat" size={24} color="#8E8E93" />
+          <Text style={styles.navItemText}>Mensajes</Text>
         </TouchableOpacity>
         
         <TouchableOpacity style={styles.navItem}>

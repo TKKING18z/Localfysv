@@ -8,14 +8,15 @@ import { LocationProvider } from './src/context/LocationContext';
 import { AuthProvider } from './src/context/AuthContext'; 
 import { ThemeProvider } from './src/context/ThemeContext';
 import { StoreProvider } from './src/context/StoreContext';
+import { CartProvider } from './src/context/CartContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from './firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
 
-// Reemplaza esta constante con tu clave publicable de prueba
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_TuClavePublicable';
+// Clave pública de Stripe (reemplaza con tu clave real)
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_tu_clave_publica'; 
 
 // Ignorar advertencias específicas que no podemos controlar
 LogBox.ignoreLogs([
@@ -110,13 +111,14 @@ export default function App() {
         <AuthProvider>
           <StripeProvider
             publishableKey={STRIPE_PUBLISHABLE_KEY}
-            urlScheme="tu-esquema-url" // Necesario para redirecciones en iOS
-            merchantIdentifier="merchant.com.localfy" // Solo para Apple Pay
+            merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
           >
             <ThemeProvider>
               <LocationProvider>
                 <BusinessProvider>
-                  <AppNavigator />
+                  <CartProvider>
+                    <AppNavigator />
+                  </CartProvider>
                 </BusinessProvider>
               </LocationProvider>
             </ThemeProvider>

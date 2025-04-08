@@ -1,5 +1,5 @@
 // components/MenuViewer.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,29 +9,40 @@ import {
   Linking,
   ActivityIndicator,
   Alert,
-  ScrollView
+  ScrollView,
+  SectionList
 } from 'react-native';
 import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
-import { MenuItem } from '../context/BusinessContext';
+import { MenuItem as MenuItemType } from '../context/BusinessContext';
+import MenuItem from './menu/MenuItem';
 
 // Interface actualizada
 interface MenuViewerProps {
-  menu?: MenuItem[];
+  menu?: MenuItemType[];
   menuUrl?: string;
   isNested?: boolean;  // Add this property
   viewType?: 'restaurant' | 'tourism';  // Add this property
+  businessId?: string; // Add this property
+  businessName?: string; // Add this property
+}
+
+// Interface para las secciones
+interface MenuSection {
+  title: string;
+  data: MenuItemType[];
 }
 
 const MenuViewer: React.FC<MenuViewerProps> = ({ 
   menu, 
   menuUrl,
   isNested = false,  // Default value
-  viewType = 'restaurant'  // Default value
+  viewType = 'restaurant',  // Default value
+  businessId,
+  businessName
 }) => {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const scrollViewRef = useRef<ScrollView>(null);
   
   // Extraer categorías únicas
   const categories = React.useMemo(() => {
@@ -40,12 +51,40 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
     return uniqueCategories;
   }, [menu]);
   
-  // Filtrar menú por categoría activa
-  const filteredMenu = React.useMemo(() => {
-    if (!menu) return [];
-    if (!activeCategory) return menu;
-    return menu.filter(item => (item.category || 'Sin categoría') === activeCategory);
-  }, [menu, activeCategory]);
+  // Preparar secciones para SectionList
+  const menuSections = React.useMemo(() => {
+    if (!menu || menu.length === 0) return [];
+    
+    // Si hay una categoría activa, solo mostrar esa
+    if (activeCategory) {
+      const filteredItems = menu.filter(item => 
+        (item.category || 'Sin categoría') === activeCategory
+      );
+      
+      return [{
+        title: activeCategory,
+        data: filteredItems
+      }];
+    }
+    
+    // Si no hay categoría activa, agrupar por categorías
+    const sections: MenuSection[] = [];
+    
+    categories.forEach(category => {
+      const itemsInCategory = menu.filter(item => 
+        (item.category || 'Sin categoría') === category
+      );
+      
+      if (itemsInCategory.length > 0) {
+        sections.push({
+          title: category,
+          data: itemsInCategory
+        });
+      }
+    });
+    
+    return sections;
+  }, [menu, categories, activeCategory]);
   
   // Abrir URL del menú externo
   const handleOpenMenuUrl = async () => {
@@ -108,32 +147,62 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
     );
   };
   
-  // Renderizar un item del menú
-  const renderMenuItem = ({ item }: { item: MenuItem }) => (
-    <View style={styles.menuItem}>
-      <View style={styles.menuItemLeft}>
-        {renderMenuItemImage(item.imageUrl, item.name)}
-      </View>
-      
-      <View style={styles.menuItemCenter}>
-        <Text style={styles.menuItemName}>{item.name}</Text>
-        {item.description && (
-          <Text style={styles.menuItemDescription} numberOfLines={2}>
-            {item.description}
-          </Text>
-        )}
-        {item.category && (
-          <View style={styles.categoryTag}>
-            <Text style={styles.categoryTagText}>{item.category}</Text>
-          </View>
-        )}
-      </View>
-      
-      <View style={styles.menuItemRight}>
-        <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
-      </View>
-    </View>
+  // Renderizar cada item del menú usando el componente MenuItem
+  const renderMenuItem = ({ item }: { item: MenuItemType }) => (
+    <MenuItem
+      id={`${businessId || ''}-${item.category || 'sin-categoria'}-${item.name}-${item.id}`}
+      name={item.name}
+      description={item.description}
+      price={parseFloat(item.price.toString()) || 0}
+      image={item.imageUrl}
+      businessId={businessId || ''}
+      businessName={businessName || 'Localfy'}
+      onPress={() => {
+        // Aquí puedes navegar a una pantalla de detalle del ítem si es necesario
+      }}
+      hasOptions={false}
+    />
   );
+  
+  // Renderizar el header de cada sección
+  const renderSectionHeader = ({ section: { title } }: { section: MenuSection }) => (
+    <Text style={styles.categoryTitle}>{title}</Text>
+  );
+  
+  // Renderizar el header con las categorías
+  const renderCategoriesHeader = () => {
+    if (categories.length === 0) return null;
+    
+    return (
+      <View style={styles.categoriesContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.categoriesScrollContent}
+        >
+          {['Todos', ...categories].map((item, index) => (
+            <TouchableOpacity
+              key={`category-${index}-${item}`}
+              style={[
+                styles.categoryButton,
+                (index === 0 && activeCategory === null) || (item === activeCategory) ? 
+                  styles.activeCategoryButton : undefined
+              ]}
+              onPress={() => setActiveCategory(index === 0 ? null : item)}
+            >
+              <Text style={[
+                styles.categoryButtonText,
+                (index === 0 && activeCategory === null) || (item === activeCategory) ? 
+                  styles.activeCategoryButtonText : undefined
+              ]}>
+                {item}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+    );
+  };
   
   // Si no hay datos de menú, mostrar mensaje apropiado
   if ((!menu || menu.length === 0) && !menuUrl) {
@@ -171,60 +240,22 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
         </TouchableOpacity>
       )}
       
-      {/* Filtros de categoría */}
-      {categories.length > 0 && (
-        <View style={styles.categoriesContainer}>
-          <ScrollView
-            ref={scrollViewRef}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.categoriesScrollContent}
-          >
-            <TouchableOpacity
-              style={[
-                styles.categoryButton,
-                activeCategory === null && styles.activeCategoryButton
-              ]}
-              onPress={() => setActiveCategory(null)}
-            >
-              <Text style={[
-                styles.categoryButtonText,
-                activeCategory === null && styles.activeCategoryButtonText
-              ]}>
-                Todos
-              </Text>
-            </TouchableOpacity>
-            
-            {categories.map((category) => (
-              <TouchableOpacity
-                key={category}
-                style={[
-                  styles.categoryButton,
-                  activeCategory === category && styles.activeCategoryButton
-                ]}
-                onPress={() => setActiveCategory(category)}
-              >
-                <Text style={[
-                  styles.categoryButtonText,
-                  activeCategory === category && styles.activeCategoryButtonText
-                ]}>
-                  {category}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
-      
-      {/* Lista de items del menú */}
+      {/* Lista de items del menú usando SectionList */}
       {menu && menu.length > 0 ? (
-        <FlatList
-          data={filteredMenu}
+        <SectionList
+          sections={menuSections}
           renderItem={renderMenuItem}
+          renderSectionHeader={renderSectionHeader}
           keyExtractor={(item) => item.id}
+          stickySectionHeadersEnabled={false}
+          ListHeaderComponent={renderCategoriesHeader}
           contentContainerStyle={styles.menuList}
           ItemSeparatorComponent={() => <View style={styles.separator} />}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={true}
+          initialNumToRender={5}
+          maxToRenderPerBatch={5}
+          windowSize={5}
         />
       ) : menuUrl ? (
         <View style={styles.onlyUrlContainer}>
@@ -270,6 +301,7 @@ const styles = StyleSheet.create({
   },
   categoriesContainer: {
     marginBottom: 16,
+    maxHeight: 50,
   },
   categoriesScrollContent: {
     paddingRight: 16,
@@ -368,6 +400,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666666',
     textAlign: 'center',
+  },
+  categoryContainer: {
+    marginBottom: 16,
+  },
+  categoryTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 8,
+    backgroundColor: '#F5F7FF',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    color: '#007AFF',
   },
 });
 

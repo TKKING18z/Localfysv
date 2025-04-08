@@ -31,6 +31,7 @@ import { Promotion } from '../types/businessTypes';
 // import { chatService } from '../../services/ChatService';
 // Add the import for ChatContext
 import { useChat } from '../context/ChatContext';
+import { useCart } from '../context/CartContext';
 import firebase from 'firebase/compat/app';
 
 // Components
@@ -69,6 +70,8 @@ const BusinessDetailScreen: React.FC = () => {
   const { user } = useAuth();
   // Update useChat to extract refreshConversations
   const { createConversation, refreshConversations } = useChat();
+  // Añadir useCart para acceder al carrito
+  const { cart } = useCart();
   
   // Estados principales
   const [business, setBusiness] = useState<Business | null>(null);
@@ -578,6 +581,11 @@ const BusinessDetailScreen: React.FC = () => {
     );
   };
 
+  // Handler para navegar al carrito
+  const handleGoToCart = useCallback(() => {
+    navigation.navigate('Cart');
+  }, [navigation]);
+
   // Estados renderizados
   if (loading) {
     return (
@@ -868,6 +876,20 @@ const BusinessDetailScreen: React.FC = () => {
                   <PaymentMethodsView methods={business.paymentMethods} />
                 </View>
               )}
+
+              {/* Botón para realizar pago */}
+              <TouchableOpacity
+                style={styles.paymentButton}
+                onPress={() =>
+                  navigation.navigate('Payment', {
+                    businessId: business.id,
+                    businessName: business.name,
+                    amount: 100, // Puedes reemplazarlo con un valor dinámico
+                  })
+                }
+              >
+                <Text style={styles.paymentButtonText}>Realizar Pago</Text>
+              </TouchableOpacity>
               
               {/* Información de contacto mejorada */}
               <View style={styles.card}>
@@ -967,16 +989,19 @@ const BusinessDetailScreen: React.FC = () => {
           {activeTab === 'menu' && (
             <>
               {(business.menu || business.menuUrl) ? (
-                <View style={styles.card}>
+                <View style={[styles.card, { paddingBottom: 0 }]}>
                   <Text style={styles.cardSectionTitle}>
                     {isTouristAttraction ? 'Planes y Actividades' : 'Menú'}
                   </Text>
-                  <MenuViewer 
-                    menu={business.menu} 
-                    menuUrl={business.menuUrl} 
-                    isNested={true}
-                    viewType={isTouristAttraction ? 'tourism' : 'restaurant'}
-                  />
+                  <View style={{ height: dimensions.height * 0.6 }}>
+                    <MenuViewer 
+                      menu={business.menu} 
+                      menuUrl={business.menuUrl} 
+                      viewType={isTouristAttraction ? 'tourism' : 'restaurant'}
+                      businessId={business.id}
+                      businessName={business.name}
+                    />
+                  </View>
                 </View>
               ) : (
                 <View style={styles.emptyCard}>
@@ -1125,7 +1150,7 @@ const BusinessDetailScreen: React.FC = () => {
       </Animated.ScrollView>
       
       {/* Botones de acción con animación de entrada */}
-      {(business.phone || business.createdBy) && (
+      {(business?.phone || business?.createdBy) && (
         <Animated.View style={[
           styles.actionButtonsContainer,
           { transform: [{ translateY: actionButtonsY }] }
@@ -1195,6 +1220,34 @@ const BusinessDetailScreen: React.FC = () => {
                 >
                   <MaterialIcons name="event-available" size={28} color="white" />
                   <Text style={styles.actionButtonText} numberOfLines={1}>Reservar</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            
+            {/* Botón de carrito integrado */}
+            {cart.items.length > 0 && (
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.smallActionButton]}
+                onPress={handleGoToCart}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Ver carrito"
+              >
+                <LinearGradient
+                  colors={GRADIENT_COLORS.call}
+                  style={styles.actionButtonGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                >
+                  <View style={styles.cartIconContainer}>
+                    <MaterialIcons name="shopping-cart" size={28} color="white" />
+                    {cart.items.length > 0 && (
+                      <View style={styles.cartBadge}>
+                        <Text style={styles.cartBadgeText}>{cart.items.length}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={styles.actionButtonText} numberOfLines={1}>Carrito</Text>
                 </LinearGradient>
               </TouchableOpacity>
             )}
@@ -1850,6 +1903,41 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  paymentButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginTop: 20,
+  },
+  paymentButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  cartIconContainer: {
+    position: 'relative',
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -10,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: 'white',
+  },
+  cartBadgeText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 

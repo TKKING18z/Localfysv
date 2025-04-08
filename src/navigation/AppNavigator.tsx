@@ -46,6 +46,9 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 // Importar la pantalla de pagos
 import PaymentScreen from '../screens/PaymentScreen';
 
+// Importar la pantalla de carrito
+import { CartScreen } from '../screens/CartScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -94,7 +97,11 @@ export type RootStackParamList = {
     businessId?: string;
     businessName?: string;
     amount?: number;
+    cartItems?: any[]; // Añadir cartItems como parámetro opcional
+    isCartPayment?: boolean; // Flag para indicar si el pago viene del carrito
   };
+  // Nueva ruta para carrito
+  Cart: undefined;
 };
 
 // Define tab navigator parameter list
@@ -102,8 +109,9 @@ export type MainTabParamList = {
   Home: undefined;
   Conversations: undefined;
   AddBusiness: undefined;
-  Favorites: undefined;
   Profile: undefined;
+  Cart: undefined;
+  // Removed Favorites as a main tab
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -184,11 +192,10 @@ function MainTabs() {
             );
           } else if (route.name === 'AddBusiness') {
             return null; // Custom button will handle this
-          } else if (route.name === 'Favorites') {
-            // Use proper icon names
-            return <MaterialIcons name={focused ? 'favorite' as any : 'favorite-border' as any} size={size} color={color} />;
           } else if (route.name === 'Profile') {
             return <MaterialIcons name={focused ? 'person' as any : 'person-outline' as any} size={size} color={color} />;
+          } else if (route.name === 'Cart') {
+            return <MaterialIcons name="shopping-cart" size={size} color={color} />;
           }
           // Default fallback
           return <MaterialIcons name={'circle' as any} size={size} color={color} />;
@@ -239,9 +246,11 @@ function MainTabs() {
         }}
       />
       <Tab.Screen 
-        name="Favorites" 
-        component={FavoritesScreen} 
-        options={{ tabBarLabel: 'Favoritos' }} // Updated label to Spanish
+        name="Cart" 
+        component={CartScreen}
+        options={{
+          tabBarLabel: 'Carrito',
+        }}
       />
       <Tab.Screen 
         name="Profile" 
@@ -385,6 +394,17 @@ const AppNavigator = () => {
           <>
             <Stack.Screen name="MainTabs" component={MainTabs} />
             <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
+            {/* Mantén solo esta definición de Payment */}
+            <Stack.Screen 
+              name="Payment" 
+              component={PaymentScreen} 
+              options={{
+                headerShown: true,
+                title: 'Realizar Pago',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF',
+              }} 
+            />
             
             {/* Agregar las nuevas pantallas */}
             <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
@@ -451,9 +471,9 @@ const AppNavigator = () => {
             
             {/* Notifications screen */}
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
-            
-            {/* Payment screen */}
-            <Stack.Screen name="Payment" component={PaymentScreen} />
+
+            {/* Cart screen */}
+            <Stack.Screen name="Cart" component={CartScreen} options={{ headerShown: false }} />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthStack} />

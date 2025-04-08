@@ -24,7 +24,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
   onPress,
   onFavoritePress,
   style, // Use the style prop
-  showOpenStatus  // Add the showOpenStatus prop
+  showOpenStatus = true  // Enable by default
 }) => {
   // Determinar la imagen a mostrar
   const getBusinessImage = () => {
@@ -66,6 +66,37 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
     return name.substring(0, maxLength) + '...';
   };
 
+  // Función para determinar si el negocio está abierto o cerrado
+  const isBusinessOpen = () => {
+    if (!business.businessHours) return false;
+
+    const now = new Date();
+    const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
+    const currentHour = now.getHours();
+    const currentMinutes = now.getMinutes();
+    const currentTime = currentHour * 60 + currentMinutes; // Convertir a minutos
+
+    // Acceder de forma segura a las horas del día actual
+    const dayHours = business.businessHours[dayOfWeek];
+    if (!dayHours || dayHours.closed) return false;
+
+    // Analizar horarios de apertura y cierre (formato como "9:00" o "21:30")
+    try {
+      const openTimeParts = dayHours.open?.split(':').map(Number) || [0, 0];
+      const closeTimeParts = dayHours.close?.split(':').map(Number) || [0, 0];
+
+      const openTimeMinutes = openTimeParts[0] * 60 + (openTimeParts[1] || 0);
+      const closeTimeMinutes = closeTimeParts[0] * 60 + (closeTimeParts[1] || 0);
+
+      return currentTime >= openTimeMinutes && currentTime <= closeTimeMinutes;
+    } catch (error) {
+      return false;
+    }
+  };
+
+  // Determinar si el negocio está abierto
+  const isOpen = isBusinessOpen();
+
   return (
     <TouchableOpacity
       style={[styles.container, style]} // Apply external style
@@ -101,6 +132,18 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
             color={isFavorite ? '#FF3B30' : '#FFFFFF'}
           />
         </TouchableOpacity>
+
+        {/* Open/Closed Status Badge */}
+        {showOpenStatus && (
+          <View style={[
+            styles.statusBadge,
+            isOpen ? styles.openBadge : styles.closedBadge
+          ]}>
+            <Text style={styles.statusText}>
+              {isOpen ? 'Abierto' : 'Cerrado'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Business information */}
@@ -189,6 +232,27 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#8E8E93',
     marginLeft: 2,
+  },
+  // Estilos para el badge de estado (abierto/cerrado)
+  statusBadge: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  openBadge: {
+    backgroundColor: 'rgba(52, 199, 89, 0.8)', // Verde semi-transparente
+  },
+  closedBadge: {
+    backgroundColor: 'rgba(255, 59, 48, 0.8)', // Rojo semi-transparente
+  },
+  statusText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: 'bold',
   },
 });
 
