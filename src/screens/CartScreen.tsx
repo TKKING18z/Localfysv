@@ -18,8 +18,10 @@ import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useCart, CartItem, PaymentMethodType } from '../context/CartContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type CartNavigationProp = StackNavigationProp<RootStackParamList, 'Cart'>;
 
@@ -36,6 +38,8 @@ export const CartScreen: React.FC = () => {
   // Por defecto, asumimos que los negocios aceptan efectivo
   // Esto podría obtenerse de la API del negocio en una versión futura
   const [acceptsCashOnDelivery, setAcceptsCashOnDelivery] = useState(true);
+
+  const insets = useSafeAreaInsets();
 
   // Comprobar si el negocio acepta efectivo
   useEffect(() => {
@@ -302,244 +306,271 @@ export const CartScreen: React.FC = () => {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={handleBack} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color="black" />
-        </TouchableOpacity>
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>Tu Carrito</Text>
-          <Text style={styles.businessNameHeader}>
-            {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
-          </Text>
-        </View>
-        {cart.items.length > 0 && (
-          <TouchableOpacity onPress={handleClearCart} style={styles.clearButton}>
-            <MaterialIcons name="delete-sweep" size={24} color="#FF3B30" />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={handleBack} style={styles.backButton}>
+            <MaterialIcons name="arrow-back" size={24} color="black" />
           </TouchableOpacity>
-        )}
-      </View>
-
-      {cart.items.length > 0 ? (
-        <>
-          <FlatList
-            data={cart.items}
-            renderItem={renderItem}
-            keyExtractor={item => item.id}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.listContent}
-            ListHeaderComponent={() => (
-              <View style={styles.businessInfo}>
-                <MaterialIcons name="storefront" size={24} color="#007AFF" />
-                <View style={styles.businessInfoTextContainer}>
-                  <Text style={styles.businessInfoLabel}>Productos de:</Text>
-                  <Text style={styles.businessName}>
-                    {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
-                  </Text>
-                </View>
-              </View>
-            )}
-          />
-
-          <KeyboardAvoidingView
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            style={styles.summaryContainer}
-          >
-            <View style={styles.summaryContent}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Subtotal</Text>
-                <Text style={styles.summaryValue}>${totalPrice.toFixed(2)}</Text>
-              </View>
-              
-              <View style={styles.divider} />
-              
-              <View style={styles.summaryRow}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>${totalPrice.toFixed(2)}</Text>
-              </View>
-              
-              <TouchableOpacity 
-                style={styles.checkoutButton}
-                onPress={handleConfirmOrder}
-                disabled={loading}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <MaterialIcons name="shopping-bag" size={20} color="#FFFFFF" style={styles.checkoutIcon} />
-                    <Text style={styles.checkoutButtonText}>Confirmar Pedido</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </>
-      ) : (
-        <View style={styles.emptyCart}>
-          <MaterialIcons name="shopping-cart" size={80} color="#E5E5E5" />
-          <Text style={styles.emptyCartTitle}>Tu carrito está vacío</Text>
-          <TouchableOpacity 
-            style={styles.browseButton}
-            onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
-          >
-            <Text style={styles.browseButtonText}>Explorar negocios</Text>
-          </TouchableOpacity>
+          <View style={styles.titleContainer}>
+            <Text style={styles.title}>Tu Carrito</Text>
+            <Text style={styles.businessNameHeader}>
+              {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
+            </Text>
+          </View>
+          {cart.items.length > 0 && (
+            <TouchableOpacity onPress={handleClearCart} style={styles.clearButton}>
+              <MaterialIcons name="delete-sweep" size={24} color="#FF3B30" />
+            </TouchableOpacity>
+          )}
         </View>
-      )}
 
-      {/* Modal de detalle del producto */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={modalVisible}
-        onRequestClose={() => setModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Detalle del Producto</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}>
-                <MaterialIcons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            {selectedItem && (
-              <ScrollView style={styles.modalBody}>
-                {selectedItem.image ? (
-                  <Image 
-                    source={{ uri: selectedItem.image }} 
-                    style={styles.modalImage} 
-                    contentFit="cover"
-                  />
-                ) : (
-                  <View style={[styles.modalImage, styles.modalPlaceholderImage]}>
-                    <MaterialIcons name="restaurant" size={48} color="#BBBBBB" />
-                  </View>
-                )}
-
-                <View style={styles.modalProductInfo}>
-                  <Text style={styles.modalProductName}>{selectedItem.name}</Text>
-                  <Text style={styles.modalProductPrice}>${selectedItem.price.toFixed(2)}</Text>
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionTitle}>Cantidad</Text>
-                    <Text style={styles.detailSectionValue}>{selectedItem.quantity}</Text>
-                  </View>
-
-                  {selectedItem.options && selectedItem.options.length > 0 && (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailSectionTitle}>Opciones Seleccionadas</Text>
-                      {selectedItem.options.map((option, index) => (
-                        <View key={index} style={styles.optionItem}>
-                          <Text style={styles.optionName}>{option.name}:</Text>
-                          <Text style={styles.optionValue}>{option.choice}</Text>
-                          {option.extraPrice && option.extraPrice > 0 ? (
-                            <Text style={styles.optionPrice}>+${option.extraPrice.toFixed(2)}</Text>
-                          ) : null}
-                        </View>
-                      ))}
-                    </View>
-                  )}
-
-                  {selectedItem.notes && (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailSectionTitle}>Notas</Text>
-                      <Text style={styles.notesText}>{selectedItem.notes}</Text>
-                    </View>
-                  )}
-
-                  <View style={styles.detailSection}>
-                    <Text style={styles.detailSectionTitle}>Negocio</Text>
-                    <Text style={styles.businessNameText}>
-                      {selectedItem.businessName || cart.businessName || 'Localfy'}
+        {cart.items.length > 0 ? (
+          <>
+            <FlatList
+              data={cart.items}
+              renderItem={renderItem}
+              keyExtractor={item => item.id}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.listContent,
+                { 
+                  paddingBottom: 200 + (insets.bottom > 0 ? insets.bottom : 0),
+                  flexGrow: cart.items.length < 3 ? 1 : undefined 
+                }
+              ]}
+              ListHeaderComponent={() => (
+                <View style={styles.businessInfo}>
+                  <MaterialIcons name="storefront" size={24} color="#007AFF" />
+                  <View style={styles.businessInfoTextContainer}>
+                    <Text style={styles.businessInfoLabel}>Productos de:</Text>
+                    <Text style={styles.businessName}>
+                      {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
                     </Text>
                   </View>
                 </View>
-              </ScrollView>
-            )}
+              )}
+            />
 
-            <View style={styles.modalFooter}>
-              <TouchableOpacity 
-                style={styles.modalButton}
-                onPress={() => setModalVisible(false)}
-              >
-                <Text style={styles.modalButtonText}>Cerrar</Text>
-              </TouchableOpacity>
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 64 : 0}
+              style={[
+                styles.summaryContainer,
+                { paddingBottom: Math.max(insets.bottom, 16) }
+              ]}
+            >
+              <View style={styles.summaryContent}>
+                <View style={styles.summaryRow}>
+                  <Text style={styles.summaryLabel}>Subtotal</Text>
+                  <Text style={styles.summaryValue}>${totalPrice.toFixed(2)}</Text>
+                </View>
+                
+                <View style={styles.divider} />
+                
+                <View style={styles.summaryRow}>
+                  <Text style={styles.totalLabel}>Total</Text>
+                  <Text style={styles.totalValue}>${totalPrice.toFixed(2)}</Text>
+                </View>
+                
+                <TouchableOpacity 
+                  style={[
+                    styles.checkoutButton,
+                    { marginBottom: insets.bottom > 0 ? insets.bottom : 16 }
+                  ]}
+                  onPress={handleConfirmOrder}
+                  disabled={loading}
+                  activeOpacity={0.8}
+                >
+                  <LinearGradient
+                    colors={['#007AFF', '#00A2FF']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.checkoutButtonGradient}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color="#FFFFFF" size="small" />
+                    ) : (
+                      <>
+                        <MaterialIcons name="shopping-bag" size={20} color="#FFFFFF" style={styles.checkoutIcon} />
+                        <Text style={styles.checkoutButtonText}>Confirmar Pedido</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </>
+        ) : (
+          <View style={styles.emptyCart}>
+            <MaterialIcons name="shopping-cart" size={80} color="#E5E5E5" />
+            <Text style={styles.emptyCartTitle}>Tu carrito está vacío</Text>
+            <TouchableOpacity 
+              style={styles.browseButton}
+              onPress={() => navigation.navigate('MainTabs', { screen: 'Home' })}
+            >
+              <Text style={styles.browseButtonText}>Explorar negocios</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Modal de detalle del producto */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={modalVisible}
+          onRequestClose={() => setModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Detalle del Producto</Text>
+                <TouchableOpacity onPress={() => setModalVisible(false)}>
+                  <MaterialIcons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              {selectedItem && (
+                <ScrollView style={styles.modalBody}>
+                  {selectedItem.image ? (
+                    <Image 
+                      source={{ uri: selectedItem.image }} 
+                      style={styles.modalImage} 
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={[styles.modalImage, styles.modalPlaceholderImage]}>
+                      <MaterialIcons name="restaurant" size={48} color="#BBBBBB" />
+                    </View>
+                  )}
+
+                  <View style={styles.modalProductInfo}>
+                    <Text style={styles.modalProductName}>{selectedItem.name}</Text>
+                    <Text style={styles.modalProductPrice}>${selectedItem.price.toFixed(2)}</Text>
+
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailSectionTitle}>Cantidad</Text>
+                      <Text style={styles.detailSectionValue}>{selectedItem.quantity}</Text>
+                    </View>
+
+                    {selectedItem.options && selectedItem.options.length > 0 && (
+                      <View style={styles.detailSection}>
+                        <Text style={styles.detailSectionTitle}>Opciones Seleccionadas</Text>
+                        {selectedItem.options.map((option, index) => (
+                          <View key={index} style={styles.optionItem}>
+                            <Text style={styles.optionName}>{option.name}:</Text>
+                            <Text style={styles.optionValue}>{option.choice}</Text>
+                            {option.extraPrice && option.extraPrice > 0 ? (
+                              <Text style={styles.optionPrice}>+${option.extraPrice.toFixed(2)}</Text>
+                            ) : null}
+                          </View>
+                        ))}
+                      </View>
+                    )}
+
+                    {selectedItem.notes && (
+                      <View style={styles.detailSection}>
+                        <Text style={styles.detailSectionTitle}>Notas</Text>
+                        <Text style={styles.notesText}>{selectedItem.notes}</Text>
+                      </View>
+                    )}
+
+                    <View style={styles.detailSection}>
+                      <Text style={styles.detailSectionTitle}>Negocio</Text>
+                      <Text style={styles.businessNameText}>
+                        {selectedItem.businessName || cart.businessName || 'Localfy'}
+                      </Text>
+                    </View>
+                  </View>
+                </ScrollView>
+              )}
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity 
+                  style={styles.modalButton}
+                  onPress={() => setModalVisible(false)}
+                >
+                  <Text style={styles.modalButtonText}>Cerrar</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
 
-      {/* Modal de selección de método de pago */}
-      <Modal
-        animationType="slide"
-        transparent={true}
-        visible={paymentModalVisible}
-        onRequestClose={() => setPaymentModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalContent, { maxHeight: 500 }]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Método de Pago</Text>
-              <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
-                <MaterialIcons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
+        {/* Modal de selección de método de pago */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={paymentModalVisible}
+          onRequestClose={() => setPaymentModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: 500 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Método de Pago</Text>
+                <TouchableOpacity onPress={() => setPaymentModalVisible(false)}>
+                  <MaterialIcons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
 
-            <View style={styles.paymentMethodsContainer}>
-              <Text style={styles.paymentMethodsTitle}>
-                Selecciona tu método de pago preferido:
-              </Text>
+              <View style={styles.paymentMethodsContainer}>
+                <Text style={styles.paymentMethodsTitle}>
+                  Selecciona tu método de pago preferido:
+                </Text>
 
-              <TouchableOpacity 
-                style={styles.paymentMethodItem}
-                onPress={() => handlePaymentMethodSelection('card')}
-              >
-                <MaterialIcons name="credit-card" size={28} color="#007AFF" />
-                <View style={styles.paymentMethodInfo}>
-                  <Text style={styles.paymentMethodName}>Tarjeta de crédito/débito</Text>
-                  <Text style={styles.paymentMethodDescription}>
-                    Paga con tu tarjeta a través de Stripe
-                  </Text>
-                </View>
-                <MaterialIcons name="arrow-forward-ios" size={16} color="#999" />
-              </TouchableOpacity>
-
-              {acceptsCashOnDelivery && (
                 <TouchableOpacity 
                   style={styles.paymentMethodItem}
-                  onPress={() => handlePaymentMethodSelection('cash')}
+                  onPress={() => handlePaymentMethodSelection('card')}
                 >
-                  <MaterialIcons name="attach-money" size={28} color="#2E7D32" />
+                  <MaterialIcons name="credit-card" size={28} color="#007AFF" />
                   <View style={styles.paymentMethodInfo}>
-                    <Text style={styles.paymentMethodName}>Efectivo</Text>
+                    <Text style={styles.paymentMethodName}>Tarjeta de crédito/débito</Text>
                     <Text style={styles.paymentMethodDescription}>
-                      Paga en efectivo al recibir tu pedido
+                      Paga con tu tarjeta a través de Stripe
                     </Text>
                   </View>
                   <MaterialIcons name="arrow-forward-ios" size={16} color="#999" />
                 </TouchableOpacity>
-              )}
 
-            </View>
+                {acceptsCashOnDelivery && (
+                  <TouchableOpacity 
+                    style={styles.paymentMethodItem}
+                    onPress={() => handlePaymentMethodSelection('cash')}
+                  >
+                    <MaterialIcons name="attach-money" size={28} color="#2E7D32" />
+                    <View style={styles.paymentMethodInfo}>
+                      <Text style={styles.paymentMethodName}>Efectivo</Text>
+                      <Text style={styles.paymentMethodDescription}>
+                        Paga en efectivo al recibir tu pedido
+                      </Text>
+                    </View>
+                    <MaterialIcons name="arrow-forward-ios" size={16} color="#999" />
+                  </TouchableOpacity>
+                )}
 
-            <View style={styles.modalFooter}>
-              <TouchableOpacity 
-                style={styles.modalButtonSecondary}
-                onPress={() => setPaymentModalVisible(false)}
-              >
-                <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
-              </TouchableOpacity>
+              </View>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity 
+                  style={styles.modalButtonSecondary}
+                  onPress={() => setPaymentModalVisible(false)}
+                >
+                  <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
-        </View>
-      </Modal>
+        </Modal>
+      </View>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F5F7FF',
+  },
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',
@@ -681,7 +712,18 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#EEE',
     backgroundColor: '#FFF',
-    paddingBottom: Platform.OS === 'ios' ? 20 : 0,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -3 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 4,
+    zIndex: 10,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
   },
   summaryContent: {
     padding: 16,
@@ -716,13 +758,21 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
   checkoutButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
     marginTop: 16,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    overflow: 'hidden',
+  },
+  checkoutButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'center',
+    width: '100%',
   },
   checkoutIcon: {
     marginRight: 8,

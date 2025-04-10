@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback, useState, useRef } from 'react';
+import React, { useEffect, useCallback, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import * as Haptics from 'expo-haptics';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as NotificationService from '../../../services/NotificationService';
 
 type NavigationProp = StackNavigationProp<RootStackParamList, 'Conversations'>;
 
@@ -56,56 +57,31 @@ const ConversationsScreen: React.FC = () => {
   const [isSearchActive, setIsSearchActive] = useState(false);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   
+  // Estado para selección múltiple
+  const [isMultiSelectActive, setIsMultiSelectActive] = useState(false);
+  const [selectedConversations, setSelectedConversations] = useState<Set<string>>(new Set());
+  const [isDeleting, setIsDeleting] = useState(false);
+  
   // Animation values
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
   const searchWidth = useRef(new Animated.Value(0)).current;
+  const actionBarSlideAnim = useRef(new Animated.Value(100)).current;
   
   // Track swipeable rows for proper handling
   const swipeableRefs = useRef<Map<string, Swipeable>>(new Map());
   const prevOpenedRow = useRef<string | null>(null);
   
-  // Animation on component mount
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 400,
-        useNativeDriver: true
-      }),
-      Animated.spring(slideAnim, {
-        toValue: 0,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true
-      })
-    ]).start();
-  }, [fadeAnim, slideAnim]);
+  // Utilizamos un ref para controlar si ya se hizo la carga inicial
+  const initialLoadDone = useRef(false);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Update conversations when context conversations change
-  useEffect(() => {
-    if (contextConversations.length > 0) {
-      setConversations(contextConversations);
-      setError(null);
-      
-      // Also update filtered conversations if search is active
-      if (searchQuery.length > 0) {
-        filterConversations(searchQuery, contextConversations);
-      } else {
-        setFilteredConversations(contextConversations);
-      }
-    } else if (contextConversations.length === 0 && !contextLoading) {
-      setConversations([]);
-      setFilteredConversations([]);
-    }
-  }, [contextConversations, contextLoading, searchQuery]);
+  // Añadir un bloqueo de tiempo para evitar refrescos demasiado frecuentes
+  const lastRefreshTimestamp = useRef<number>(0);
+  const REFRESH_COOLDOWN = 3000; // Mínimo 3 segundos entre refrescos
   
-  // Update error state when context error changes
-  useEffect(() => {
-    if (contextError) {
-      setError(contextError);
-    }
-  }, [contextError]);
+  // Añadir un nuevo estado para mostrar la guía de uso
+  const [showSelectionHelp, setShowSelectionHelp] = useState(false);
   
   // Filter conversations based on search query
   const filterConversations = useCallback((query: string, conversationsToFilter = conversations) => {
@@ -168,7 +144,7 @@ const ConversationsScreen: React.FC = () => {
     }
   }, [isSearchActive, searchWidth, filterConversations]);
   
-  // Enhanced refresh function
+  // Enhanced refresh function - sin desactivar la multiseleción
   const refreshConversations = useCallback(async () => {
     if (!user) {
       return;
@@ -179,7 +155,22 @@ const ConversationsScreen: React.FC = () => {
       return;
     }
     
+    // Comprobar si ya hay un refresco en curso
+    if (refreshing) {
+      console.log('[ConversationsScreen] Evitando refresco múltiple - ya en progreso');
+      return;
+    }
+    
+    // Comprobar si ha pasado suficiente tiempo desde el último refresco
+    const now = Date.now();
+    const timeSinceLastRefresh = now - lastRefreshTimestamp.current;
+    if (timeSinceLastRefresh < REFRESH_COOLDOWN) {
+      console.log(`[ConversationsScreen] Evitando refresco demasiado frecuente - último hace ${timeSinceLastRefresh}ms`);
+      return;
+    }
+    
     try {
+      lastRefreshTimestamp.current = now;
       setRefreshing(true);
       
       // Close any opened swipeable rows
@@ -191,222 +182,212 @@ const ConversationsScreen: React.FC = () => {
         prevOpenedRow.current = null;
       }
       
+      // IMPORTANTE: Ya no desactivamos el modo multi-selección durante refrescos
+      // Guardar las conversaciones seleccionadas antes de refrescar
+      const selectedIds = Array.from(selectedConversations);
+      
       // Execute the context's refresh function
+      console.log('[ConversationsScreen] Ejecutando refresco real de conversaciones');
       await contextRefreshConversations();
+      
+      // Restaurar selecciones después del refresco
+      if (isMultiSelectActive && selectedIds.length > 0) {
+        // Verificar que las conversaciones seleccionadas todavía existen
+        const newSelectedIds = selectedIds.filter(id => 
+          contextConversations.some(conv => conv.id === id)
+        );
+        setSelectedConversations(new Set(newSelectedIds));
+      }
+      
+      console.log('[ConversationsScreen] Refresco completado');
     } catch (error) {
       console.error('Error refreshing conversations:', error);
       setError('Error al actualizar. Intenta de nuevo.');
     } finally {
-      setRefreshing(false);
+      // Uso de setTimeout para evitar actualizar estado si el componente se desmontó
+      setTimeout(() => {
+        setRefreshing(false);
+      }, 300);
     }
-  }, [user, contextRefreshConversations, isOffline]);
+  }, [user, contextRefreshConversations, isOffline, refreshing, isMultiSelectActive, selectedConversations, contextConversations]);
   
-  // Función para actualizar fotos de perfil de negocios
-  const updateBusinessAvatars = useCallback(async () => {
-    if (!user || conversations.length === 0 || isOffline) return;
+  // Mostrar guía de ayuda al activar el modo selección por primera vez
+  const toggleMultiSelect = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
-    try {
-      console.log('[ConversationsScreen] Verificando avatares de negocios en conversaciones...');
-      const db = firebase.firestore();
-      let updatedCount = 0;
+    // Si está activo, lo desactivamos y limpiamos selecciones
+    if (isMultiSelectActive) {
+      setIsMultiSelectActive(false);
+      setSelectedConversations(new Set());
       
-      // Solo procesar conversaciones con businessId
-      const businessConversations = conversations.filter(
-        conv => conv.businessId && conv.participants.length >= 2
-      );
+      // Animación para ocultar barra de acciones
+      Animated.timing(actionBarSlideAnim, {
+        toValue: 100,
+        duration: 300,
+        useNativeDriver: true
+      }).start();
+    } else {
+      // Activamos modo selección
+      setIsMultiSelectActive(true);
       
-      console.log(`[ConversationsScreen] Encontradas ${businessConversations.length} conversaciones de negocios`);
-      
-      for (const conv of businessConversations) {
-        try {
-          // Identificar el ID del propietario del negocio
-          let businessOwnerId = '';
-          for (const participantId of conv.participants) {
-            if (participantId.includes('business_owner_') || participantId === conv.businessId) {
-              businessOwnerId = participantId;
-              break;
-            }
-          }
-          
-          // Si no lo encontramos, asumimos que es el otro participante que no es el usuario actual
-          if (!businessOwnerId) {
-            businessOwnerId = conv.participants.find(id => id !== user.uid) || '';
-          }
-          
-          // Verificar si ya tiene una foto de perfil
-          if (!businessOwnerId || 
-              (conv.participantPhotos && conv.participantPhotos[businessOwnerId])) {
-            continue;
-          }
-          
-          // Buscar la imagen principal del negocio
-          const businessDoc = await db.collection('businesses').doc(conv.businessId).get();
-          if (!businessDoc.exists) continue;
-          
-          const businessData = businessDoc.data();
-          if (!businessData?.images || !Array.isArray(businessData.images) || 
-              businessData.images.length === 0) continue;
-          
-          // Buscar la imagen principal o usar la primera disponible
-          let businessImageUrl = null;
-          const mainImage = businessData.images.find(img => img && img.isMain);
-          
-          if (mainImage && mainImage.url) {
-            businessImageUrl = mainImage.url;
-          } else if (businessData.images[0].url) {
-            businessImageUrl = businessData.images[0].url;
-          }
-          
-          if (!businessImageUrl) continue;
-          
-          // Actualizar la conversación con la imagen del negocio
-          const participantPhotos = conv.participantPhotos || {};
-          const updatedPhotos = { ...participantPhotos };
-          updatedPhotos[businessOwnerId] = businessImageUrl;
-          
-          // Actualizar en Firestore
-          await db.collection('conversations').doc(conv.id).update({
-            participantPhotos: updatedPhotos,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          updatedCount++;
-        } catch (convError) {
-          console.error(`[ConversationsScreen] Error procesando conversación ${conv.id}:`, convError);
+      // Mostrar ayuda la primera vez
+      AsyncStorage.getItem('multiselect_help_shown').then(value => {
+        if (!value) {
+          setShowSelectionHelp(true);
+          AsyncStorage.setItem('multiselect_help_shown', 'true');
         }
+      }).catch(err => {
+        console.error('[ConversationsScreen] Error comprobando estado de ayuda:', err);
+      });
+      
+      // Cerrar búsqueda si está activa
+      if (isSearchActive) {
+        toggleSearch();
       }
       
-      if (updatedCount > 0) {
-        console.log(`[ConversationsScreen] Actualizadas ${updatedCount} fotos de perfil de negocios`);
-        // Refrescar conversaciones para ver los cambios
-        refreshConversations();
-      }
-    } catch (error) {
-      console.error('[ConversationsScreen] Error actualizando avatares:', error);
-    }
-  }, [user, conversations, isOffline, refreshConversations]);
-  
-  // Utilizamos un ref para controlar si ya se hizo la carga inicial
-  const initialLoadDone = useRef(false);
-  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
-  // Cargar datos cuando el componente se monta (una sola vez)
-  useEffect(() => {
-    // Solo cargar si no se ha hecho ya
-    if (!initialLoadDone.current) {
-      console.log('[ConversationsScreen] Carga inicial de conversaciones');
-      
-      const loadInitialData = async () => {
-        try {
-          // Primero cargamos las conversaciones
-          await refreshConversations();
-          
-          // Sincronizar badge count al iniciar la pantalla
-          if (user) {
-            try {
-              const { notificationService } = require('../../../services/NotificationService');
-              await notificationService.syncBadgeCount(user.uid);
-              console.log('[ConversationsScreen] Badge count sincronizado correctamente');
-            } catch (badgeErr) {
-              console.error('[ConversationsScreen] Error sincronizando badge count:', badgeErr);
-            }
-          }
-          
-          // Verificamos si necesitamos actualizar avatares (máximo una vez al día)
-          try {
-            const lastAvatarUpdateStr = await AsyncStorage.getItem('last_avatar_update');
-            const lastUpdate = lastAvatarUpdateStr ? new Date(lastAvatarUpdateStr) : null;
-            const now = new Date();
-            
-            // Solo actualizar si han pasado más de 24 horas desde la última vez
-            if (!lastUpdate || (now.getTime() - lastUpdate.getTime() > 24 * 60 * 60 * 1000)) {
-              console.log('[ConversationsScreen] Primera actualización de avatares del día');
-              await updateBusinessAvatars();
-              await AsyncStorage.setItem('last_avatar_update', now.toISOString());
-            } else {
-              console.log('[ConversationsScreen] No es necesario actualizar avatares hoy');
-            }
-          } catch (avatarErr) {
-            console.error('[ConversationsScreen] Error en actualización de avatares:', avatarErr);
-          }
-          
-          // Marcar como completada la carga inicial
-          initialLoadDone.current = true;
-        } catch (err) {
-          console.error('[ConversationsScreen] Error en carga inicial:', err);
+      // Cerrar cualquier swipeable abierto
+      if (prevOpenedRow.current) {
+        const swipeable = swipeableRefs.current.get(prevOpenedRow.current);
+        if (swipeable) {
+          swipeable.close();
         }
-      };
+        prevOpenedRow.current = null;
+      }
       
-      loadInitialData();
+      // Animación para mostrar barra de acciones
+      Animated.timing(actionBarSlideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true
+      }).start();
     }
+  }, [isMultiSelectActive, isSearchActive, toggleSearch, actionBarSlideAnim]);
+
+  // Seleccionar/deseleccionar una conversación
+  const toggleConversationSelection = useCallback((conversationId: string) => {
+    if (!isMultiSelectActive) return;
     
-    // Limpiar cualquier timeout al desmontar
-    return () => {
-      if (refreshTimeoutRef.current) {
-        clearTimeout(refreshTimeoutRef.current);
-        refreshTimeoutRef.current = null;
-      }
-    };
-  }, [refreshConversations, updateBusinessAvatars, user]);
-  
-  // Implementamos useFocusEffect pero con protecciones estrictas
-  useFocusEffect(
-    useCallback(() => {
-      // Evitamos la primera carga, ya que eso lo maneja el useEffect
-      if (initialLoadDone.current) {
-        console.log('[ConversationsScreen] Actualización por foco (no es la primera vez)');
-        
-        // Usamos un timeout para evitar múltiples refrescos en secuencia rápida
-        if (refreshTimeoutRef.current) {
-          clearTimeout(refreshTimeoutRef.current);
-        }
-        
-        // Esperar un poco antes de actualizar para asegurar que no hay múltiples refrescos
-        refreshTimeoutRef.current = setTimeout(async () => {
-          try {
-            await refreshConversations();
-            
-            // Sincronizar badge count cuando la pantalla recibe foco
-            if (user) {
-              const { notificationService } = require('../../../services/NotificationService');
-              await notificationService.syncBadgeCount(user.uid);
-              console.log('[ConversationsScreen] Badge count sincronizado al recibir foco');
-            }
-          } catch (err) {
-            console.error('[ConversationsScreen] Error en refresh por foco:', err);
-          }
-        }, 500);
-      }
-      
-      return () => {
-        // Limpieza al perder el foco
-        if (refreshTimeoutRef.current) {
-          clearTimeout(refreshTimeoutRef.current);
-          refreshTimeoutRef.current = null;
-        }
-        setActiveConversation(null);
-      };
-    }, [refreshConversations, user])
-  );
-  
-  // Navigate to a specific conversation - con protección contra navegación rápida repetida
-  const handleConversationPress = useCallback((conversationId: string) => {
-    console.log(`Navigating to conversation: ${conversationId}`);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // Update active conversation to provide immediate visual feedback
-    setActiveConversation(conversationId);
+    setSelectedConversations(prev => {
+      const newSelection = new Set(prev);
+      if (newSelection.has(conversationId)) {
+        newSelection.delete(conversationId);
+      } else {
+        newSelection.add(conversationId);
+      }
+      return newSelection;
+    });
+  }, [isMultiSelectActive]);
+
+  // Seleccionar todas las conversaciones
+  const selectAllConversations = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     
-    // Navegar primero, luego establecer la conversación activa
-    // Esta secuencia evita problemas con el montaje/desmontaje del componente
-    navigation.navigate('Chat', { conversationId });
+    const displayConvs = isSearchActive ? filteredConversations : conversations;
+    const allIds = new Set(displayConvs.map(conv => conv.id));
     
-    // Pequeño delay para evitar problemas de timing
-    setTimeout(() => {
-      // Establecer la conversación activa en el contexto después de la navegación
-      setActiveConversationId(conversationId);
-    }, 50);
-  }, [navigation, setActiveConversationId]);
+    if (selectedConversations.size === allIds.size) {
+      // Si todas están seleccionadas, deseleccionar todas
+      setSelectedConversations(new Set());
+    } else {
+      // Seleccionar todas
+      setSelectedConversations(allIds);
+    }
+  }, [conversations, filteredConversations, isSearchActive, selectedConversations]);
+
+  // Eliminar las conversaciones seleccionadas
+  const deleteSelectedConversations = useCallback(async () => {
+    if (selectedConversations.size === 0 || isDeleting) return;
+    
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    const count = selectedConversations.size;
+    
+    Alert.alert(
+      `Eliminar ${count} conversación${count > 1 ? 'es' : ''}`,
+      `¿Estás seguro de que quieres eliminar ${count === 1 ? 'esta conversación' : 'estas ' + count + ' conversaciones'}? Esta acción no se puede deshacer.`,
+      [
+        { 
+          text: "Cancelar", 
+          style: "cancel" 
+        },
+        { 
+          text: "Eliminar", 
+          style: "destructive", 
+          onPress: async () => {
+            try {
+              setIsDeleting(true);
+              
+              // 1. Primero eliminamos los elementos de la UI para feedback inmediato
+              const selectedIds = Array.from(selectedConversations);
+              setConversations(prev => prev.filter(conv => !selectedIds.includes(conv.id)));
+              setFilteredConversations(prev => prev.filter(conv => !selectedIds.includes(conv.id)));
+              
+              // 2. Ejecutar eliminación en Firestore (secuencial para mayor fiabilidad)
+              let successCount = 0;
+              let failCount = 0;
+              
+              for (const convId of selectedIds) {
+                try {
+                  const success = await deleteConversation(convId);
+                  if (success) {
+                    successCount++;
+                  } else {
+                    failCount++;
+                  }
+                } catch (err) {
+                  console.error(`Error eliminando conversación ${convId}:`, err);
+                  failCount++;
+                }
+              }
+              
+              // 3. Informar resultados
+              if (failCount > 0) {
+                Alert.alert(
+                  "Eliminación parcial",
+                  `${successCount} conversación(es) eliminada(s) correctamente.\n${failCount} no pudieron eliminarse.\n\nLos errores pueden deberse a problemas de conexión.`,
+                  [{ text: "Entendido" }]
+                );
+                
+                // Refrescar para sincronizar el estado
+                refreshConversations();
+              } else if (successCount > 0) {
+                // Éxito completo
+                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                
+                if (successCount > 3) {
+                  Alert.alert(
+                    "Eliminación completada",
+                    `${successCount} conversaciones eliminadas con éxito.`,
+                    [{ text: "OK" }]
+                  );
+                }
+                
+                // 4. Salir del modo selección automáticamente solo si se eliminaron todas
+                if (successCount === count) {
+                  toggleMultiSelect();
+                } else {
+                  // Si solo se eliminaron algunas, actualizamos la selección
+                  setSelectedConversations(new Set());
+                }
+              }
+            } catch (error) {
+              console.error('Error eliminando conversaciones:', error);
+              Alert.alert(
+                "Error", 
+                "Ocurrió un error inesperado al eliminar las conversaciones. Inténtalo de nuevo.",
+                [{ text: "OK" }]
+              );
+              refreshConversations();
+            } finally {
+              setIsDeleting(false);
+            }
+          }
+        }
+      ]
+    );
+  }, [selectedConversations, isDeleting, deleteConversation, refreshConversations, toggleMultiSelect]);
   
   // Navigate back
   const handleBackPress = useCallback(() => {
@@ -503,27 +484,396 @@ const ConversationsScreen: React.FC = () => {
     prevOpenedRow.current = conversationId;
   }, []);
   
+  // Navigate to a specific conversation - con protección contra navegación rápida repetida
+  const handleConversationPress = useCallback((conversationId: string) => {
+    // Si el modo de selección múltiple está activo, seleccionar/deseleccionar
+    if (isMultiSelectActive) {
+      toggleConversationSelection(conversationId);
+      return;
+    }
+    
+    console.log(`Navigating to conversation: ${conversationId}`);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Update active conversation to provide immediate visual feedback
+    setActiveConversation(conversationId);
+    
+    // Navegar primero, luego establecer la conversación activa
+    // Esta secuencia evita problemas con el montaje/desmontaje del componente
+    navigation.navigate('Chat', { conversationId });
+    
+    // Pequeño delay para evitar problemas de timing
+    setTimeout(() => {
+      // Establecer la conversación activa en el contexto después de la navegación
+      setActiveConversationId(conversationId);
+    }, 50);
+  }, [navigation, setActiveConversationId, isMultiSelectActive, toggleConversationSelection]);
+
+  // Long press para iniciar selección múltiple
+  const handleConversationLongPress = useCallback((conversationId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    
+    // Si ya está en modo selección, seleccionar/deseleccionar
+    if (isMultiSelectActive) {
+      toggleConversationSelection(conversationId);
+    } else {
+      // Activar modo selección y seleccionar el elemento
+      setIsMultiSelectActive(true);
+      setSelectedConversations(new Set([conversationId]));
+      
+      // Animación para mostrar barra de acciones
+      Animated.timing(actionBarSlideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true
+      }).start();
+    }
+  }, [isMultiSelectActive, toggleConversationSelection, actionBarSlideAnim]);
+  
   // Función para probar notificaciones locales
   const testNotification = useCallback(async () => {
     try {
-      const notificationService = require('../../services/NotificationService').notificationService;
-      
-      // Mostrar una notificación de prueba
-      await notificationService.sendLocalNotification(
+      // Usar el servicio importado correctamente
+      const result = await NotificationService.sendLocalNotification(
         "Notificación de prueba",
         "Esta es una notificación local de prueba para Localfy",
         { type: 'test' }
       );
       
-      // Vibración para confirmar
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      
-      console.log('[ConversationsScreen] Notificación de prueba enviada');
+      if (result.success) {
+        // Vibración para confirmar
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        console.log('[ConversationsScreen] Notificación de prueba enviada');
+      } else {
+        console.warn('[ConversationsScreen] Error enviando notificación:', result.error);
+        Alert.alert("Error", result.error?.message || "No se pudo enviar la notificación de prueba");
+      }
     } catch (error: any) {
       console.error('[ConversationsScreen] Error enviando notificación de prueba:', error);
       Alert.alert("Error", "No se pudo enviar la notificación de prueba");
     }
   }, []);
+  
+  // Determine which conversations to show
+  const displayedConversations = useMemo(() => {
+    const convList = isSearchActive ? filteredConversations : conversations;
+    
+    // Eliminar conversaciones duplicadas
+    const conversationIds = new Set<string>();
+    const uniqueConversations = convList.filter((conv: Conversation) => {
+      if (conversationIds.has(conv.id)) {
+        return false;
+      }
+      conversationIds.add(conv.id);
+      return true;
+    });
+    
+    return uniqueConversations;
+  }, [isSearchActive, filteredConversations, conversations]);
+  
+  // Animation on component mount
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 400,
+        useNativeDriver: true
+      }),
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true
+      })
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
+  // Update conversations when context conversations change
+  useEffect(() => {
+    if (contextConversations.length > 0) {
+      setConversations(contextConversations);
+      setError(null);
+      
+      // Also update filtered conversations if search is active
+      if (searchQuery.length > 0) {
+        filterConversations(searchQuery, contextConversations);
+      } else {
+        setFilteredConversations(contextConversations);
+      }
+    } else if (contextConversations.length === 0 && !contextLoading) {
+      setConversations([]);
+      setFilteredConversations([]);
+    }
+  }, [contextConversations, contextLoading, searchQuery, filterConversations]);
+
+  // Update error state when context error changes
+  useEffect(() => {
+    if (contextError) {
+      setError(contextError);
+    }
+  }, [contextError]);
+
+  // Función para actualizar fotos de perfil de negocios (opcional)
+  const updateBusinessAvatars = useCallback(async () => {
+    if (!user || conversations.length === 0 || isOffline) return;
+    
+    try {
+      console.log('[ConversationsScreen] Verificando avatares de negocios en conversaciones...');
+      const db = firebase.firestore();
+      let updatedCount = 0;
+      
+      // Solo procesar conversaciones con businessId
+      const businessConversations = conversations.filter(
+        conv => conv.businessId && conv.participants.length >= 2
+      );
+      
+      console.log(`[ConversationsScreen] Encontradas ${businessConversations.length} conversaciones de negocios`);
+      
+      for (const conv of businessConversations) {
+        try {
+          // Identificar el ID del propietario del negocio
+          let businessOwnerId = '';
+          for (const participantId of conv.participants) {
+            if (participantId.includes('business_owner_') || participantId === conv.businessId) {
+              businessOwnerId = participantId;
+              break;
+            }
+          }
+          
+          // Si no lo encontramos, asumimos que es el otro participante que no es el usuario actual
+          if (!businessOwnerId) {
+            businessOwnerId = conv.participants.find(id => id !== user.uid) || '';
+          }
+          
+          // Verificar si ya tiene una foto de perfil
+          if (!businessOwnerId || 
+              (conv.participantPhotos && conv.participantPhotos[businessOwnerId])) {
+            continue;
+          }
+          
+          // Buscar la imagen principal del negocio
+          const businessDoc = await db.collection('businesses').doc(conv.businessId).get();
+          if (!businessDoc.exists) continue;
+          
+          const businessData = businessDoc.data();
+          if (!businessData?.images || !Array.isArray(businessData.images) || 
+              businessData.images.length === 0) continue;
+          
+          // Buscar la imagen principal o usar la primera disponible
+          let businessImageUrl = null;
+          const mainImage = businessData.images.find(img => img && img.isMain);
+          
+          if (mainImage && mainImage.url) {
+            businessImageUrl = mainImage.url;
+          } else if (businessData.images[0].url) {
+            businessImageUrl = businessData.images[0].url;
+          }
+          
+          if (!businessImageUrl) continue;
+          
+          // Actualizar la conversación con la imagen del negocio
+          const participantPhotos = conv.participantPhotos || {};
+          const updatedPhotos = { ...participantPhotos };
+          updatedPhotos[businessOwnerId] = businessImageUrl;
+          
+          // Actualizar en Firestore
+          await db.collection('conversations').doc(conv.id).update({
+            participantPhotos: updatedPhotos,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          
+          updatedCount++;
+        } catch (convError) {
+          console.error(`[ConversationsScreen] Error procesando conversación ${conv.id}:`, convError);
+        }
+      }
+      
+      if (updatedCount > 0) {
+        console.log(`[ConversationsScreen] Actualizadas ${updatedCount} fotos de perfil de negocios`);
+        // Refrescar conversaciones para ver los cambios
+        refreshConversations();
+      }
+    } catch (error) {
+      console.error('[ConversationsScreen] Error actualizando avatares:', error);
+    }
+  }, [user, conversations, isOffline, refreshConversations]);
+
+  // Cargar datos cuando el componente se monta (una sola vez)
+  useEffect(() => {
+    // Evitar múltiples cargas y ejecutar solo una vez
+    if (initialLoadDone.current) {
+      console.log('[ConversationsScreen] Carga inicial ya realizada, omitiendo');
+      return;
+    }
+    
+    console.log('[ConversationsScreen] Iniciando carga inicial de conversaciones');
+    // Marcar inmediatamente como cargado para evitar múltiples intentos
+    initialLoadDone.current = true;
+    
+    const loadInitialData = async () => {
+      try {
+        // Asegurar que no hay otro refresco en curso y que no estamos en modo multiselección
+        if (!refreshing && !isMultiSelectActive) {
+          // Primer refresco de conversaciones
+          console.log('[ConversationsScreen] Ejecutando primer refresco de conversaciones');
+          await refreshConversations();
+          console.log('[ConversationsScreen] Primer refresco completado');
+        }
+        
+        // Sincronizar badge count al iniciar la pantalla - solo si tenemos usuario
+        if (user) {
+          try {
+            setTimeout(async () => {
+              try {
+                // Usar el módulo importado correctamente
+                const result = await NotificationService.syncBadgeCount(user.uid);
+                if (result.success) {
+                  console.log('[ConversationsScreen] Badge count sincronizado correctamente:', result.data);
+                } else {
+                  console.warn('[ConversationsScreen] Error sincronizando badge count:', result.error);
+                }
+              } catch (badgeErr) {
+                console.error('[ConversationsScreen] Error sincronizando badge count:', badgeErr);
+              }
+            }, 1000); // Retrasar para evitar bloqueos
+          } catch (badgeErr) {
+            console.error('[ConversationsScreen] Error en proceso de badge:', badgeErr);
+          }
+        }
+        
+        // Verificamos si necesitamos actualizar avatares (máximo una vez al día) - en segundo plano
+        setTimeout(async () => {
+          try {
+            const lastAvatarUpdateStr = await AsyncStorage.getItem('last_avatar_update');
+            const lastUpdate = lastAvatarUpdateStr ? new Date(lastAvatarUpdateStr) : null;
+            const now = new Date();
+            
+            // Solo actualizar si han pasado más de 24 horas desde la última vez
+            if (!lastUpdate || (now.getTime() - lastUpdate.getTime() > 24 * 60 * 60 * 1000)) {
+              console.log('[ConversationsScreen] Primera actualización de avatares del día');
+              await updateBusinessAvatars();
+              await AsyncStorage.setItem('last_avatar_update', now.toISOString());
+            } else {
+              console.log('[ConversationsScreen] No es necesario actualizar avatares hoy');
+            }
+          } catch (avatarErr) {
+            console.error('[ConversationsScreen] Error en actualización de avatares:', avatarErr);
+          }
+        }, 3000); // Retrasar para no bloquear la UI inicial
+      } catch (err) {
+        console.error('[ConversationsScreen] Error en carga inicial:', err);
+      }
+    };
+    
+    loadInitialData();
+    
+    // Limpiar cualquier timeout al desmontar
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+        refreshTimeoutRef.current = null;
+      }
+    };
+  }, [refreshConversations, updateBusinessAvatars, user, refreshing, isMultiSelectActive]);
+
+  // Modificada para evitar refrescos durante el modo de multiselección
+  useFocusEffect(
+    useCallback(() => {
+      let isMounted = true;
+      let focusTimeoutRef: NodeJS.Timeout | null = null;
+      let didInitialRefresh = false;
+      
+      // Evitar logs excesivos, solo registrar la primera vez
+      console.log('[ConversationsScreen] Screen focused');
+      
+      // IMPORTANTE: No refrescar si estamos en modo multiselección
+      if (initialLoadDone.current && !didInitialRefresh && !refreshing && !isMultiSelectActive) {
+        didInitialRefresh = true; // Marcar que ya hicimos el refresco inicial para este ciclo de foco
+        
+        // Usar un timeout único con un valor mayor para evitar refrescos en cadena
+        focusTimeoutRef = setTimeout(async () => {
+          if (!isMounted) return;
+          
+          try {
+            // Doble verificación para asegurar que no estamos en modo multiselección
+            if (!refreshing && !isMultiSelectActive) {
+              console.log('[ConversationsScreen] Ejecutando refresco por foco (único)');
+              await refreshConversations();
+              
+              // Sincronizar badge count cuando la pantalla recibe foco (DENTRO del bloque async)
+              if (isMounted && user) {
+                try {
+                  const result = await NotificationService.syncBadgeCount(user.uid);
+                  if (result.success) {
+                    console.log('[ConversationsScreen] Badge count sincronizado al recibir foco:', result.data);
+                  } else {
+                    console.warn('[ConversationsScreen] Error sincronizando badge count al recibir foco:', result.error);
+                  }
+                } catch (err) {
+                  console.error('[ConversationsScreen] Error sincronizando badge count en foco:', err);
+                }
+              }
+            }
+          } catch (err) {
+            console.error('[ConversationsScreen] Error en refresh por foco:', err);
+          }
+        }, 1500); // Tiempo mayor para evitar colisiones con otros eventos
+      }
+      
+      return () => {
+        // Evitar logs excesivos, solo registrar la primera vez
+        console.log('[ConversationsScreen] Screen unfocused');
+        isMounted = false;
+        
+        // Limpiar el timeout específico del foco
+        if (focusTimeoutRef) {
+          clearTimeout(focusTimeoutRef);
+          focusTimeoutRef = null;
+        }
+        
+        // No limpiamos la conversación activa si estamos en modo multiselección
+        if (!isMultiSelectActive) {
+          setActiveConversation(null);
+        }
+      };
+    }, [refreshConversations, refreshing, isMultiSelectActive, user]) // Añadir user a las dependencias
+  );
+  
+  // Renderizar mensaje de ayuda para selección múltiple
+  const renderSelectionHelp = () => {
+    if (!showSelectionHelp) return null;
+    
+    return (
+      <View style={styles.helpOverlay}>
+        <View style={styles.helpCard}>
+          <View style={styles.helpHeader}>
+            <MaterialIcons name="info-outline" size={24} color="#007AFF" />
+            <Text style={styles.helpTitle}>Modo selección múltiple</Text>
+            <TouchableOpacity 
+              onPress={() => setShowSelectionHelp(false)}
+              hitSlop={{top: 10, right: 10, bottom: 10, left: 10}}
+            >
+              <MaterialIcons name="close" size={24} color="#8E8E93" />
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.helpContent}>
+            <Text style={styles.helpText}>• Toca para seleccionar/deseleccionar una conversación</Text>
+            <Text style={styles.helpText}>• Usa el botón "Eliminar seleccionados" para borrar varias conversaciones a la vez</Text>
+            <Text style={styles.helpText}>• Toca en "Seleccionar todo" para marcar todas las conversaciones</Text>
+            <Text style={styles.helpText}>• Presiona "X" para salir del modo selección</Text>
+          </View>
+          
+          <TouchableOpacity 
+            style={styles.helpButton}
+            onPress={() => setShowSelectionHelp(false)}
+          >
+            <Text style={styles.helpButtonText}>Entendido</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  };
   
   // Main render conditionals
   
@@ -543,7 +893,7 @@ const ConversationsScreen: React.FC = () => {
           >
             <LinearGradient
               colors={['#007AFF', '#00C2FF']}
-              style={styles.actionButtonGradient}
+              style={styles.buttonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
             >
@@ -555,15 +905,13 @@ const ConversationsScreen: React.FC = () => {
     );
   }
   
-  // Determine which conversations to show
-  const displayedConversations = isSearchActive ? filteredConversations : conversations;
-
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
       
-      {/* Header with search */}
+      {/* Header with search and multi-select */}
       <View style={styles.header}>
+        {!isMultiSelectActive ? (
         <TouchableOpacity
           style={styles.backButton}
           onPress={handleBackPress}
@@ -571,12 +919,27 @@ const ConversationsScreen: React.FC = () => {
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={toggleMultiSelect}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <MaterialIcons name="close" size={24} color="#007AFF" />
+          </TouchableOpacity>
+        )}
         
         <View style={styles.headerTitleContainer}>
-          {!isSearchActive && (
+          {!isSearchActive && !isMultiSelectActive && (
             <Text style={styles.headerTitle}>
               Mensajes
               {unreadTotal > 0 && <Text style={styles.unreadBadgeText}> ({unreadTotal})</Text>}
+            </Text>
+          )}
+          
+          {isMultiSelectActive && (
+            <Text style={styles.headerTitle}>
+              {selectedConversations.size} seleccionado(s)
             </Text>
           )}
           
@@ -613,17 +976,49 @@ const ConversationsScreen: React.FC = () => {
           </Animated.View>
         </View>
         
+        {isMultiSelectActive ? (
         <TouchableOpacity
-          style={styles.searchButton}
-          onPress={toggleSearch}
+            style={styles.selectAllButton}
+            onPress={selectAllConversations}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
           <MaterialIcons 
-            name={isSearchActive ? "close" : "search"} 
+              name={selectedConversations.size === (isSearchActive ? filteredConversations.length : conversations.length) ? "deselect" : "select-all"} 
             size={24} 
             color="#007AFF" 
           />
+          </TouchableOpacity>
+        ) : (
+          <>
+            {isSearchActive ? (
+              <TouchableOpacity
+                style={styles.searchButton}
+                onPress={toggleSearch}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <MaterialIcons name="close" size={24} color="#007AFF" />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.headerButtons}>
+                <TouchableOpacity
+                  style={styles.searchButton}
+                  onPress={toggleSearch}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <MaterialIcons name="search" size={24} color="#007AFF" />
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.selectButton, {marginLeft: 8}]}
+                  onPress={toggleMultiSelect}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <MaterialIcons name="checklist" size={24} color="#007AFF" />
         </TouchableOpacity>
+              </View>
+            )}
+          </>
+        )}
       </View>
       
       {/* Offline indicator */}
@@ -686,7 +1081,7 @@ const ConversationsScreen: React.FC = () => {
         ) : (
           <FlatList
             data={displayedConversations}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={({ item }) => (
               <Swipeable
                 ref={(ref) => {
@@ -694,18 +1089,21 @@ const ConversationsScreen: React.FC = () => {
                     swipeableRefs.current.set(item.id, ref);
                   }
                 }}
-                renderRightActions={() => renderRightActions(item.id)}
-                onSwipeableOpen={() => closeOtherRows(item.id)}
+                renderRightActions={() => !isMultiSelectActive && renderRightActions(item.id)}
+                onSwipeableOpen={() => !isMultiSelectActive && closeOtherRows(item.id)}
                 friction={2}
                 rightThreshold={40}
                 overshootRight={false}
+                enabled={!isMultiSelectActive} // Desactivar swipe cuando está en modo selección
               >
                 <ConversationItem 
                   conversation={item} 
                   userId={user.uid}
                   onPress={handleConversationPress}
-                  onLongPress={confirmDelete}
+                  onLongPress={handleConversationLongPress}
                   isActive={item.id === activeConversation}
+                  isSelected={selectedConversations.has(item.id)}
+                  isMultiSelectMode={isMultiSelectActive}
                 />
               </Swipeable>
             )}
@@ -725,16 +1123,61 @@ const ConversationsScreen: React.FC = () => {
         )}
       </Animated.View>
       
+      {/* Barra de acciones para eliminación múltiple */}
+      <Animated.View 
+        style={[
+          styles.actionBar,
+          {
+            transform: [{ translateY: actionBarSlideAnim }]
+          }
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.actionButton, 
+            styles.deleteActionButton,
+            {opacity: selectedConversations.size > 0 ? 1 : 0.5}
+          ]}
+          onPress={deleteSelectedConversations}
+          disabled={selectedConversations.size === 0 || isDeleting}
+        >
+          {isDeleting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <>
+              <MaterialIcons name="delete" size={24} color="#FFFFFF" />
+              <Text style={styles.actionButtonText}>Eliminar seleccionados ({selectedConversations.size})</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </Animated.View>
+      
       {/* Botón flotante para probar notificaciones (solo en desarrollo) */}
-      {__DEV__ && (
+      {__DEV__ && !isMultiSelectActive && (
         <TouchableOpacity 
-          style={styles.testNotificationButton}
+          style={[
+            styles.testNotificationButton,
+            isMultiSelectActive && { bottom: 150 } // Mover más arriba si está en modo selección
+          ]}
           onPress={testNotification}
           activeOpacity={0.8}
         >
           <MaterialIcons name="notifications" size={24} color="#FFFFFF" />
         </TouchableOpacity>
       )}
+      
+      {/* Añadimos un indicador en la parte superior cuando estamos en modo selección */}
+      {isMultiSelectActive && (
+        <View style={styles.selectionModeBar}>
+          <MaterialIcons name="check-circle" size={18} color="#007AFF" />
+          <Text style={styles.selectionModeText}>
+            Modo selección activo - {selectedConversations.size} elemento(s) seleccionado(s)
+          </Text>
+        </View>
+      )}
+      
+      {/* En el return, antes del cierre del SafeAreaView, agregamos el componente de ayuda */}
+      {renderSelectionHelp()}
     </SafeAreaView>
   );
 };
@@ -911,25 +1354,24 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   actionButton: {
-    marginTop: 24,
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-  },
-  actionButtonGradient: {
+    flex: 1,
     paddingVertical: 12,
-    paddingHorizontal: 24,
-    alignItems: 'center',
+    borderRadius: 12,
+    flexDirection: 'row',
     justifyContent: 'center',
+    alignItems: 'center',
+  },
+  deleteActionButton: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
   },
   actionButtonText: {
-    color: 'white',
+    color: '#FFFFFF',
     fontWeight: 'bold',
     fontSize: 16,
+    marginLeft: 8,
   },
   offlineBar: {
     backgroundColor: '#FFF5F5',
@@ -967,7 +1409,123 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 5,
     zIndex: 999,
-  }
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  selectButton: {
+    padding: 10,
+    borderRadius: 22,
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  selectAllButton: {
+    padding: 10,
+    borderRadius: 22,
+    backgroundColor: '#F0F7FF',
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  actionBar: {
+    position: 'absolute',
+    bottom: Platform.OS === 'ios' ? 80 : 60, // Ajustamos para que esté por encima de la navegación
+    left: 16,
+    right: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 5,
+    zIndex: 1000,
+    borderWidth: 1,
+    borderColor: '#E5EAFC',
+  },
+  buttonGradient: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionModeBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EBF5FF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#DBEAFE',
+  },
+  selectionModeText: {
+    fontSize: 14,
+    color: '#007AFF',
+    fontWeight: '500',
+    marginLeft: 8,
+  },
+  helpOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2000,
+    padding: 24,
+  },
+  helpCard: {
+    width: '100%',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  helpHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  helpTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    flex: 1,
+    marginLeft: 8,
+  },
+  helpContent: {
+    marginBottom: 20,
+  },
+  helpText: {
+    fontSize: 15,
+    color: '#333',
+    marginBottom: 8,
+    lineHeight: 22,
+  },
+  helpButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  helpButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
 });
 
 export default ConversationsScreen;

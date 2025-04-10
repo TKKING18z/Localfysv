@@ -37,17 +37,28 @@ import ReservationsScreen from '../screens/business/ReservationsScreen';
 import ConversationsScreen from '../screens/chat/ConversationsScreen';
 import ChatScreen from '../screens/chat/ChatScreen';
 
-// Importar las pantallas del Centro de Ayuda
+// Importar pantalla de notificaciones
+import NotificationsScreen from '../screens/NotificationsScreen';
+
+// Importar pantallas del Centro de Ayuda
 import FAQsScreen from '../screens/FAQsScreen';
 import SupportScreen from '../screens/SupportScreen';
 import TermsConditionsScreen from '../screens/TermsConditionsScreen';
-import NotificationsScreen from '../screens/NotificationsScreen';
 
-// Importar la pantalla de pagos
+// Importar pantalla de Payment
 import PaymentScreen from '../screens/PaymentScreen';
 
-// Importar la pantalla de carrito
+// Importar pantalla de Cart
 import { CartScreen } from '../screens/CartScreen';
+
+// Importar pantallas de órdenes
+import OrderConfirmationScreen from '../screens/orders/OrderConfirmationScreen';
+// @ts-ignore
+import OrderDetailsScreen from '../screens/orders/OrderDetailsScreen';
+// @ts-ignore
+import OrdersListScreen from '../screens/orders/OrdersListScreen';
+// @ts-ignore
+import BusinessOrdersScreen from '../screens/orders/BusinessOrdersScreen';
 
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
@@ -102,6 +113,19 @@ export type RootStackParamList = {
   };
   // Nueva ruta para carrito
   Cart: undefined;
+  // Nuevas rutas para ordenes
+  OrderConfirmation: { 
+    orderId: string;
+    orderNumber: string;
+  };
+  OrderDetails: { 
+    orderId: string;
+  };
+  OrdersList: undefined;
+  BusinessOrders: { 
+    businessId: string;
+    businessName: string;
+  };
 };
 
 // Define tab navigator parameter list
@@ -365,7 +389,7 @@ const AppNavigator = () => {
         if (tokenResult.success && tokenResult.data?.token) {
           // Actualizar token en Firestore
           await notificationService.saveTokenToFirestore(user.uid, tokenResult.data.token);
-          if (updateNotificationToken) {
+          if (typeof updateNotificationToken === 'function') {
             updateNotificationToken(tokenResult.data.token);
           }
           console.log('[AppNavigator] Notification token refreshed successfully');
@@ -474,6 +498,45 @@ const AppNavigator = () => {
 
             {/* Cart screen */}
             <Stack.Screen name="Cart" component={CartScreen} options={{ headerShown: false }} />
+            
+            {/* Order screens */}
+            <Stack.Screen 
+              name="OrderConfirmation" 
+              component={OrderConfirmationScreen}
+              options={{ 
+                headerShown: false
+              }} 
+            />
+            <Stack.Screen 
+              name="OrderDetails" 
+              component={OrderDetailsScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Detalles del Pedido',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="OrdersList" 
+              component={OrdersListScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Mis Pedidos',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="BusinessOrders" 
+              component={BusinessOrdersScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Pedidos del Negocio',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthStack} />

@@ -434,14 +434,41 @@ const ProfileScreen: React.FC = () => {
           
           {/* Add "Mis Negocios" button for business owners */}
           {profile?.userType === 'Propietario' && (
-            <TouchableOpacity 
-              style={styles.menuItem}
-              onPress={() => navigation.navigate('MyBusinesses')}
-            >
-              <MaterialIcons name="store" size={24} color="#007AFF" />
-              <Text style={styles.menuItemText}>Mis Negocios</Text>
-              <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
-            </TouchableOpacity>
+            <>
+              <TouchableOpacity 
+                style={styles.menuItem}
+                onPress={() => navigation.navigate('MyBusinesses')}
+              >
+                <MaterialIcons name="store" size={24} color="#007AFF" />
+                <Text style={styles.menuItemText}>Mis Negocios</Text>
+                <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.menuItem}
+                onPress={() => {
+                  // Si no hay un negocio seleccionado, deberíamos mostrar una lista
+                  // Por simplicidad, aquí vamos a navegar directamente si hay un negocio
+                  if (profile.uid) {
+                    // TODO: Aquí deberíamos obtener el businessId del usuario
+                    // Por ahora usaremos un placeholder
+                    // En una implementación real, deberías consultar el primer negocio del usuario
+                    const businessId = profile.uid; // Usar el ID del usuario como placeholder
+                    const businessName = "Mi Negocio"; // Placeholder
+                    navigation.navigate('BusinessOrders', { 
+                      businessId,
+                      businessName
+                    });
+                  } else {
+                    Alert.alert('Aviso', 'No tienes negocios registrados aún.');
+                  }
+                }}
+              >
+                <MaterialIcons name="shopping-basket" size={24} color="#007AFF" />
+                <Text style={styles.menuItemText}>Pedidos de mis negocios</Text>
+                <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+              </TouchableOpacity>
+            </>
           )}
           
           {/* Add Favorites Link */}
@@ -451,6 +478,16 @@ const ProfileScreen: React.FC = () => {
           >
             <MaterialIcons name="favorite" size={24} color="#007AFF" />
             <Text style={styles.menuItemText}>Mis Favoritos</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
+          {/* Add Orders Link */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('OrdersList')}
+          >
+            <MaterialIcons name="receipt-long" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>Mis Pedidos</Text>
             <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
           

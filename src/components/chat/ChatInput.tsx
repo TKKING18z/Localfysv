@@ -1,275 +1,347 @@
-import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  TextInput, 
-  TouchableOpacity, 
-  StyleSheet, 
-  Platform, 
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle } from 'react';
+import {
+  View,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Platform,
   ActivityIndicator,
+  Keyboard,
+  Image,
+  Text,
   Alert,
-  Dimensions
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface ChatInputProps {
-  onSend: (text: string, imageUrl?: string) => Promise<boolean | void>;
-  uploadImage?: (uri: string) => Promise<string | null | undefined>;
+  onSend: (text: string, imageUrl?: string) => Promise<boolean>;
+  uploadImage: (uri: string) => Promise<string | null>;
   disabled?: boolean;
   keyboardVisible?: boolean;
   isModernIphone?: boolean;
+  replyActive?: boolean;
 }
 
-const ChatInput: React.FC<ChatInputProps> = ({ 
-  onSend, 
-  uploadImage, 
-  disabled = false, 
+// Definiendo los métodos que queremos exponer mediante la ref
+export interface ChatInputRef {
+  focus: () => void;
+  blur: () => void;
+}
+
+// Usando forwardRef para pasar la referencia desde el padre
+const ChatInput = forwardRef<ChatInputRef, ChatInputProps>(({
+  onSend,
+  uploadImage,
+  disabled = false,
   keyboardVisible = false,
-  isModernIphone = false
-}) => {
+  isModernIphone = false,
+  replyActive = false,
+}, ref) => {
   const [text, setText] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [isSending, setIsSending] = useState(false);
   const inputRef = useRef<TextInput>(null);
   
-  // Focus the input when keyboard appears
-  useEffect(() => {
-    if (keyboardVisible && inputRef.current && Platform.OS === 'ios') {
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 100);
+  // Exponemos la referencia del input al componente padre
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      inputRef.current?.focus();
+    },
+    blur: () => {
+      inputRef.current?.blur();
     }
-  }, [keyboardVisible]);
-  
+  }));
+
+  // Color del botón de enviar basado en el estado
+  const getSendButtonColor = () => {
+    if (disabled || (!text.trim() && !selectedImage)) {
+      return '#C7D2E3'; // Desactivado
+    }
+    if (isSending) {
+      return '#0A84FF'; // Enviando
+    }
+    return replyActive ? '#0A84FF' : '#0A84FF'; // Normal (podríamos cambiar el color cuando se responde)
+  };
+
+  // Manejar el envío del mensaje
   const handleSend = async () => {
-    if (text.trim().length === 0 || isLoading) return;
-    
-    setIsLoading(true);
-    const trimmedText = text.trim();
-    setText('');
-    
+    if (disabled || isSending || (!text.trim() && !selectedImage)) {
+      return;
+    }
+
     try {
-      await onSend(trimmedText);
+      setIsSending(true);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+      let imageUrlToSend: string | undefined = undefined;
+      if (selectedImage) {
+        const uploadedUrl = await uploadImage(selectedImage);
+        if (uploadedUrl) {
+          imageUrlToSend = uploadedUrl;
+        }
+      }
+
+      const trimmedText = text.trim();
+
+      if (!trimmedText && !imageUrlToSend) {
+        setIsSending(false);
+        return;
+      }
+
+      const success = await onSend(trimmedText, imageUrlToSend);
+
+      if (success) {
+        setText('');
+        setSelectedImage(null);
+      }
     } catch (error) {
       console.error('Error sending message:', error);
     } finally {
-      setIsLoading(false);
-      if (inputRef.current) {
-        inputRef.current.focus();
-      }
+      setIsSending(false);
     }
   };
-  
-  const compressAndResizeImage = async (uri: string): Promise<string> => {
-    try {
-      console.log('Comprimiendo imagen antes de subir...');
-      return uri;
-    } catch (error) {
-      console.error('Error comprimiendo imagen:', error);
-      return uri;
-    }
-  };
-  
-  const handleAttachImage = async () => {
-    if (isLoading || !uploadImage) return;
+
+  // Abrir cámara usando ImagePicker
+  const openCamera = async () => {
+    if (disabled) return;
     
     try {
-      if (Platform.OS !== 'web') {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== 'granted') {
-          Alert.alert(
-            'Permiso denegado',
-            'Se necesita acceso a la galería para adjuntar imágenes.',
-            [{ text: 'OK' }]
-          );
-          return;
-        }
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      
+      // Solicitar permisos para usar la cámara
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permisos requeridos', 
+          'Necesitamos permiso para usar la cámara.',
+          [{ text: 'OK' }]
+        );
+        return;
       }
       
+      // Abrir la cámara directamente
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.7,
+      });
+      
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setSelectedImage(result.assets[0].uri);
+      }
+    } catch (error) {
+      console.error('Error taking picture:', error);
+      Alert.alert('Error', 'No se pudo tomar la foto');
+    }
+  };
+
+  // Seleccionar imagen de la galería
+  const pickImage = async () => {
+    if (disabled || isSending || isUploading) return;
+
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permissionResult.granted) {
+        alert('Se necesita permiso para acceder a la galería');
+        return;
+      }
+
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
       });
-      
+
       if (!result.canceled && result.assets && result.assets.length > 0) {
-        setIsLoading(true);
-        
-        try {
-          const imageUri = result.assets[0].uri;
-          const compressedUri = await compressAndResizeImage(imageUri);
-          
-          const imageUrl = await uploadImage(compressedUri);
-          
-          if (imageUrl) {
-            await onSend(text.trim() || '', imageUrl);
-            setText('');
-          } else {
-            Alert.alert('Error', 'No se pudo subir la imagen. Verifique su conexión e intente nuevamente.');
-          }
-        } catch (error) {
-          console.error('Error subiendo imagen:', error);
-          let errorMessage = 'No se pudo subir la imagen.';
-          
-          if (error instanceof Error && error.message.includes('permission')) {
-            errorMessage += ' No tienes permisos para subir imágenes en este momento.';
-          } else if (error instanceof Error && error.message.includes('network')) {
-            errorMessage += ' Verifica tu conexión a internet.';
-          } else {
-            errorMessage += ' Intenta nuevamente más tarde.';
-          }
-          
-          Alert.alert('Error', errorMessage);
-        } finally {
-          setIsLoading(false);
-        }
+        setSelectedImage(result.assets[0].uri);
       }
     } catch (error) {
-      console.error('Error seleccionando imagen:', error);
-      Alert.alert('Error', 'No se pudo abrir la galería. Intente nuevamente.');
+      console.error('Error picking image:', error);
     }
   };
-  
+
+  // Cancelar imagen seleccionada
+  const cancelImage = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setSelectedImage(null);
+  };
+
   return (
     <View style={[
       styles.container,
-      // Simplificamos los estilos para evitar exceso de padding
-      Platform.OS === 'android' && styles.androidContainer
+      Platform.OS === 'ios' && keyboardVisible && isModernIphone && styles.keyboardVisible,
+      replyActive && styles.replyActive
     ]}>
-      {uploadImage && (
-        <TouchableOpacity 
-          style={[styles.attachButton, isLoading && styles.disabledButton]} 
-          onPress={handleAttachImage}
-          disabled={isLoading}
-        >
-          <View style={styles.attachButtonColor}>
-            <MaterialIcons name="photo-camera" size={24} color="#FFFFFF" />
-          </View>
-        </TouchableOpacity>
-      )}
-      
+      {/* Botón de cámara */}
+      <TouchableOpacity
+        style={[styles.iconButton, (disabled) && styles.disabledButton]}
+        onPress={openCamera}
+        disabled={disabled}
+      >
+        <MaterialIcons
+          name="photo-camera"
+          size={24}
+          color={disabled ? '#C7D2E3' : '#0A84FF'}
+        />
+      </TouchableOpacity>
+
+      {/* Botón de galería */}
+      <TouchableOpacity
+        style={[styles.iconButton, (isUploading || disabled) && styles.disabledButton]}
+        onPress={pickImage}
+        disabled={isUploading || disabled}
+      >
+        <MaterialIcons
+          name="photo-library"
+          size={24}
+          color={disabled ? '#C7D2E3' : '#0A84FF'}
+        />
+      </TouchableOpacity>
+
+      {/* Contenedor de input */}
       <View style={styles.inputContainer}>
+        {/* Imagen seleccionada (miniatura) */}
+        {selectedImage && (
+          <View style={styles.selectedImageContainer}>
+            <Image source={{ uri: selectedImage }} style={styles.selectedImage} />
+            <TouchableOpacity style={styles.cancelImageButton} onPress={cancelImage}>
+              <MaterialIcons name="close" size={16} color="#FFF" />
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Campo de texto */}
         <TextInput
           ref={inputRef}
           style={styles.input}
+          placeholder={replyActive ? "Escribe tu respuesta..." : "Escribe un mensaje..."}
           value={text}
           onChangeText={setText}
-          placeholder="Escribe un mensaje..."
-          placeholderTextColor="#8E8E93"
           multiline
-          maxLength={500}
-          autoFocus={false}
-          editable={!disabled && !isLoading}
+          maxLength={1000}
+          editable={!disabled}
+          returnKeyType="default"
+          placeholderTextColor="#8E8E93"
         />
       </View>
-      
-      <TouchableOpacity 
+
+      {/* Botón de enviar */}
+      <TouchableOpacity
         style={[
-          styles.sendButton, 
-          (text.trim().length === 0 || isLoading || disabled) && styles.disabledButton
-        ]} 
+          styles.sendButton,
+          (!text.trim() && !selectedImage) && styles.disabledButton,
+          disabled && styles.disabledButton,
+          replyActive && styles.replySendButton
+        ]}
         onPress={handleSend}
-        disabled={text.trim().length === 0 || isLoading || disabled}
+        disabled={disabled || (!text.trim() && !selectedImage)}
       >
-        {isLoading ? (
-          <ActivityIndicator size="small" color="#FFF" />
+        {isSending ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
         ) : (
-          <View style={styles.sendButtonColor}>
-            <MaterialIcons name="send" size={24} color="#FFF" />
-          </View>
+          <MaterialIcons
+            name="send"
+            size={22}
+            color={(!text.trim() && !selectedImage) || disabled ? '#C7D2E3' : '#FFF'}
+          />
         )}
       </TouchableOpacity>
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
     backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: '#E9E9EB',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
-    elevation: 5,
+    borderTopColor: '#E5EAFC',
   },
-  androidContainer: {
-    backgroundColor: '#FFFFFF',
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+  keyboardVisible: {
+    paddingBottom: 30, // Añadir espacio extra para iPhones modernos
   },
-  inputContainer: {
-    flex: 1,
-    borderRadius: 24,
-    backgroundColor: '#F0F2F8',
-    paddingHorizontal: 16,
-    marginHorizontal: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(0, 122, 255, 0.2)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 2,
-    elevation: 1,
+  replyActive: {
+    backgroundColor: '#F0F7FF', // Fondo diferente cuando hay respuesta activa
   },
-  input: {
-    minHeight: 42,
-    maxHeight: 120,
-    fontSize: 16,
-    color: '#333333',
-    paddingTop: 10,
-    paddingBottom: 10,
-  },
-  attachButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  attachButtonColor: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
-  },
-  sendButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  sendButtonColor: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#007AFF',
+    backgroundColor: '#F5F7FF',
+    marginRight: 8,
   },
   disabledButton: {
     opacity: 0.5,
   },
+  inputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F5F7FF',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    minHeight: 40,
+    maxHeight: 120,
+  },
+  input: {
+    flex: 1,
+    fontSize: 16,
+    color: '#0A1629',
+    maxHeight: 100,
+  },
+  sendButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#0A84FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+    shadowColor: '#0A84FF',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  replySendButton: {
+    backgroundColor: '#0A84FF', // Podríamos cambiar el color si queremos
+  },
+  selectedImageContainer: {
+    position: 'relative',
+    marginRight: 8,
+  },
+  selectedImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 6,
+  },
+  cancelImageButton: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FFFFFF',
+  }
 });
 
 export default ChatInput;

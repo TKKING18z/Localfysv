@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState } from 'react';
+import React, { memo, useCallback, useState, useRef } from 'react';
 import { 
   View, 
   Text, 
@@ -10,6 +10,7 @@ import {
   ActivityIndicator
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
 import { Message, MessageStatus, MessageType } from '../../../models/chatTypes';
 import { formatMessageTime, getNameInitial, getAvatarColor } from '../../../src/utils/chatUtils';
 import * as Haptics from 'expo-haptics';
@@ -19,11 +20,12 @@ interface ChatMessageProps {
   isMine: boolean;
   onImagePress?: (imageUrl: string) => void;
   onRetry?: (messageId: string) => void;
+  onReply?: (message: Message) => void;
   previousMessage?: Message | null;
 }
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.75;
+const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.85;
 
 // Helper to determine if we need to show the avatar/name again
 const shouldShowSenderInfo = (current: Message, previous: Message | null | undefined): boolean => {
@@ -46,17 +48,39 @@ const shouldShowSenderInfo = (current: Message, previous: Message | null | undef
   return Math.abs(currentTime - previousTime) > 5 * 60 * 1000; // 5 minutes
 };
 
+// Render left actions (reply button)
+const renderLeftActions = (message: Message, onReply?: (message: Message) => void) => {
+  return (
+    <TouchableOpacity
+      style={styles.replyAction}
+      onPress={() => {
+        if (onReply) {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onReply(message);
+        }
+      }}
+    >
+      <View style={styles.replyActionContent}>
+        <MaterialIcons name="reply" size={24} color="#0A84FF" />
+        <Text style={styles.replyActionText}>Responder</Text>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 // Memoized message component for better performance
 const ChatMessage: React.FC<ChatMessageProps> = memo(({ 
   message, 
   isMine, 
   onImagePress, 
   onRetry,
+  onReply,
   previousMessage
 }) => {
   const [isLoading, setIsLoading] = useState(false);
-  const [imageLoading, setImageLoading] = useState(true); // Add state for image loading
+  const [imageLoading, setImageLoading] = useState(true);
   const showSenderInfo = !isMine && shouldShowSenderInfo(message, previousMessage);
+  const swipeableRef = useRef<Swipeable | null>(null);
   
   // Format the time from timestamp
   const getFormattedTime = useCallback(() => {
@@ -87,7 +111,11 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
     );
   }
   
-  return (
+  // Check if the message is a reply
+  const isReply = !!message.replyTo;
+  
+  // Render the message content bubble
+  const renderMessageContent = () => (
     <View style={[
       styles.container,
       isMine ? styles.myMessageContainer : styles.otherMessageContainer
@@ -119,11 +147,56 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
           isMine ? styles.myMessageBubble : styles.otherMessageBubble,
           message.type === MessageType.IMAGE ? styles.imageBubble : {},
           isMine && pressed && styles.myMessageBubblePressed,
-          !isMine && pressed && styles.otherMessageBubblePressed
+          !isMine && pressed && styles.otherMessageBubblePressed,
+          isReply && (isMine ? styles.myReplyBubble : styles.otherReplyBubble)
         ]}
         onLongPress={handleLongPress}
         delayLongPress={500}
       >
+        {/* Replied message preview if this is a reply */}
+        {message.replyTo && (
+          <View style={[
+            styles.replyPreviewContainer,
+            isMine ? styles.myReplyPreviewContainer : styles.otherReplyPreviewContainer
+          ]}>
+            <View style={[
+              styles.replyPreviewBar,
+              isMine ? styles.myReplyPreviewBar : styles.otherReplyPreviewBar
+            ]} />
+            <View style={styles.replyPreviewContent}>
+              <Text style={[
+                styles.replyPreviewName,
+                isMine && styles.myReplyPreviewName
+              ]}>
+                {message.replyTo.senderId === message.senderId ? 'Tú' : message.replyTo.senderName || 'Usuario'}
+              </Text>
+              {message.replyTo.type === MessageType.IMAGE ? (
+                <View style={styles.replyImagePreview}>
+                  <MaterialIcons 
+                    name="image" 
+                    size={14} 
+                    color={isMine ? "rgba(255, 255, 255, 0.8)" : "#8E8E93"} 
+                    style={{ marginRight: 4 }} 
+                  />
+                  <Text style={[
+                    styles.replyPreviewText,
+                    isMine && { color: 'rgba(255, 255, 255, 0.9)' }
+                  ]} numberOfLines={1}>
+                    {message.replyTo.text || 'Foto'}
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[
+                  styles.replyPreviewText,
+                  isMine && { color: 'rgba(255, 255, 255, 0.9)' }
+                ]} numberOfLines={1}>
+                  {message.replyTo.text}
+                </Text>
+              )}
+            </View>
+          </View>
+        )}
+        
         {/* Sender name for others' messages when needed */}
         {!isMine && showSenderInfo && message.senderName && (
           <Text style={styles.senderName}>{message.senderName}</Text>
@@ -212,6 +285,26 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
       )}
     </View>
   );
+
+  // Use Swipeable to enable reply functionality
+  return (
+    <Swipeable
+      ref={swipeableRef}
+      renderLeftActions={() => onReply ? renderLeftActions(message, onReply) : null}
+      friction={2}
+      leftThreshold={40}
+      onSwipeableOpen={() => {
+        if (onReply) {
+          onReply(message);
+          setTimeout(() => {
+            swipeableRef.current?.close();
+          }, 500);
+        }
+      }}
+    >
+      {renderMessageContent()}
+    </Swipeable>
+  );
 });
 
 const styles = StyleSheet.create({
@@ -252,10 +345,11 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   messageBubble: {
-    padding: 12,
+    padding: 10,
+    paddingHorizontal: 14,
     borderRadius: 18,
     maxWidth: MAX_BUBBLE_WIDTH,
-    minWidth: 80,
+    minWidth: 120,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
@@ -304,7 +398,7 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 16,
-    lineHeight: 22,
+    lineHeight: 20,
   },
   myMessageText: {
     color: 'white',
@@ -369,7 +463,112 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 8,
-  }
+  },
+  // Reply action styles
+  replyAction: {
+    backgroundColor: '#E1F5FE',
+    justifyContent: 'center',
+    alignItems: 'flex-end',
+    width: 120,
+    height: '100%',
+  },
+  replyActionContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E1F5FE',
+    padding: 10,
+    borderRadius: 12,
+    marginRight: 10,
+  },
+  replyActionText: {
+    color: '#0A84FF',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginTop: 4,
+  },
+  // Reply preview styles
+  replyPreviewContainer: {
+    flexDirection: 'row',
+    marginBottom: 4,
+    paddingBottom: 6,
+    paddingTop: 2,
+    paddingRight: 8,
+    paddingLeft: 2,
+    borderWidth: 1,
+    borderBottomWidth: 1,
+    backgroundColor: 'rgba(10, 132, 255, 0.05)',
+    borderRadius: 8,
+    marginTop: 2,
+    marginLeft: 2,
+    marginRight: 2,
+  },
+  // Styles for my (user's) message reply preview
+  myReplyPreviewContainer: {
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    shadowColor: '#FFFFFF',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  // Styles for other user's message reply preview
+  otherReplyPreviewContainer: {
+    borderColor: 'rgba(10, 132, 255, 0.7)',
+    backgroundColor: 'rgba(10, 132, 255, 0.08)',
+  },
+  replyPreviewBar: {
+    width: 4,
+    borderRadius: 2,
+    marginRight: 8,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 2,
+    elevation: 3,
+  },
+  myReplyPreviewBar: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#FFFFFF',
+  },
+  otherReplyPreviewBar: {
+    backgroundColor: '#0A84FF',
+    shadowColor: '#0A84FF',
+  },
+  replyPreviewContent: {
+    flex: 1,
+    flexShrink: 1,
+  },
+  replyPreviewName: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#0A84FF',
+    marginBottom: 2,
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  myReplyPreviewName: {
+    color: '#FFFFFF',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  replyPreviewText: {
+    fontSize: 12,
+    color: 'rgba(51, 51, 51, 0.9)',
+    fontWeight: '500',
+    paddingTop: 1,
+    paddingBottom: 1,
+  },
+  replyImagePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  // Add new reply styles
+  myReplyBubble: {
+    borderWidth: 2,
+    borderColor: '#0064C8',
+  },
+  otherReplyBubble: {
+    borderWidth: 2,
+    borderColor: '#BFE0FF',
+  },
 });
 
 export default ChatMessage;

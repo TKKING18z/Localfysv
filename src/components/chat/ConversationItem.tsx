@@ -8,6 +8,7 @@ import {
   Animated,
   Pressable
 } from 'react-native';
+import { MaterialIcons } from '@expo/vector-icons';
 import { Conversation } from '../../../models/chatTypes';
 import { formatConversationTime, getNameInitial, getAvatarColor, truncateText } from '../../../src/utils/chatUtils';
 import * as Haptics from 'expo-haptics';
@@ -18,6 +19,8 @@ interface ConversationItemProps {
   onPress: (conversationId: string) => void;
   onLongPress?: (conversationId: string) => void;
   isActive?: boolean;
+  isMultiSelectMode?: boolean;
+  isSelected?: boolean;
 }
 
 const ConversationItem: React.FC<ConversationItemProps> = memo(({ 
@@ -25,7 +28,9 @@ const ConversationItem: React.FC<ConversationItemProps> = memo(({
   userId,
   onPress,
   onLongPress,
-  isActive = false
+  isActive = false,
+  isMultiSelectMode = false,
+  isSelected = false
 }) => {
   // Get the ID of the other participant
   const getOtherParticipantId = () => {
@@ -80,13 +85,28 @@ const ConversationItem: React.FC<ConversationItemProps> = memo(({
       style={({ pressed }) => [
         styles.container,
         unreadCount > 0 && styles.unreadContainer,
-        isActive && styles.activeContainer,
-        pressed && styles.pressedContainer
+        isActive && !isMultiSelectMode && styles.activeContainer,
+        pressed && styles.pressedContainer,
+        isSelected && styles.selectedContainer
       ]} 
       onPress={handlePress}
       onLongPress={handleLongPress}
       android_ripple={{ color: 'rgba(0, 122, 255, 0.1)' }}
     >
+      {/* Checkbox for multi-select */}
+      {isMultiSelectMode && (
+        <View style={styles.checkboxContainer}>
+          <View style={[
+            styles.checkbox,
+            isSelected && styles.checkboxSelected
+          ]}>
+            {isSelected && (
+              <MaterialIcons name="check" size={20} color="#FFFFFF" />
+            )}
+          </View>
+        </View>
+      )}
+      
       {/* Avatar */}
       <View style={styles.avatarContainer}>
         {otherParticipantPhoto ? (
@@ -187,8 +207,31 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#0A84FF',
   },
+  selectedContainer: {
+    backgroundColor: '#E6F2FF',
+    borderWidth: 2,
+    borderColor: '#0A84FF',
+  },
   pressedContainer: {
     backgroundColor: '#F0F7FF',
+  },
+  // Checkbox styles
+  checkboxContainer: {
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#0A84FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  checkboxSelected: {
+    backgroundColor: '#0A84FF',
   },
   avatarContainer: {
     marginRight: 16,

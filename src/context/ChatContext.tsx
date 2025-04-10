@@ -2,34 +2,48 @@ import React, { createContext, useContext, useEffect, useState, useCallback, use
 import { chatService } from '../../services/ChatService';
 import { firebaseService } from '../services/firebaseService';
 import { useAuth } from './AuthContext';
-import { Conversation, Message, ChatResult, MessageStatus, MessageType } from '../../models/chatTypes';
+import { Conversation, Message, ChatResult, MessageStatus, MessageType, ReplyInfo, NewMessageData } from '../../models/chatTypes';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { AppState } from 'react-native';
+import { useNetInfo } from '@react-native-community/netinfo';
+
 
 interface ChatContextType {
-  // State
   conversations: Conversation[];
   activeConversation: Conversation | null;
   activeMessages: Message[];
+  localMessages: Message[];
   loading: boolean;
   error: string | null;
+  setError: (error: string | null) => void;
+  refreshConversations: () => Promise<void>;
+  setActiveConversationId: (id: string | null) => Promise<void>;
+  sendMessage: (text: string, imageUrl?: string, replyTo?: ReplyInfo) => Promise<boolean>;
+  addLocalMessage: (message: Message) => void;
+  removeLocalMessage: (id: string) => void;
+  markMessageAsRead: (messageId: string) => void;
+  markConversationAsRead: () => Promise<void>;
+  isLoadingMoreMessages: boolean;
+  loadMoreMessages: () => Promise<void>;
+  hasMoreMessages: boolean;
+  replyingTo: ReplyInfo | null;
+  setReplyingTo: (data: ReplyInfo | null) => void;
   unreadTotal: number;
   isOffline: boolean;
-  
-  // Actions
-  setActiveConversationId: (id: string | null) => void;
-  sendMessage: (text: string, imageUrl?: string) => Promise<boolean>;
-  createConversation: (userId: string, userName: string, businessId?: string, businessName?: string, initialMessage?: string) => Promise<string | null>;
-  markConversationAsRead: () => Promise<void>;
-  refreshConversations: () => Promise<void>;
-  deleteConversation: (conversationId: string) => Promise<boolean>;
-  resendFailedMessage: (messageId: string) => Promise<boolean>;
   uploadImage: (uri: string) => Promise<string | null>;
-  // New notification token functions
+  resendFailedMessage: (messageId: string) => Promise<boolean>;
+  deleteConversation: (conversationId: string) => Promise<boolean>;
   updateNotificationToken: (token: string) => Promise<void>;
-  clearNotificationToken: () => Promise<void>;
+  createConversation: (
+    recipientId: string,
+    recipientName: string,
+    businessId?: string,
+    businessName?: string,
+    initialMessage?: string
+  ) => Promise<string | null>;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -40,6 +54,7 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeConversationId, _setActiveConversationId] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<Message[]>([]);
+  const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
@@ -647,237 +662,138 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, markConversationAsRead, activeConversationId, activeConversation]);
   
-  // Enhanced setActiveConversationId function with debounce protection
+  // Establecer conversación activa por ID
   const setActiveConversationId = useCallback(async (id: string | null) => {
-    if (!id) {
-      console.log('[ChatContext] Clearing active conversation');
+    console.log(`[ChatContext] Setting active conversation ID: ${id}`);
+    
+    // Si ya es la conversación activa, no hacer nada
+    if (activeConversationId === id) {
+      console.log(`[ChatContext] Conversation ${id} is already active, skipping`);
+      return;
+    }
+    
+    // Si se solicita limpiar la conversación activa
+    if (id === null) {
       _setActiveConversationId(null);
       setActiveConversation(null);
       setActiveMessages([]);
       return;
     }
     
-    // Protección completa contra configuración de la misma conversación
-    if (activeConversationId === id && activeConversation !== null) {
-      console.log(`[ChatContext] Conversation ${id} is already active, skipping`);
-      return;
-    }
-    
-    // Protección contra navegación offline
-    if (isOffline) {
-      setError('No hay conexión a internet. No se puede cargar la conversación.');
-      return;
-    }
-    
     try {
-      console.log(`[ChatContext] Setting active conversation to ${id}`);
-      
-      // IMPORTANTE: Establecer el ID antes de cargar los datos para evitar
-      // problemas de reentrada al montar/desmontar el componente
-      _setActiveConversationId(id);
       setLoading(true);
       
-      // Verificar que la conversación existe
-      const snapshot = await firebase.firestore()
-        .collection('conversations')
-        .doc(id)
-        .get();
+      // Buscar primero en las conversaciones ya cargadas
+      const existingConv = conversations.find(conv => conv.id === id);
       
-      // Si el ID activo ha cambiado mientras se cargaban los datos, no seguir
-      if (activeConversationId !== id) {
-        console.log(`[ChatContext] Active conversation changed during loading, aborting load for ${id}`);
-        return;
-      }
-      
-      // Verificar que la conversación existe
-      if (!snapshot.exists) {
-        console.error(`[ChatContext] Conversation with ID ${id} not found`);
-        setError(`La conversación no existe o fue eliminada`);
-        _setActiveConversationId(null);
-        setLoading(false);
-        return;
-      }
-      
-      // Cargar datos de la conversación
-      const conversationData = {
-        id,
-        ...snapshot.data()
-      } as Conversation;
-      setActiveConversation(conversationData);
-      
-      // Cargar mensajes iniciales
-      const messagesSnapshot = await firebase.firestore()
-        .collection('conversations')
-        .doc(id)
-        .collection('messages')
-        .orderBy('timestamp', 'desc')
-        .limit(30)
-        .get();
-      
-      // Si el ID activo ha cambiado mientras se cargaban los mensajes, no continuar
-      if (activeConversationId !== id) {
-        console.log(`[ChatContext] Active conversation changed during messages loading, aborting for ${id}`);
-        return;
-      }
-      
-      if (!messagesSnapshot.empty) {
-        const messages = messagesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        })) as Message[];
+      if (existingConv) {
+        setActiveConversation(existingConv);
+        _setActiveConversationId(id);
         
-        // Ordenar por timestamp para mostrar
-        const sortedMessages = messages.sort((a, b) => {
-          // Manejar diferentes formatos de timestamp
-          const getTime = (msg: Message): number => {
-            if (!msg.timestamp) return 0;
-            if (msg.timestamp instanceof firebase.firestore.Timestamp) {
-              return msg.timestamp.toMillis();
-            }
-            if (msg.timestamp instanceof Date) {
-              return msg.timestamp.getTime();
-            }
-            if (typeof msg.timestamp === 'string') {
-              return new Date(msg.timestamp).getTime();
-            }
-            return 0;
-          };
+        // Cargar mensajes
+        try {
+          const messagesResult = await chatService.getMessages(id, 50);
           
-          return getTime(a) - getTime(b);
-        });
-        
-        setActiveMessages(sortedMessages);
-      } else {
-        setActiveMessages([]);
-      }
-      
-      setLoading(false);
-      
-      // Marcar como leído después de un pequeño retraso
-      setTimeout(() => {
-        // Verificar que la conversación activa no ha cambiado antes de marcar como leída
-        if (activeConversationId === id) {
-          markConversationAsRead().catch(err => {
-            console.error('[ChatContext] Error marking conversation as read:', err);
-          });
+          if (messagesResult.success && messagesResult.data) {
+            setActiveMessages(messagesResult.data);
+          } else {
+            console.error('[ChatContext] Error loading messages:', messagesResult.error);
+            setActiveMessages([]);
+          }
+        } catch (error) {
+          console.error('[ChatContext] Error fetching messages:', error);
+          setActiveMessages([]);
         }
-      }, 1000);
-    } catch (error) {
-      // Solo actualizar el estado de error si esta sigue siendo la conversación activa
-      if (activeConversationId === id) {
-        console.error('[ChatContext] Error setting active conversation:', error);
-        setError('Error al cargar la conversación');
-        // No limpiar el ID activo en caso de error para evitar ciclos de carga
-        setLoading(false);
+      } else {
+        console.log(`[ChatContext] Conversation ${id} not found in loaded conversations, fetching...`);
+        // Cargar la conversación desde Firestore
+        try {
+          const convResult = await chatService.getConversation(id);
+          
+          if (convResult.success && convResult.data) {
+            setActiveConversation(convResult.data);
+            _setActiveConversationId(id);
+            
+            // Cargar mensajes
+            const messagesResult = await chatService.getMessages(id, 50);
+            
+            if (messagesResult.success && messagesResult.data) {
+              setActiveMessages(messagesResult.data);
+            } else {
+              console.error('[ChatContext] Error loading messages:', messagesResult.error);
+              setActiveMessages([]);
+            }
+          } else {
+            console.error('[ChatContext] Conversation not found:', convResult.error);
+            setError(`No se pudo cargar la conversación: ${convResult.error?.message || 'Error desconocido'}`);
+            setActiveConversation(null);
+            setActiveMessages([]);
+          }
+        } catch (error) {
+          console.error('[ChatContext] Error fetching conversation:', error);
+          setError('Error cargando la conversación. Intente más tarde.');
+          setActiveConversation(null);
+          setActiveMessages([]);
+        }
       }
+    } catch (error) {
+      console.error('[ChatContext] Error setting active conversation:', error);
+      setError('Error activando la conversación. Intente más tarde.');
+    } finally {
+      setLoading(false);
     }
-  }, [isOffline, markConversationAsRead, activeConversationId, activeConversation]);
+  }, [conversations, activeConversationId]);
   
   // Enhanced send message function
-  const sendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
+  const sendMessage = useCallback(async (text: string, imageUrl?: string, replyTo?: ReplyInfo): Promise<boolean> => {
     if (!user) {
       console.error('[ChatContext] Cannot send message: Missing user');
       return false;
     }
-    
-    if (!activeConversation && !activeConversationId) {
-      console.error('[ChatContext] Cannot send message: Missing active conversation and ID');
+
+    if (!activeConversation) {
+      console.error('[ChatContext] Cannot send message: No active conversation');
       return false;
     }
-    
-    if (isOffline) {
-      console.error('[ChatContext] Cannot send message: Device is offline');
-      return false;
-    }
-    
+
     try {
-      // Get active conversation ID
-      const conversationId = activeConversation?.id || activeConversationId;
-      
-      if (!conversationId) {
-        console.error('[ChatContext] Cannot determine conversation ID for sending message');
-        return false;
-      }
-      
-      console.log(`[ChatContext] Sending message in conversation ${conversationId}`);
-      
-      // Verify conversation exists
-      const convDoc = await firebase.firestore()
-        .collection('conversations')
-        .doc(conversationId)
-        .get();
-      
-      if (!convDoc.exists) {
-        console.error(`[ChatContext] Conversation ${conversationId} does not exist`);
-        return false;
-      }
-      
-      // Prepare sender data
-      const userName = user.displayName || 'Usuario';
-      const userPhoto = user.photoURL || '';
-      
-      // Add optimistic message to UI immediately
-      const optimisticId = `temp-${Date.now()}`;
-      const optimisticMessage: Message = {
-        id: optimisticId,
-        text: text.trim(),
-        senderId: user.uid,
-        senderName: userName,
-        senderPhoto: userPhoto,
-        timestamp: new Date(),
-        status: MessageStatus.SENDING,
-        read: false,
-        type: imageUrl ? MessageType.IMAGE : MessageType.TEXT,
-        imageUrl
+      setLoading(true);
+
+      const messageData: NewMessageData = {
+        text,
+        type: MessageType.TEXT
       };
-      
-      // Update UI immediately
-      setActiveMessages(prev => [...prev, optimisticMessage]);
-      
-      // Send message using service
+
+      if (imageUrl) {
+        messageData.imageUrl = imageUrl;
+        messageData.type = MessageType.IMAGE;
+      }
+
       const result = await chatService.sendMessage(
-        conversationId,
+        activeConversation.id,
         user.uid,
-        { 
-          text: text.trim(), 
-          imageUrl,
-          type: imageUrl ? MessageType.IMAGE : MessageType.TEXT
-        },
-        userName,
-        userPhoto
+        messageData,
+        user.displayName || undefined,
+        user.photoURL || undefined,
+        replyTo // Pasar la información de respuesta
       );
-      
-      if (!result.success) {
-        console.error('[ChatContext] Error sending message:', result.error);
-        
-        // Update optimistic message to show error
-        setActiveMessages(prev => 
-          prev.map(msg => 
-            msg.id === optimisticId 
-              ? { ...msg, status: MessageStatus.ERROR } 
-              : msg
-          )
-        );
-        
+
+      if (result.success && result.data) {
+        // Add message to UI
+        const newMessage = result.data as Message;
+        setActiveMessages(prev => [...prev, newMessage]);
+        return true;
+      } else {
+        console.error('[ChatContext] Failed to send message:', result.error);
         return false;
       }
-      
-      // Replace optimistic message with actual message
-      if (result.data) {
-        setActiveMessages(prev => 
-          prev.map(msg => 
-            msg.id === optimisticId ? result.data! : msg
-          )
-        );
-      }
-      
-      console.log('[ChatContext] Message sent successfully');
-      return true;
     } catch (error) {
-      console.error('[ChatContext] Unexpected error sending message:', error);
+      console.error('[ChatContext] Error sending message:', error);
       return false;
+    } finally {
+      setLoading(false);
     }
-  }, [user, activeConversation, activeConversationId, isOffline]);
+  }, [user, activeConversation, setLoading]);
   
   // Method to resend a failed message
   const resendFailedMessage = useCallback(async (messageId: string): Promise<boolean> => {
@@ -1265,40 +1181,48 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     conversations,
     activeConversation,
     activeMessages,
+    localMessages,
     loading,
     error,
-    unreadTotal,
-    isOffline,
+    setError,
+    refreshConversations,
     setActiveConversationId,
     sendMessage,
-    createConversation,
+    addLocalMessage: (message: Message) => setActiveMessages(prev => [...prev, message]),
+    removeLocalMessage: (id: string) => setActiveMessages(prev => prev.filter(msg => msg.id !== id)),
+    markMessageAsRead: (messageId: string) => setActiveMessages(prev => prev.map(msg => msg.id === messageId ? { ...msg, read: true } : msg)),
     markConversationAsRead,
-    refreshConversations,
-    deleteConversation,
-    resendFailedMessage,
+    isLoadingMoreMessages: false,
+    loadMoreMessages: async () => {},
+    hasMoreMessages: false,
+    replyingTo: null,
+    setReplyingTo: (data: ReplyInfo | null) => {},
+    unreadTotal,
+    isOffline,
     uploadImage,
-    // Add new notification token functions to context
+    resendFailedMessage,
+    deleteConversation,
     updateNotificationToken,
-    clearNotificationToken
+    createConversation
   }), [
     conversations,
     activeConversation,
     activeMessages,
+    localMessages,
     loading,
     error,
-    unreadTotal,
-    isOffline,
+    setError,
+    refreshConversations,
     setActiveConversationId,
     sendMessage,
-    createConversation,
     markConversationAsRead,
-    refreshConversations,
-    deleteConversation,
-    resendFailedMessage,
+    unreadTotal,
+    isOffline,
     uploadImage,
-    // Include new functions in dependency array
+    resendFailedMessage,
+    deleteConversation,
     updateNotificationToken,
-    clearNotificationToken
+    createConversation
   ]);
   
   return (
@@ -1325,20 +1249,29 @@ export const useChat = () => {
       conversations: [],
       activeConversation: null,
       activeMessages: [],
+      localMessages: [],
       loading: false,
       error: null,
+      setError: () => {},
+      refreshConversations: async () => {},
+      setActiveConversationId: async () => {},
+      sendMessage: async () => false,
+      addLocalMessage: (message: Message) => {},
+      removeLocalMessage: (id: string) => {},
+      markMessageAsRead: (messageId: string) => {},
+      markConversationAsRead: async () => {},
+      isLoadingMoreMessages: false,
+      loadMoreMessages: async () => {},
+      hasMoreMessages: false,
+      replyingTo: null,
+      setReplyingTo: (data: ReplyInfo | null) => {},
       unreadTotal: 0,
       isOffline: false,
-      setActiveConversationId: () => {},
-      sendMessage: async () => false,
-      createConversation: async () => null,
-      markConversationAsRead: async () => {},
-      refreshConversations: async () => {},
-      deleteConversation: async () => false,
-      resendFailedMessage: async () => false,
       uploadImage: async () => null,
+      resendFailedMessage: async () => false,
+      deleteConversation: async () => false,
       updateNotificationToken: async () => {},
-      clearNotificationToken: async () => {}
+      createConversation: async () => null
     } as ChatContextType;
   }
   

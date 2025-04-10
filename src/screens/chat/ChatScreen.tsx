@@ -38,13 +38,14 @@ import 'firebase/compat/firestore';
 // Components
 import ChatHeader from '../../components/chat/ChatHeader';
 import ChatMessage from '../../components/chat/ChatMessage';
-import ChatInput from '../../components/chat/ChatInput';
+import ChatInput, { ChatInputRef } from '../../components/chat/ChatInput';
+import ReplyPreview from '../../../src/components/chat/ReplyPreview';
 
 // Hooks
 import useKeyboard from '../../hooks/useKeyboard';
 
 // Types
-import { Message, MessageType, MessageStatus } from '../../../models/chatTypes';
+import { Message, MessageType, MessageStatus, ReplyInfo } from '../../../models/chatTypes';
 
 // Detailed type definitions
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
@@ -76,11 +77,14 @@ const ChatScreen: React.FC = () => {
   useLayoutEffect(() => {
     // Variable para controlar si el componente está montado
     let isMounted = true;
+    let hasInitialized = false; // Evitar inicializaciones repetidas
+    
+    console.log(`[ChatScreen] Setting active conversation on mount: ${conversationId}`);
     
     // Para evitar race conditions, envolvemos la inicialización en un timeout
     const initTimer = setTimeout(() => {
-      if (isMounted && conversationId) {
-        console.log(`[ChatScreen] Setting active conversation on mount: ${conversationId}`);
+      if (isMounted && conversationId && !hasInitialized) {
+        hasInitialized = true;
         setActiveConversationId(conversationId);
       }
     }, 50); // Pequeño delay para asegurar estabilidad en la navegación
@@ -90,11 +94,10 @@ const ChatScreen: React.FC = () => {
       isMounted = false;
       clearTimeout(initTimer);
       
-      // NO limpiamos la conversación activa aquí para evitar problemas de navegación
       console.log('[ChatScreen] Unmounting');
     };
-  }, [conversationId, setActiveConversationId]);
-
+  }, [conversationId]); // Removiendo setActiveConversationId para evitar loops
+  
   // Local state
   const [imageModalVisible, setImageModalVisible] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
@@ -105,11 +108,15 @@ const ChatScreen: React.FC = () => {
   const [isLoadingData, setIsLoadingData] = useState(true);
   const [localMessages, setLocalMessages] = useState<Message[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
+  // Estado para el mensaje al que se está respondiendo
+  const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
+  
   const maxRetries = 5;
 
   // Refs
   const messagesListRef = useRef<FlatList>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
+  const inputRef = useRef<ChatInputRef>(null);
 
   // Usar el hook personalizado para detectar el teclado
   const { 
@@ -134,13 +141,19 @@ const ChatScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       const onBackPress = () => {
+        // Si hay una respuesta activa, cancelarla en lugar de regresar
+        if (replyToMessage) {
+          setReplyToMessage(null);
+          return true;
+        }
+        
         handleGoBack();
         return true;
       };
       
       BackHandler.addEventListener('hardwareBackPress', onBackPress);
       return () => BackHandler.removeEventListener('hardwareBackPress', onBackPress);
-    }, [])
+    }, [replyToMessage])
   );
   
   // Listen for keyboard events
@@ -222,6 +235,7 @@ const ChatScreen: React.FC = () => {
                 read: msgData.read === true,
                 type: msgData.type || MessageType.TEXT,
                 imageUrl: msgData.imageUrl,
+                replyTo: msgData.replyTo,
                 metadata: msgData.metadata
               } as Message;
             });
@@ -273,32 +287,56 @@ const ChatScreen: React.FC = () => {
   
   // Mark messages as read when the conversation becomes active
   useEffect(() => {
+    let isMounted = true;
+    
     const markAsRead = async () => {
-      if (activeConversation && user) {
+      if (!activeConversation || !user || !isMounted) return;
+      
+      try {
+        await markConversationAsRead();
+        
+        // Resetear badge de notificaciones cuando la conversación está activa
         try {
-          await markConversationAsRead();
-          
-          // Resetear badge de notificaciones cuando la conversación está activa
-          try {
+          if (isMounted) {
             const { notificationService } = require('../../../services/NotificationService');
             await notificationService.resetBadgeCount(user.uid);
-          } catch (notifError) {
-            console.error('[ChatScreen] Error resetting badge count:', notifError);
           }
-        } catch (error) {
-          console.error('Error marking conversation as read:', error);
+        } catch (notifError) {
+          console.error('[ChatScreen] Error resetting badge count:', notifError);
         }
+      } catch (error) {
+        console.error('Error marking conversation as read:', error);
       }
     };
     
     markAsRead();
-  }, [activeConversation, markConversationAsRead, user]);
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [activeConversation?.id]); // Cambiando a solo depender del ID, no de toda la función
   
   // Determine which error to display (context or local)
   const displayError = error || localError;
   
   // Determine which messages to display (context or local)
-  const displayMessages = activeMessages.length > 0 ? activeMessages : localMessages;
+  const displayMessages = useMemo(() => {
+    let messages = activeMessages.length > 0 ? activeMessages : localMessages;
+    
+    // Eliminar mensajes duplicados usando un Set para rastrear IDs ya vistos
+    const messageIds = new Set();
+    const uniqueMessages = messages.filter(msg => {
+      // Si ya hemos visto este ID, es un duplicado
+      if (messageIds.has(msg.id)) {
+        return false;
+      }
+      // Si no, añadir a los IDs ya vistos y mantener el mensaje
+      messageIds.add(msg.id);
+      return true;
+    });
+    
+    return uniqueMessages;
+  }, [activeMessages, localMessages]);
   
   // Scroll to bottom when new messages are added
   useEffect(() => {
@@ -322,7 +360,7 @@ const ChatScreen: React.FC = () => {
     return activeConversation.participants.find(id => id !== user.uid) || '';
   }, [activeConversation, user]);
   
-  // Handle sending a message
+  // Handle sending a message with reply support
   const handleSendMessage = useCallback(async (text: string, imageUrl?: string): Promise<boolean> => {
     if (!user) {
       Alert.alert('Error', 'No se puede enviar el mensaje, usuario no autenticado');
@@ -335,7 +373,29 @@ const ChatScreen: React.FC = () => {
     }
 
     try {
-      const success = await sendMessage(text, imageUrl);
+      // Crear el objeto de respuesta si hay un mensaje al que responder
+      let replyData: ReplyInfo | undefined;
+      
+      if (replyToMessage) {
+        replyData = {
+          messageId: replyToMessage.id,
+          text: replyToMessage.text || '',
+          senderId: replyToMessage.senderId,
+          senderName: replyToMessage.senderName || '',
+          type: replyToMessage.type
+        };
+        
+        // Solo añadir imageUrl si existe
+        if (replyToMessage.imageUrl) {
+          replyData.imageUrl = replyToMessage.imageUrl;
+        }
+      }
+      
+      // Enviar el mensaje con la información de respuesta
+      const success = await sendMessage(text, imageUrl, replyData);
+      
+      // Limpiar el estado de respuesta
+      setReplyToMessage(null);
       
       if (success) {
         scrollToBottomIfNeeded();
@@ -347,13 +407,35 @@ const ChatScreen: React.FC = () => {
       console.error('Error sending message:', error);
       return false;
     }
-  }, [user, sendMessage, scrollToBottomIfNeeded, isOffline]);
+  }, [user, sendMessage, scrollToBottomIfNeeded, isOffline, replyToMessage]);
   
   // Handle showing an image in fullscreen mode
   const handleImagePress = useCallback((imageUrl: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setSelectedImage(imageUrl);
     setImageModalVisible(true);
+  }, []);
+  
+  // Handle replying to a message
+  const handleReplyMessage = useCallback((message: Message) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setReplyToMessage(message);
+    // Mostrar el teclado para responder inmediatamente
+    setTimeout(() => {
+      Keyboard.dismiss();
+      // En lugar de Keyboard.show() que no existe, vamos a usar setTimeout para dar tiempo
+      // a que el teclado se cierre y luego enfocar el input
+      setTimeout(() => {
+        if (inputRef && inputRef.current) {
+          inputRef.current.focus();
+        }
+      }, 100);
+    }, 300);
+  }, []);
+  
+  // Handle canceling a reply
+  const handleCancelReply = useCallback(() => {
+    setReplyToMessage(null);
   }, []);
   
   // Handle retrying a failed message
@@ -508,13 +590,14 @@ const ChatScreen: React.FC = () => {
             <FlatList
               ref={messagesListRef}
               data={displayMessages} 
-              keyExtractor={(item) => item.id}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
               renderItem={({ item, index }) => (
                 <ChatMessage 
                   message={item} 
                   isMine={item.senderId === user?.uid}
                   onImagePress={handleImagePress}
                   onRetry={handleRetryMessage}
+                  onReply={handleReplyMessage}
                   previousMessage={index > 0 ? displayMessages[index - 1] : null}
                 />
               )}
@@ -532,13 +615,32 @@ const ChatScreen: React.FC = () => {
             />
           </View>
           
-          {/* Input component - simplificado */}
+          {/* Reply Preview */}
+          {replyToMessage && (
+            <View style={{
+              position: 'absolute', 
+              bottom: inputRef.current ? 60 : 80, 
+              left: 0,
+              right: 0,
+              zIndex: 1000,
+            }}>
+              <ReplyPreview 
+                message={replyToMessage}
+                onCancel={handleCancelReply}
+                isMine={replyToMessage.senderId === user?.uid}
+              />
+            </View>
+          )}
+          
+          {/* Input component */}
           <ChatInput 
             onSend={handleSendMessage}
             uploadImage={uploadImage}
             disabled={loading || isOffline}
             keyboardVisible={keyboardVisibleHook}
             isModernIphone={isModernIphone}
+            replyActive={!!replyToMessage}
+            ref={inputRef}
           />
         </KeyboardAvoidingView>
       </Animated.View>

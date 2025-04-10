@@ -18,12 +18,18 @@ import { useStripe } from '@stripe/stripe-react-native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAuth } from '../context/AuthContext';
 import { useCart, CartItem } from '../context/CartContext';
+import { useOrders, PaymentMethod } from '../context/OrderContext';
 
 type PaymentScreenRouteProp = RouteProp<RootStackParamList, 'Payment'>;
 type PaymentScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Payment'>;
 
-// URL de tu servidor - Cambia esto a la URL de tu servidor real
-const API_URL = 'http://tu-ip-local:3000'; // Por ejemplo: 'http://192.168.1.100:3000'
+// URL de tu servidor - Usa IP local para emuladores/dispositivos físicos
+// En un emulador Android puedes usar 10.0.2.2 para acceder a localhost
+// En un emulador iOS puedes usar localhost
+// Para dispositivos físicos, usa tu dirección IP de la red local (ej: 192.168.1.X)
+const API_URL = 'http://localhost:3001'; // Puerto configurado en server/.env
+// const API_URL = 'http://10.0.2.2:3001'; // Para emulador Android
+// const API_URL = 'http://192.168.X.X:3001'; // Para dispositivos físicos (reemplaza X.X con tu IP)
 
 const PaymentScreen: React.FC = () => {
   const navigation = useNavigation<PaymentScreenNavigationProp>();
@@ -31,6 +37,7 @@ const PaymentScreen: React.FC = () => {
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
   const { user } = useAuth();
   const { clearCart } = useCart();
+  const { createOrder } = useOrders();
 
   // Obtener parámetros de la ruta con validación
   const params = route.params || {};
@@ -330,35 +337,156 @@ const PaymentScreen: React.FC = () => {
         setProcessingPayment(false);
       } else {
         try {
-          if (isCartPayment) {
-            await clearCart();
+          // Crear orden después de un pago exitoso
+          const amountValue = parseFloat(amount);
+          const subtotalValue = isCartPayment ? calculatedTotal : amountValue; // En pagos directos, subtotal = total
+          
+          // Verificar que el usuario esté autenticado
+          if (!user || !user.uid || !user.email) {
+            throw new Error('User information is missing - user must be logged in');
           }
-
-          Alert.alert(
-            'Pago exitoso',
-            `Tu pago de $${parseFloat(amount).toFixed(2)} a ${businessName} se ha procesado correctamente.`,
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  if (isCartPayment) {
-                    navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'MainTabs' }],
-                    });
-                  } else {
-                    navigation.goBack();
+          
+          // Convertir el método de pago al formato esperado por el contexto de órdenes
+          const orderPaymentMethod: PaymentMethod = 'card';
+          
+          // Validar que todos los campos necesarios estén definidos
+          if (!businessId) {
+            throw new Error('businessId is undefined');
+          }
+          
+          if (!businessName) {
+            throw new Error('businessName is undefined');
+          }
+          
+          const cartToUse = isCartPayment ? cartItems : [{
+            id: 'direct-payment',
+            name: 'Pago directo',
+            price: amountValue,
+            quantity: 1,
+            businessId: businessId
+          }];
+          
+          if (!cartToUse || cartToUse.length === 0) {
+            throw new Error('cartItems is empty or undefined');
+          }
+          
+          // Validar cada item del carrito
+          cartToUse.forEach((item, index) => {
+            if (!item.id) {
+              throw new Error(`Item at index ${index} has undefined id`);
+            }
+            if (!item.name) {
+              throw new Error(`Item at index ${index} has undefined name`);
+            }
+            if (item.price === undefined || item.price === null) {
+              throw new Error(`Item at index ${index} has undefined price`);
+            }
+            if (item.quantity === undefined || item.quantity === null) {
+              throw new Error(`Item at index ${index} has undefined quantity`);
+            }
+            if (!item.businessId) {
+              throw new Error(`Item at index ${index} has undefined businessId`);
+            }
+          });
+          
+          // Create a sanitized cart without undefined values that could cause Firestore errors
+          const sanitizedCart = cartToUse.map((item) => {
+            // Definir un tipo básico para el item limpio
+            const cleanItem: {
+              id: string;
+              name: string;
+              price: number;
+              quantity: number;
+              businessId: string;
+              options?: Array<{
+                name: string;
+                choice: string;
+                extraPrice: number;
+              }>;
+            } = {
+              id: item.id || `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+              name: item.name || 'Producto',
+              price: Number(item.price) || 0,
+              quantity: Number(item.quantity) || 1,
+              businessId: item.businessId || businessId
+            };
+            
+            // Solo incluir opciones si existen y no son undefined
+            if (item.options && Array.isArray(item.options) && item.options.length > 0) {
+              // Filtrar y limpiar las opciones también
+              cleanItem.options = item.options
+                .filter((option: any) => option !== undefined && option !== null)
+                .map((option: any) => ({
+                  name: option.name || '',
+                  choice: option.choice || '',
+                  extraPrice: option.extraPrice !== undefined ? Number(option.extraPrice) : 0
+                }));
+            }
+            
+            return cleanItem;
+          });
+          
+          // Validar los valores numéricos
+          if (isNaN(amountValue) || amountValue <= 0) {
+            throw new Error('Invalid amount value');
+          }
+          
+          if (isNaN(subtotalValue) || subtotalValue <= 0) {
+            throw new Error('Invalid subtotal value');
+          }
+          
+          console.log('Creating order with params:', {
+            businessId,
+            businessName,
+            cartItemsCount: sanitizedCart.length,
+            amountValue,
+            subtotalValue,
+            orderPaymentMethod,
+            isDelivery: false
+          });
+          
+          // Log the full sanitized cart for debugging
+          console.log('Sanitized cart items:', JSON.stringify(sanitizedCart, null, 2));
+          
+          // Crear la orden en la base de datos
+          try {
+            const orderId = await createOrder(
+              businessId,
+              businessName,
+              sanitizedCart,
+              amountValue,
+              subtotalValue,
+              orderPaymentMethod,
+              false // isDelivery: false por defecto para pagos directos
+            );
+            
+            if (isCartPayment) {
+              await clearCart();
+            }
+            
+            // Navegamos a la pantalla de confirmación de pedido
+            navigation.reset({
+              index: 0,
+              routes: [
+                { 
+                  name: 'OrderConfirmation',
+                  params: { 
+                    orderId,
+                    orderNumber: orderId // El orderNumber lo generamos en el backend
                   }
-                },
-              },
-            ]
-          );
-        } catch (clearCartError) {
-          console.error('Error al limpiar el carrito:', clearCartError);
-          // Aún consideramos el pago exitoso, solo un error al limpiar el carrito
+                }
+              ],
+            });
+          } catch (orderError) {
+            console.error('Error creating order with details:', orderError);
+            throw orderError; // Re-throw to be caught by outer catch block
+          }
+        } catch (error) {
+          console.error('Error al crear orden:', error);
+          // Mostrar el error pero aún consideramos el pago exitoso
           Alert.alert(
             'Pago exitoso',
-            'Tu pago se ha procesado correctamente, pero hubo un problema al actualizar tu carrito.',
+            'Tu pago se ha procesado correctamente, pero hubo un problema al registrar tu pedido. Por favor, contacta a soporte.',
             [
               {
                 text: 'OK',

@@ -9,14 +9,15 @@ import { AuthProvider } from './src/context/AuthContext';
 import { ThemeProvider } from './src/context/ThemeContext';
 import { StoreProvider } from './src/context/StoreContext';
 import { CartProvider } from './src/context/CartContext';
+import { OrderProvider } from './src/context/OrderContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from './firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
 
-// Clave pública de Stripe (reemplaza con tu clave real)
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_tu_clave_publica'; 
+// Clave pública de Stripe en modo PRUEBA (sandbox)
+const STRIPE_PUBLISHABLE_KEY = 'pk_test_51RAPGb4eUIEuN4bhAQUTbCD3BaeC8rUOHz4ecJvZzqyiej8P7N8mCFeRpIvpJyWwltjo9L57YDZBjqjeLBvEkkt100FpoNKP3H';
 
 // Ignorar advertencias específicas que no podemos controlar
 LogBox.ignoreLogs([
@@ -117,7 +118,9 @@ export default function App() {
               <LocationProvider>
                 <BusinessProvider>
                   <CartProvider>
-                    <AppNavigator />
+                    <OrderProvider>
+                      <AppNavigator />
+                    </OrderProvider>
                   </CartProvider>
                 </BusinessProvider>
               </LocationProvider>

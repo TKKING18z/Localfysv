@@ -30,6 +30,24 @@ export enum MessageType {
 }
 
 /**
+ * Reply info structure for replies to messages
+ */
+export interface ReplyInfo {
+  /** ID of the message being replied to */
+  messageId: string;
+  /** Text of the original message */
+  text: string;
+  /** Sender ID of the original message */
+  senderId: string;
+  /** Sender name of the original message */
+  senderName?: string;
+  /** Type of the original message */
+  type: MessageType | string;
+  /** URL to image (for image messages) */
+  imageUrl?: string;
+}
+
+/**
  * Message model - Represents a single chat message
  */
 export interface Message {
@@ -53,6 +71,8 @@ export interface Message {
   type: MessageType | string;
   /** URL to image (for image messages) */
   imageUrl?: string;
+  /** Reply information if this message is a reply */
+  replyTo?: ReplyInfo;
   /** Additional data for specialized messages */
   metadata?: Record<string, any>;
 }

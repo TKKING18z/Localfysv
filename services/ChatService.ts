@@ -1,7 +1,7 @@
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
-import { Message, Conversation, NewMessageData, ChatResult, MessageStatus, MessageType } from '../models/chatTypes';
+import { Message, Conversation, NewMessageData, ChatResult, MessageStatus, MessageType, ReplyInfo } from '../models/chatTypes';
 import { getCurrentTimestamp, normalizeTimestamp, isValidURL, sanitizeText } from '../src/utils/chatUtils';
 
 /**
@@ -237,7 +237,8 @@ export const chatService = {
     senderId: string,
     messageData: NewMessageData,
     senderName?: string,
-    senderPhoto?: string
+    senderPhoto?: string,
+    replyTo?: ReplyInfo
   ): Promise<ChatResult<Message>> => {
     try {
       console.log(`[ChatService] Sending message to conversation ${conversationId}`);
@@ -341,6 +342,25 @@ export const chatService = {
       
       if (messageData.metadata) {
         messageObj.metadata = messageData.metadata;
+      }
+      
+      // Añadir información de respuesta si es una respuesta
+      if (replyTo) {
+        // Limpiar objeto replyTo para evitar valores undefined que Firestore no acepta
+        const sanitizedReplyTo: ReplyInfo = {
+          messageId: replyTo.messageId,
+          text: replyTo.text || '',
+          senderId: replyTo.senderId,
+          type: replyTo.type,
+          senderName: replyTo.senderName || ''
+        };
+        
+        // Solo incluir imageUrl si existe, Firestore no acepta undefined
+        if (replyTo.imageUrl) {
+          sanitizedReplyTo.imageUrl = replyTo.imageUrl;
+        }
+        
+        messageObj.replyTo = sanitizedReplyTo;
       }
       
       // Update unread counts for everyone except sender
