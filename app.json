@@ -4,7 +4,7 @@
     "slug": "localfy-app",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/Icon.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -16,6 +16,7 @@
     ],
     "ios": {
       "supportsTablet": true,
+      "bundleIdentifier": "com.zalabsdigital.localfy",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Localfy uses your location to find nearby businesses."
       }
@@ -25,7 +26,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"]
+      "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
+      "package": "com.zalabsdigital.localfy"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -54,6 +56,7 @@
       "EXPO_PUBLIC_FIREBASE_APP_ID": "${process.env.EXPO_PUBLIC_FIREBASE_APP_ID}",
       "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "${process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID}"
     },
-    "newArchEnabled": true
+    "newArchEnabled": true,
+    "scheme": "com.zalabsdigital.localfy"
   }
 }

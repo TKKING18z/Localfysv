@@ -5,10 +5,10 @@ const config = {
   slug: "localfy-app",
   version: "1.0.0",
   orientation: "portrait",
-  icon: "./assets/Icon.png",
+  icon: "./assets/icon.png",
   userInterfaceStyle: "light",
   splash: {
-    image: "./assets/Icon.png",
+    image: "./assets/icon.png",
     resizeMode: "contain",
     backgroundColor: "#ffffff"
   },
@@ -61,6 +61,9 @@ const config = {
     ]
   ],
   extra: {
+    eas: {
+      projectId: "5df16710-3ec7-47c3-b07c-a1cc5a36786e"
+    },
     EXPO_PUBLIC_FIREBASE_API_KEY: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
     EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
     EXPO_PUBLIC_FIREBASE_PROJECT_ID: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
