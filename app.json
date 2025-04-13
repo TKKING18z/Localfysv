@@ -57,6 +57,6 @@
       "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "${process.env.EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID}"
     },
     "newArchEnabled": true,
-    "scheme": "com.zalabsdigital.localfy"
+    "scheme": "localfy"
   }
 }

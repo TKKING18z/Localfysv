@@ -10,7 +10,8 @@ import {
   SafeAreaView,
   Image,
   RefreshControl,
-  TextInput
+  TextInput,
+  Platform
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -497,50 +498,6 @@ const MyBusinessesScreen: React.FC = () => {
       >
         <MaterialIcons name="add" size={32} color="white" />
       </TouchableOpacity>
-      
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNavigation}>
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('Home')}
-        >
-          <MaterialIcons name="home" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Inicio</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem} 
-          onPress={() => navigation.navigate('Map')}
-        >
-          <MaterialIcons name="explore" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Explorar</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItemCenter}
-          onPress={() => navigation.navigate('AddBusiness')}
-        >
-          <View style={styles.navItemCenterButton}>
-            <MaterialIcons name="add" size={28} color="white" />
-          </View>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('Favorites')}
-        >
-          <MaterialIcons name="favorite-border" size={24} color="#8E8E93" />
-          <Text style={styles.navItemText}>Favoritos</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity 
-          style={styles.navItem}
-          onPress={() => navigation.navigate('Profile')}
-        >
-          <MaterialIcons name="person" size={24} color="#007AFF" />
-          <Text style={styles.navItemTextActive}>Perfil</Text>
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 };
@@ -602,7 +559,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 80,
+    paddingBottom: Platform.OS === 'ios' ? 120 : 100, // Adjusted for the global tab bar
   },
   listContent: {
     padding: 16,
@@ -698,7 +655,7 @@ const styles = StyleSheet.create({
   floatingButton: {
     position: 'absolute',
     right: 20,
-    bottom: 80,
+    bottom: Platform.OS === 'ios' ? 100 : 80, // Adjusted for the global tab bar
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -712,55 +669,22 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   bottomNavigation: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    backgroundColor: 'white',
-    flexDirection: 'row',
-    height: 60,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 4,
+    display: 'none', // Hide it instead of removing to avoid breaking style references
   },
   navItem: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    display: 'none',
   },
   navItemCenter: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    display: 'none', 
   },
   navItemCenterButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    display: 'none',
   },
   navItemText: {
-    fontSize: 12,
-    color: '#8E8E93',
-    marginTop: 4,
+    display: 'none',
   },
   navItemTextActive: {
-    fontSize: 12,
-    color: '#007AFF',
-    marginTop: 4,
-    fontWeight: '600',
+    display: 'none',
   },
 });
 

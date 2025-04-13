@@ -4,7 +4,6 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
-import { googleAuthService } from '../services/googleAuthService';
 
 // Definición de tipo para el servicio de notificaciones
 interface NotificationService {
@@ -27,7 +26,6 @@ interface AuthContextType {
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
-  signInWithGoogle: () => Promise<boolean>;
 }
 
 // Crear el contexto
@@ -142,33 +140,6 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
-  // Función para iniciar sesión con Google
-  const signInWithGoogle = async (): Promise<boolean> => {
-    try {
-      setIsGoogleLoading(true);
-      console.log('Starting Google sign in...');
-      
-      const result = await googleAuthService.signInWithGoogle();
-      
-      if (result.success) {
-        console.log('Google sign in successful');
-        return true;
-      } else {
-        console.error('Google sign in failed:', result.error);
-        if (result.error && result.error !== "Inicio de sesión con Google cancelado") {
-          Alert.alert('Error', result.error || 'No se pudo iniciar sesión con Google');
-        }
-        return false;
-      }
-    } catch (error: any) {
-      console.error('Unexpected error during Google sign in:', error);
-      Alert.alert('Error', 'Ha ocurrido un error inesperado al iniciar sesión con Google');
-      return false;
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
   // Función para registrar un nuevo usuario
   const register = async (email: string, password: string, name: string): Promise<boolean> => {
     try {
@@ -250,45 +221,53 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   // Función para actualizar el perfil
   const updateProfile = async (data: any): Promise<boolean> => {
     try {
+      setIsLoading(true);
+      
       if (!user) {
         throw new Error('No hay usuario autenticado');
       }
       
-      await user.updateProfile(data);
-      // Refrescar el usuario
-      await user.reload();
-      // Actualizar el estado para reflejar los cambios
-      const currentUser = firebase.auth().currentUser;
-      if (currentUser) {
-        setUser(currentUser);
-      } else {
-        setUser(null);
+      // Actualizar el perfil del usuario en Firestore
+      await firebase.firestore()
+        .collection('users')
+        .doc(user.uid)
+        .update({
+          ...data,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      
+      // Si hay cambios en displayName o photoURL, actualizar también en Firebase Auth
+      if (data.displayName || data.photoURL) {
+        await user.updateProfile({
+          displayName: data.displayName || user.displayName,
+          photoURL: data.photoURL || user.photoURL
+        });
       }
+      
       console.log('Profile updated successfully');
       return true;
     } catch (error: any) {
       console.error('Profile update error:', error.message);
       Alert.alert('Error al actualizar perfil', error.message);
       return false;
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // Proporcionar el contexto a los componentes hijos
-  return (
-    <AuthContext.Provider value={{
-      user,
-      isLoading,
-      loading: isLoading,
-      isGoogleLoading,
-      login,
-      register,
-      signUp,
-      logout,
-      resetPassword,
-      updateProfile,
-      signInWithGoogle
-    }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  // Valores del contexto
+  const value = {
+    user,
+    isLoading,
+    loading: isLoading,
+    isGoogleLoading,
+    login,
+    register,
+    signUp,
+    logout,
+    resetPassword,
+    updateProfile,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

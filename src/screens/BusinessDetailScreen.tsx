@@ -27,23 +27,23 @@ import { useLocation } from '../hooks/useLocation';
 import { useAuth } from '../context/AuthContext';
 import { firebaseService } from '../services/firebaseService';
 import { Promotion } from '../types/businessTypes';
-// Comentamos esta importación ya que no se utiliza directamente
-// import { chatService } from '../../services/ChatService';
-// Add the import for ChatContext
 import { useChat } from '../context/ChatContext';
 import { useCart } from '../context/CartContext';
 import firebase from 'firebase/compat/app';
 
-// Components
-import BusinessHoursView from '../components/BusinessHoursView';
-import PaymentMethodsView from '../components/PaymentMethodsView';
-import EnhancedGallery from '../components/EnhancedGallery';
-// Removed import for VideoPlayer
-import SocialLinks from '../components/SocialLinks';
-import MenuViewer from '../components/MenuViewer';
-import ReviewForm from '../../components/reviews/ReviewForm';
-import PromoCard from '../components/promotions/PromoCard';
-import ReviewList from '../components/ReviewList'; // Use the component we updated
+// Importar componentes modularizados
+import {
+  BusinessHeader,
+  BusinessTabs,
+  BusinessInfoTab,
+  BusinessGalleryTab,
+  BusinessMenuTab,
+  BusinessPromotionsTab,
+  BusinessReservationsTab,
+  BusinessReviewsTab,
+  BusinessActionButtons,
+  ReviewFormModal,
+} from '../components/businessDetail';
 
 // Constants
 const HEADER_HEIGHT = 350;
@@ -68,9 +68,7 @@ const BusinessDetailScreen: React.FC = () => {
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
   const { user } = useAuth();
-  // Update useChat to extract refreshConversations
   const { createConversation, refreshConversations } = useChat();
-  // Añadir useCart para acceder al carrito
   const { cart } = useCart();
   
   // Estados principales
@@ -84,7 +82,7 @@ const BusinessDetailScreen: React.FC = () => {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [loadingPromotions, setLoadingPromotions] = useState(false);
   const [isBusinessOwner, setIsBusinessOwner] = useState(false);
-  const [isLoading, setIsLoading] = useState(false); // Add this state for loading indicator
+  const [isLoading, setIsLoading] = useState(false);
   
   // Valores animados
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -144,7 +142,7 @@ const BusinessDetailScreen: React.FC = () => {
     
     // Iniciar animaciones en secuencia después de un pequeño retraso
     setTimeout(() => {
-      Animated.sequence(animations).start();
+      Animated.parallel(animations).start();
     }, 100);
   }, [actionButtonsY, tabBarOpacity]);
 
@@ -491,17 +489,16 @@ const BusinessDetailScreen: React.FC = () => {
     return tabs;
   }, [business, isRestaurant]);
 
-  // Ya no necesitamos calcular la posición del indicador
-  // Eliminamos el cálculo obsoleto
-
   // Para manejar el scroll animado
   const handleScroll = Animated.event(
     [{ nativeEvent: { contentOffset: { y: scrollY } } }],
     { useNativeDriver: false }
   );
 
-  // Distancia formateada
-  const distance = business ? getFormattedDistance(business) : null;
+  // Distancia formateada - asegurando que siempre sea string | null
+  const distance: string | null = business 
+    ? (getFormattedDistance(business) || null) 
+    : null;
 
   // Load reviews when tab changes to 'reseñas'
   useEffect(() => {
@@ -514,7 +511,6 @@ const BusinessDetailScreen: React.FC = () => {
   const loadBusinessReviews = useCallback(async () => {
     try {
       setLoadingReviews(true);
-      // Implementation depends on your firebaseService structure
       const result = await firebaseService.reviews.getByBusinessId(businessId);
       if (result.success && result.data) {
         setReviews(result.data);
@@ -586,6 +582,17 @@ const BusinessDetailScreen: React.FC = () => {
     navigation.navigate('Cart');
   }, [navigation]);
 
+  // Add an useEffect to smooth out animation when changing tabs
+  useEffect(() => {
+    if (activeTab) {
+      // This resets the scroll position slightly to trigger header animation
+      scrollY.setValue(10);
+      setTimeout(() => {
+        scrollY.setValue(0);
+      }, 100);
+    }
+  }, [activeTab, scrollY]);
+
   // Estados renderizados
   if (loading) {
     return (
@@ -618,679 +625,135 @@ const BusinessDetailScreen: React.FC = () => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       
-      {/* Header flotante mejorado */}
-      <Animated.View style={[
-        styles.floatingHeader,
-        { 
-          opacity: headerAnimations.opacity,
-          transform: [{ translateY: headerAnimations.opacity.interpolate({
-            inputRange: [0, 1],
-            outputRange: [-50, 0]
-          })}]
-        }
-      ]}>
-        <TouchableOpacity 
-          style={styles.floatingBackButton}
-          onPress={() => navigation.goBack()}
-          accessibilityRole="button"
-          accessibilityLabel="Volver atrás"
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <MaterialIcons name="arrow-back-ios" size={22} color="#333" />
-        </TouchableOpacity>
-        <Text 
-          numberOfLines={1} 
-          style={styles.floatingHeaderTitle}
-          accessibilityRole="header"
-        >
-          {business.name}
-        </Text>
-        <Animated.View style={{ transform: [{ scale: favoriteScale }] }}>
-          <TouchableOpacity 
-            style={styles.floatingActionButton}
-            onPress={handleFavoriteToggle}
-            accessibilityRole="button"
-            accessibilityLabel={isFav ? "Quitar de favoritos" : "Añadir a favoritos"}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <MaterialIcons 
-              name={isFav ? "favorite" : "favorite-border"} 
-              size={24} 
-              color={isFav ? "#FF2D55" : "#333"} 
-            />
-          </TouchableOpacity>
-        </Animated.View>
-      </Animated.View>
-      
+      {/* Header */}
+      <BusinessHeader
+        business={business}
+        scrollY={scrollY}
+        getBusinessImage={getBusinessImage}
+        isFav={isFav}
+        isOpenNow={isOpenNow}
+        getPlaceholderColor={getPlaceholderColor}
+        headerAnimations={headerAnimations}
+        favoriteScale={favoriteScale}
+        handleFavoriteToggle={handleFavoriteToggle}
+        goBack={() => navigation.goBack()}
+        shareBusiness={shareBusiness}
+        distance={distance}
+      />
+
       <Animated.ScrollView 
         showsVerticalScrollIndicator={false}
         onScroll={handleScroll}
         scrollEventThrottle={16}
         contentContainerStyle={styles.scrollContent}
         overScrollMode="never"
-        refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={handleRefresh} 
-            tintColor="#007AFF"
-            colors={["#007AFF"]}
-          />
-        }
+        bounces={true}
+        alwaysBounceVertical={true}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#007AFF" colors={["#007AFF"]} />}
       >
-        {/* Business Image Header con animación */}
-        <Animated.View style={[styles.imageContainer, { height: headerAnimations.height }]}>
-          {getBusinessImage ? (
-            <Image 
-              source={{ uri: getBusinessImage }} 
-              style={styles.businessImage}
-              contentFit="cover"
-              transition={500}
-              cachePolicy="memory-disk"
-              contentPosition="center"
-              placeholder={Platform.OS === 'ios' ? null : { color: getPlaceholderColor }}
-              accessibilityLabel={`Imagen principal de ${business.name}`}
-            />
-          ) : (
-            <View style={[styles.placeholderImage, { backgroundColor: getPlaceholderColor }]}>
-              <Text style={styles.placeholderText}>{business.name.charAt(0).toUpperCase()}</Text>
-            </View>
-          )}
-          
-          {/* Gradiente mejorado para visibilidad */}
-          <LinearGradient
-            colors={['rgba(0,0,0,0.8)', 'transparent', 'rgba(0,0,0,0.5)']}
-            style={styles.headerGradient}
-            locations={[0, 0.4, 1]}
+        {/* Business Details */}
+        <View style={styles.detailsContainer}>
+          {/* Tabs */}
+          <BusinessTabs
+            availableTabs={availableTabs}
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            tabBarOpacity={tabBarOpacity}
+            isTouristAttraction={isTouristAttraction}
           />
           
-          {/* Header Buttons con efecto al presionar */}
-          <View style={styles.headerButtons}>
-            <TouchableOpacity 
-              style={styles.iconButton}
-              onPress={() => navigation.goBack()}
-              activeOpacity={0.7}
-              accessibilityRole="button"
-              accessibilityLabel="Volver atrás"
-            >
-              <MaterialIcons name="arrow-back-ios" size={22} color="white" />
-            </TouchableOpacity>
-            
-            <View style={styles.headerRightButtons}>
-              <TouchableOpacity 
-                style={styles.iconButton}
-                onPress={shareBusiness}
-                activeOpacity={0.7}
-                accessibilityRole="button"
-                accessibilityLabel="Compartir negocio"
-              >
-                <MaterialIcons name="share" size={22} color="white" />
-              </TouchableOpacity>
-              
-              <Animated.View style={{ 
-                transform: [{ scale: favoriteScale }],
-                marginLeft: 12
-              }}>
-                <TouchableOpacity 
-                  style={[
-                    styles.iconButton,
-                    isFav && styles.favoriteIconButton
-                  ]}
-                  onPress={handleFavoriteToggle}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  accessibilityLabel={isFav ? "Quitar de favoritos" : "Añadir a favoritos"}
-                >
-                  <MaterialIcons 
-                    name={isFav ? "favorite" : "favorite-border"} 
-                    size={22} 
-                    color="white" 
-                  />
-                </TouchableOpacity>
-              </Animated.View>
-            </View>
-          </View>
-          
-          {/* Nombre del negocio flotante animado */}
-          <Animated.View style={[
-            styles.overlayBusinessNameContainer,
-            { opacity: headerAnimations.nameOpacity }
-          ]}>
-            <Text 
-              style={styles.overlayBusinessName}
-              numberOfLines={2}
-              accessibilityRole="header"
-            >
-              {business.name}
-            </Text>
-            <View style={styles.ratingContainer}>
-              <MaterialIcons name="star" size={16} color="#FFCC00" />
-              <Text style={styles.ratingText}>
-                {(business as any).averageRating?.toFixed(1) || "Nuevo"}
-              </Text>
-            </View>
-          </Animated.View>
-          
-          {/* Estado de apertura con diseño mejorado */}
-          {isOpenNow !== null && (
-            <View style={[
-              styles.openStatusBadge,
-              isOpenNow ? styles.openBadge : styles.closedBadge
-            ]}>
-              <View style={[
-                styles.statusDot,
-                isOpenNow ? styles.openDot : styles.closedDot
-              ]} />
-              <Text style={styles.openStatusText}>
-                {isOpenNow ? 'Abierto ahora' : 'Cerrado'}
-              </Text>
-            </View>
-          )}
-        </Animated.View>
-        
-        {/* Business Details con diseño mejorado */}
-        <View style={styles.detailsContainer}>
-          <Text 
-            style={styles.businessName}
-            accessibilityRole="header"
-            numberOfLines={2}
-          >
-            {business.name}
-          </Text>
-          
-          <View style={styles.infoRow}>
-            <View style={styles.tagContainer}>
-              <Text style={styles.categoryTag}>{business.category}</Text>
-            </View>
-            
-            {distance && (
-              <View style={styles.distanceContainer}>
-                <MaterialIcons name="location-on" size={16} color="#8E8E93" />
-                <Text style={styles.distanceText}>{distance}</Text>
-              </View>
+          {/* Tab Content */}
+          <View style={styles.tabContentContainer}>
+            {activeTab === 'info' && (
+              <BusinessInfoTab
+                business={business}
+                handleCallBusiness={handleCallBusiness}
+                handleEmailBusiness={handleEmailBusiness}
+                navigation={navigation}
+              />
             )}
-          </View>
-          
-          {/* Tabs de navegación animados */}
-          <Animated.View 
-            style={[
-              styles.tabsContainer,
-              { opacity: tabBarOpacity }
-            ]}
-            accessibilityRole="tablist"
-          >
-            {availableTabs.map(tab => (
-              <TouchableOpacity 
-                key={tab}
-                style={[styles.tab, activeTab === tab && styles.activeTab]} 
-                onPress={() => setActiveTab(tab)}
-                activeOpacity={0.8}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: activeTab === tab }}
-                accessibilityLabel={`Pestaña ${tab}`}
-              >
-                <MaterialIcons 
-                  name={
-                    tab === 'info' ? 'info' :
-                    tab === 'gallery' ? 'photo-library' :
-                    tab === 'menu' ? (isTouristAttraction ? 'hiking' : 'restaurant-menu') :
-                    tab === 'promociones' ? 'local-offer' :
-                    tab === 'reservas' ? 'event-available' : 'rate-review'
-                  } 
-                  size={24} 
-                  color={activeTab === tab ? "#FFFFFF" : "#007aff"} 
-                />
-                <Text 
-                  numberOfLines={tab === 'info' ? 1 : undefined}  // Ensure "Información" stays on one line
-                  ellipsizeMode="tail"
-                  style={[styles.tabText, activeTab === tab && styles.activeTabText]}
-                >
-                  {tab === 'info' ? 'Información' :
-                   tab === 'gallery' ? 'Galería' :
-                   tab === 'menu' ? (isTouristAttraction ? 'Planes' : 'Menú') :
-                   tab === 'promociones' ? 'Promos' :
-                   tab === 'reservas' ? 'Reservas' : 'Reseñas'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-            {/* Eliminamos el indicador animado ya que no lo necesitamos más */}
-          </Animated.View>
-          
-          {/* Contenido de la pestaña de Información */}
-          {activeTab === 'info' && (
-            <>
-              <View style={styles.card}>
-                <Text style={styles.cardSectionTitle}>Descripción</Text>
-                <Text style={styles.description}>{business.description || "No hay descripción disponible."}</Text>
-              </View>
-              
-              {/* Información de horarios */}
-              {business.businessHours && (
-                <View style={styles.card}>
-                  <BusinessHoursView hours={business.businessHours} />
-                </View>
-              )}
-              
-              {/* Información de métodos de pago */}
-              {business.paymentMethods && business.paymentMethods.length > 0 && (
-                <View style={styles.card}>
-                  <PaymentMethodsView methods={business.paymentMethods} />
-                </View>
-              )}
-
-              {/* Botón para realizar pago */}
-              <TouchableOpacity
-                style={styles.paymentButton}
-                onPress={() =>
-                  navigation.navigate('Payment', {
-                    businessId: business.id,
-                    businessName: business.name,
-                    amount: 100, // Puedes reemplazarlo con un valor dinámico
-                  })
-                }
-              >
-                <Text style={styles.paymentButtonText}>Realizar Pago</Text>
-              </TouchableOpacity>
-              
-              {/* Información de contacto mejorada */}
-              <View style={styles.card}>
-                <Text style={styles.cardSectionTitle}>Información de contacto</Text>
-                {business.phone && (
-                  <TouchableOpacity 
-                    style={styles.contactItem}
-                    onPress={handleCallBusiness}
-                    activeOpacity={0.6}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Llamar a ${business.phone}`}
-                  >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
-                      <MaterialIcons name="phone" size={20} color="white" />
-                    </View>
-                    <Text style={styles.contactText}>{business.phone}</Text>
-                    <MaterialIcons name="arrow-forward-ios" size={18} color="#8E8E93" style={{marginLeft: 'auto'}} />
-                  </TouchableOpacity>
-                )}
-                {business.email && (
-                  <TouchableOpacity 
-                    style={styles.contactItem}
-                    onPress={handleEmailBusiness}
-                    activeOpacity={0.6}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Enviar correo a ${business.email}`}
-                  >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
-                      <MaterialIcons name="email" size={20} color="white" />
-                    </View>
-                    <Text style={styles.contactText}>{business.email}</Text>
-                    <MaterialIcons name="arrow-forward-ios" size={18} color="#8E8E93" style={{marginLeft: 'auto'}} />
-                  </TouchableOpacity>
-                )}
-                {business.address && (
-                  <View style={styles.contactItem}>
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
-                      <MaterialIcons name="place" size={20} color="white" />
-                    </View>
-                    <Text style={styles.contactText}>{business.address}</Text>
-                  </View>
-                )}
-                {business.website && (
-                  <TouchableOpacity 
-                    style={styles.contactItem}
-                    onPress={() => {
-                      let url = business.website || '';
-                      if (!url.startsWith('http://') && !url.startsWith('https://')) {
-                        url = 'https://' + url;
-                      }
-                      Linking.openURL(url);
-                    }}
-                    activeOpacity={0.6}
-                    accessibilityRole="link"
-                    accessibilityLabel={`Visitar sitio web ${business.website}`}
-                  >
-                    <View style={[styles.contactIconCircle, {backgroundColor: '#007aff'}]}>
-                      <MaterialIcons name="public" size={20} color="white" />
-                    </View>
-                    <Text style={[styles.contactText, styles.websiteText]} numberOfLines={1}>{business.website}</Text>
-                    <MaterialIcons name="arrow-forward-ios" size={18} color="#8E8E93" style={{marginLeft: 'auto'}} />
-                  </TouchableOpacity>
-                )}
-                {!business.phone && !business.email && !business.address && !business.website && (
-                  <Text style={styles.noInfoText}>No hay información de contacto disponible</Text>
-                )}
-              </View>
-              
-              {/* Enlaces a redes sociales */}
-              {business.socialLinks && Object.keys(business.socialLinks).length > 0 && (
-                <View style={styles.card}>
-                  <Text style={styles.cardSectionTitle}>Redes Sociales</Text>
-                  <SocialLinks links={business.socialLinks} />
-                </View>
-              )}
-            </>
-          )}
-          
-          {/* Contenido de la pestaña de Galería */}
-          {activeTab === 'gallery' && (
-            <>
-              {business.images && business.images.length > 0 ? (
-                <View style={styles.galleryCard}>
-                  <Text style={styles.cardSectionTitle}>Galería de imágenes</Text>
-                  <EnhancedGallery images={business.images} />
-                </View>
-              ) : (
-                <View style={styles.emptyCard}>
-                  <MaterialIcons name="photo-library" size={48} color="#E5E5EA" />
-                  <Text style={styles.emptyCardText}>No hay imágenes disponibles</Text>
-                </View>
-              )}
-            </>
-          )}
-          
-          {/* Contenido de la pestaña de Menú */}
-          {activeTab === 'menu' && (
-            <>
-              {(business.menu || business.menuUrl) ? (
-                <View style={[styles.card, { paddingBottom: 0 }]}>
-                  <Text style={styles.cardSectionTitle}>
-                    {isTouristAttraction ? 'Planes y Actividades' : 'Menú'}
-                  </Text>
-                  <View style={{ height: dimensions.height * 0.6 }}>
-                    <MenuViewer 
-                      menu={business.menu} 
-                      menuUrl={business.menuUrl} 
-                      viewType={isTouristAttraction ? 'tourism' : 'restaurant'}
-                      businessId={business.id}
-                      businessName={business.name}
-                    />
-                  </View>
-                </View>
-              ) : (
-                <View style={styles.emptyCard}>
-                  <MaterialIcons 
-                    name={isTouristAttraction ? "hiking" : "restaurant-menu"} 
-                    size={48} 
-                    color="#E5E5EA" 
-                  />
-                  <Text style={styles.emptyCardText}>
-                    {isTouristAttraction ? 'No hay planes disponibles' : 'No hay menú disponible'}
-                  </Text>
-                </View>
-              )}
-            </>
-          )}
-          
-          {/* Contenido de la pestaña de Promociones */}
-          {activeTab === 'promociones' && (
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.cardSectionTitle}>Promociones</Text>
-                {isBusinessOwner && (
-                  <TouchableOpacity 
-                    style={styles.managementButton}
-                    onPress={navigateToPromotions}
-                  >
-                    <MaterialIcons name="edit" size={20} color="#007AFF" />
-                    <Text style={styles.managementButtonText}>Gestionar</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              
-              {loadingPromotions ? (
-                <ActivityIndicator size="large" color="#007AFF" style={{marginVertical: 20}} />
-              ) : promotions.length > 0 ? (
-                <ScrollView 
-                  horizontal 
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.promotionsScrollContent}
-                >
-                  {promotions.map((promo) => (
-                    <View key={promo.id} style={styles.promotionItemContainer}>
-                      <PromoCard promotion={promo} compact={true} />
-                    </View>
-                  ))}
-                </ScrollView>
-              ) : (
-                <View style={styles.emptyStateContainer}>
-                  <MaterialIcons name="local-offer" size={48} color="#E5E5EA" />
-                  <Text style={styles.emptyStateText}>No hay promociones disponibles</Text>
-                </View>
-              )}
-
-              {!isBusinessOwner && promotions.length > 0 && (
-                <TouchableOpacity 
-                  style={styles.viewAllButton}
-                  onPress={navigateToPromotions}
-                >
-                  <Text style={styles.viewAllButtonText}>Ver todas las promociones</Text>
-                  <MaterialIcons name="arrow-forward" size={16} color="#007AFF" />
-                </TouchableOpacity>
-              )}
-            </View>
-          )}
-
-          {/* Contenido de la pestaña de Reservas */}
-          {activeTab === 'reservas' && (
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.cardSectionTitle}>Reservaciones</Text>
-                {isBusinessOwner && (
-                  <TouchableOpacity 
-                    style={styles.managementButton}
-                    onPress={navigateToReservations}
-                  >
-                    <MaterialIcons name="edit" size={20} color="#007AFF" />
-                    <Text style={styles.managementButtonText}>Gestionar</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-              
-              <View style={styles.reservationInfoContainer}>
-                <MaterialIcons name="event-available" size={48} color="#007AFF" style={styles.reservationIcon} />
-                <Text style={styles.reservationTitle}>
-                  {isBusinessOwner 
-                    ? "Gestiona tus reservaciones"
-                    : "Reserva en " + business.name}
-                </Text>
-                <Text style={styles.reservationDescription}>
-                  {isBusinessOwner 
-                    ? "Administra todas las reservaciones de tu negocio, confirma o rechaza solicitudes y configura tu disponibilidad."
-                    : "Realiza una reservación en este negocio de manera fácil y rápida. Selecciona la fecha, hora y número de personas."}
-                </Text>
-                
-                <TouchableOpacity 
-                  style={styles.reservationButton}
-                  onPress={navigateToReservations}
-                >
-                  <LinearGradient
-                    colors={isBusinessOwner ? ['#FF9500', '#FF2D55'] : ['#007AFF', '#00C2FF']}
-                    style={styles.reservationButtonGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    <MaterialIcons 
-                      name={isBusinessOwner ? "event-note" : "event-available"} 
-                      size={22} 
-                      color="white" 
-                    />
-                    <Text style={styles.reservationButtonText}>
-                      {isBusinessOwner ? "Gestionar Reservaciones" : "Hacer Reservación"}
-                    </Text>
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
-            </View>
-          )}
-
-          {/* Contenido de la pestaña de Reseñas */}
-          {activeTab === 'reseñas' && (
-            <View style={styles.card}>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.cardSectionTitle}>Reseñas</Text>
-              </View>
-              
-              <ReviewList 
-                businessId={businessId}
+            
+            {activeTab === 'gallery' && (
+              <BusinessGalleryTab images={business.images} />
+            )}
+            
+            {activeTab === 'menu' && (
+              <BusinessMenuTab
+                menu={business.menu}
+                menuUrl={business.menuUrl}
+                isTouristAttraction={isTouristAttraction}
+                businessId={business.id}
+                businessName={business.name}
+              />
+            )}
+            
+            {activeTab === 'promociones' && (
+              <BusinessPromotionsTab
+                promotions={promotions}
+                loadingPromotions={loadingPromotions}
                 isBusinessOwner={isBusinessOwner}
+                navigateToPromotions={navigateToPromotions}
+              />
+            )}
+            
+            {activeTab === 'reservas' && (
+              <BusinessReservationsTab
+                isBusinessOwner={isBusinessOwner}
+                businessName={business.name}
+                navigateToReservations={navigateToReservations}
+              />
+            )}
+            
+            {activeTab === 'reseñas' && (
+              <BusinessReviewsTab
+                businessId={businessId}
                 business={business}
                 reviews={reviews}
+                isBusinessOwner={isBusinessOwner}
                 currentUserId={user?.uid || ""}
-                loading={loadingReviews}
-                onAddReview={() => setShowReviewForm(true)}
-                onReply={handleReplyReview}
-                onReport={handleReportReview}
+                loadingReviews={loadingReviews}
+                reviewActiveFilter={reviewActiveFilter}
+                reviewSortBy={reviewSortBy}
+                onShowReviewForm={() => setShowReviewForm(true)}
+                onReplyReview={handleReplyReview}
+                onReportReview={handleReportReview}
                 onEditReview={handleEditReview}
                 onDeleteReview={handleDeleteReview}
-                activeFilter={reviewActiveFilter}
                 onFilterChange={setReviewActiveFilter}
-                sortBy={reviewSortBy}
                 onSortChange={setReviewSortBy}
               />
-            </View>
-          )}
+            )}
+          </View>
         </View>
       </Animated.ScrollView>
       
-      {/* Botones de acción con animación de entrada */}
-      {(business?.phone || business?.createdBy) && (
-        <Animated.View style={[
-          styles.actionButtonsContainer,
-          { transform: [{ translateY: actionButtonsY }] }
-        ]}>
-          <View style={styles.actionButtonsWrapper}>
-            {business.phone && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.smallActionButton]}
-                onPress={handleCallBusiness}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Llamar al negocio"
-              >
-                <LinearGradient
-                  colors={GRADIENT_COLORS.email}
-                  style={styles.actionButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                >
-                  <MaterialIcons name="phone" size={28} color="white" />
-                  <Text style={styles.actionButtonText} numberOfLines={1}>Llamar</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-            
-            {/* Add new Chat button */}
-            {business.createdBy && business.createdBy !== user?.uid && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.smallActionButton]} 
-                onPress={handleStartChat}
-                activeOpacity={0.8}
-                disabled={isLoading}
-                accessibilityRole="button"
-                accessibilityLabel="Chatear con el negocio"
-              >
-                <LinearGradient
-                  colors={GRADIENT_COLORS.email}
-                  style={styles.actionButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                >
-                  {isLoading ? (
-                    <ActivityIndicator size="small" color="white" />
-                  ) : (
-                    <>
-                      <MaterialIcons name="chat" size={28} color="white" />
-                      <Text style={styles.actionButtonText} numberOfLines={1}>Chatear</Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-            
-            {business.acceptsReservations !== false && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.smallActionButton]}
-                onPress={navigateToReservations}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Hacer reservación"
-              >
-                <LinearGradient
-                  colors={GRADIENT_COLORS.email}
-                  style={styles.actionButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                >
-                  <MaterialIcons name="event-available" size={28} color="white" />
-                  <Text style={styles.actionButtonText} numberOfLines={1}>Reservar</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-            
-            {/* Botón de carrito integrado */}
-            {cart.items.length > 0 && (
-              <TouchableOpacity 
-                style={[styles.actionButton, styles.smallActionButton]}
-                onPress={handleGoToCart}
-                activeOpacity={0.8}
-                accessibilityRole="button"
-                accessibilityLabel="Ver carrito"
-              >
-                <LinearGradient
-                  colors={GRADIENT_COLORS.call}
-                  style={styles.actionButtonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 0, y: 1 }}
-                >
-                  <View style={styles.cartIconContainer}>
-                    <MaterialIcons name="shopping-cart" size={28} color="white" />
-                    {cart.items.length > 0 && (
-                      <View style={styles.cartBadge}>
-                        <Text style={styles.cartBadgeText}>{cart.items.length}</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.actionButtonText} numberOfLines={1}>Carrito</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-          </View>
-        </Animated.View>
-      )}
+      {/* Action Buttons */}
+      <BusinessActionButtons
+        business={business}
+        hasPhone={!!business.phone}
+        hasCreator={!!business.createdBy}
+        userIsCreator={user?.uid === business.createdBy}
+        isLoading={isLoading}
+        cartItemsCount={cart.items.length}
+        acceptsReservations={business.acceptsReservations !== false}
+        actionButtonsY={actionButtonsY}
+        onCallBusiness={handleCallBusiness}
+        onStartChat={handleStartChat}
+        onGoToReservations={navigateToReservations}
+        onGoToCart={handleGoToCart}
+      />
 
-      {/* Modal de formulario de reseña */}
-      {showReviewForm && (
-        <View style={[styles.reviewFormOverlay, { zIndex: 2000 }]}>
-          <TouchableOpacity 
-            style={styles.reviewFormBackdrop}
-            onPress={() => setShowReviewForm(false)}
-            activeOpacity={1}
-          />
-          <View style={[styles.reviewFormContainer]}>
-            <View style={styles.reviewFormHeader}>
-              <Text style={styles.reviewFormTitle}>Añadir Reseña</Text>
-              <TouchableOpacity 
-                onPress={() => setShowReviewForm(false)}
-                hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
-              >
-                <MaterialIcons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-            
-            {/* ReviewForm */}
-            <ReviewForm
-              businessId={businessId}
-              businessName={business.name}
-              userId={user?.uid || ""}
-              userName={user?.displayName || user?.email?.split('@')[0] || "Usuario"}
-              userPhotoURL={user?.photoURL || undefined}
-              onSuccess={() => {
-                setShowReviewForm(false);
-                // Refrescar datos
-                handleRefresh();
-              }}
-              onCancel={() => setShowReviewForm(false)}
-            />
-          </View>
-        </View>
-      )}
+      {/* Review Form Modal */}
+      <ReviewFormModal
+        showReviewForm={showReviewForm}
+        businessId={businessId}
+        businessName={business.name}
+        userId={user?.uid || ""}
+        userName={user?.displayName || user?.email?.split('@')[0] || "Usuario"}
+        userPhotoURL={user?.photoURL || undefined}
+        onClose={() => setShowReviewForm(false)}
+        onSuccess={handleRefresh}
+      />
     </SafeAreaView>
   );
 };
@@ -1302,7 +765,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: Platform.OS === 'ios' ? 150 : 120,
   },
   loadingContainer: {
     flex: 1,
@@ -1352,592 +815,17 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
-  floatingHeader: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 50 : 40,
-    left: 0,
-    right: 0,
-    backgroundColor: 'rgba(255,255,255,0.95)',
-    zIndex: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-  },
-  floatingBackButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(240,240,245,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  floatingActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(240,240,245,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  floatingHeaderTitle: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginHorizontal: 16,
-  },
-  imageContainer: {
-    height: HEADER_HEIGHT,
-    position: 'relative',
-  },
-  headerGradient: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    top: 0,
-    zIndex: 1,
-  },
-  businessImage: {
-    width: '100%',
-    height: '100%',
-  },
-  placeholderImage: {
-    width: '100%',
-    height: '100%',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  placeholderText: {
-    fontSize: 72,
-    fontWeight: 'bold',
-    color: 'white',
-  },
-  headerButtons: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 50 : 40,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    zIndex: 2,
-  },
-  headerRightButtons: {
-    flexDirection: 'row',
-  },
-  iconButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
-    elevation: 3,
-  },
-  favoriteIconButton: {
-    backgroundColor: 'rgba(255, 45, 85, 0.8)',
-  },
-  overlayBusinessNameContainer: {
-    position: 'absolute',
-    bottom: 80,
-    left: 20,
-    right: 20,
-    zIndex: 2,
-  },
-  overlayBusinessName: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 8,
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: 'flex-start',
-  },
-  ratingText: {
-    color: 'white',
-    fontSize: 16,
-    fontWeight: 'bold',
-    marginLeft: 4,
-  },
   detailsContainer: {
-    padding: 20,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     backgroundColor: '#F5F7FF',
     marginTop: -24,
-    paddingTop: 24,
-  },
-  businessName: {
-    fontSize: 26,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 10,
-  },
-  openStatusBadge: {
-    position: 'absolute',
-    right: 20,
-    bottom: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 2,
-    elevation: 4,
-    zIndex: 2,
-  },
-  openBadge: {
-    backgroundColor: 'rgba(52, 199, 89, 0.9)',
-  },
-  closedBadge: {
-    backgroundColor: 'rgba(255, 59, 48, 0.9)',
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  openDot: {
-    backgroundColor: '#FFFFFF',
-  },
-  closedDot: {
-    backgroundColor: '#FFFFFF',
-  },
-  openStatusText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  tagContainer: {
-    flexDirection: 'row',
-  },
-  categoryTag: {
-    backgroundColor: '#007AFF20',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    color: '#007AFF',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  distanceContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(142, 142, 147, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  distanceText: {
-    fontSize: 14,
-    color: '#8E8E93',
-    marginLeft: 4,
-    fontWeight: '500',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    flexWrap: 'wrap',
-    marginBottom: 20,
-    position: 'relative',
-    backgroundColor: '#F6F9FF',
-    borderRadius: 16,
-    padding: 10,
-    marginTop: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  tab: {
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 12,
-    borderRadius: 12,
-    zIndex: 1,
-    marginVertical: 4,
-    width: '22%',
-  },
-  activeTab: {
-    backgroundColor: '#007aff',
-  },
-  tabText: {
-    fontSize: 11,
-    color: '#666666',
-    marginTop: 6,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  activeTabText: {
-    color: 'white',
-    fontWeight: 'bold',
-  },
-  tabIndicator: {
-    display: 'none', // Quitamos el indicador para usar un estilo más simple
-  },
-  card: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    borderLeftWidth: 3,
-    borderLeftColor: '#007aff',
-  },
-  cardSectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#007aff',
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,122,255,0.1)',
-  },
-  description: {
-    fontSize: 16,
-    lineHeight: 24,
-    color: '#666666',
-  },
-  contactItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,122,255,0.08)',
-    paddingHorizontal: 6,
-  },
-  contactIconCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 14,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 2,
-  },
-  contactText: {
-    fontSize: 16,
-    color: '#2C3E50',
+    paddingTop: 20,
     flex: 1,
-    fontWeight: '500',
   },
-  websiteText: {
-    color: '#007aff',
-  },
-  noInfoText: {
-    fontSize: 16,
-    color: '#8E8E93',
-    fontStyle: 'italic',
-    textAlign: 'center',
-    marginTop: 16,
-    padding: 10,
-    backgroundColor: 'rgba(142,142,147,0.05)',
-    borderRadius: 8,
-  },
-  galleryCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  emptyCard: {
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 24,
-    marginBottom: 16,
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 3,
-  },
-  emptyCardText: {
-    fontSize: 16,
-    color: '#8E8E93',
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  actionButtonsContainer: {
-    backgroundColor: '#FFFFFF',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 16,
-    paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-    paddingHorizontal: 10,
-    marginBottom: -5,
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    width: '100%',
-  },
-  actionButtonsWrapper: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-evenly', // Change to space-evenly for better distribution
-    alignItems: 'center',
-    width: '100%', // Ensure it takes full width
-  },
-  actionButton: {
-    width: 70,
-    height: 70,
-    borderRadius: 18,
-    margin: 5,
-    overflow: 'hidden',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  smallActionButton: {
-    width: 72, // Slightly wider to accommodate text
-    height: 60,
-    borderRadius: 16,
-    marginHorizontal: -44, // Increased horizontal margin for more separation
-  },
-  actionButtonGradient: {
-    flexDirection: 'column',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 8,
-    width: '100%',
-    height: '100%',
-  },
-  actionButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 12,
-    marginTop: 6,
-    textAlign: 'center',
-    width: '100%', // Ensure text has full width of button
-  },
-  reviewFormOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  reviewFormBackdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.6)',
-  },
-  reviewFormContainer: {
-    width: '95%',
-    height: '90%',
-    backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 0,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 8,
-  },
-  reviewFormHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F0F0F5',
-  },
-  reviewFormTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333333',
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  managementButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 122, 255, 0.1)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-  },
-  managementButtonText: {
-    color: '#007AFF',
-    fontWeight: '600',
-    fontSize: 14,
-    marginLeft: 4,
-  },
-  promotionsScrollContent: {
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-  },
-  promotionItemContainer: {
-    marginHorizontal: 8,
-  },
-  emptyStateContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  emptyStateText: {
-    marginTop: 12,
-    color: '#8E8E93',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  viewAllButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 16,
-    paddingVertical: 8,
-  },
-  viewAllButtonText: {
-    color: '#007AFF',
-    fontWeight: '600',
-    fontSize: 16,
-    marginRight: 4,
-  },
-  reservationInfoContainer: {
-    alignItems: 'center',
-    padding: 16,
-  },
-  reservationIcon: {
-    marginBottom: 16,
-  },
-  reservationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  reservationDescription: {
-    fontSize: 14,
-    color: '#666666',
-    textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
-  },
-  reservationButton: {
-    width: '100%',
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 4,
-  },
-  reservationButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-  },
-  reservationButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-    marginLeft: 8,
-  },
-  paymentButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    marginTop: 20,
-  },
-  paymentButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  cartIconContainer: {
-    position: 'relative',
-  },
-  cartBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -10,
-    backgroundColor: '#FF3B30',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-    borderWidth: 1.5,
-    borderColor: 'white',
-  },
-  cartBadgeText: {
-    color: 'white',
-    fontSize: 10,
-    fontWeight: 'bold',
+  tabContentContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
 });
 

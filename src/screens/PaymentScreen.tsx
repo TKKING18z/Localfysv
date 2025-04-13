@@ -27,7 +27,7 @@ type PaymentScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Paym
 // En un emulador Android puedes usar 10.0.2.2 para acceder a localhost
 // En un emulador iOS puedes usar localhost
 // Para dispositivos físicos, usa tu dirección IP de la red local (ej: 192.168.1.X)
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001'; // Puerto configurado en server/.env
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://localfy-payment-server.onrender.com';
 // const API_URL = 'http://10.0.2.2:3001'; // Para emulador Android
 // const API_URL = 'http://192.168.X.X:3001'; // Para dispositivos físicos (reemplaza X.X con tu IP)
 

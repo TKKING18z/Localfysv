@@ -481,6 +481,22 @@ const ProfileScreen: React.FC = () => {
             <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
           
+          {/* Add Reservations Link */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('MyReservations', { 
+              isBusinessView: profile?.userType === 'Propietario' 
+            })}
+          >
+            <MaterialIcons name="event" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>
+              {profile?.userType === 'Propietario'
+                ? 'Gestionar Reservaciones'
+                : 'Mis Reservaciones'}
+            </Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
           {/* Add Orders Link */}
           <TouchableOpacity 
             style={styles.menuItem}

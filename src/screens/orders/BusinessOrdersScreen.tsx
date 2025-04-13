@@ -11,7 +11,7 @@ import {
   RefreshControl,
   TextInput,
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../navigation/AppNavigator';
@@ -42,6 +42,15 @@ const BusinessOrdersScreen: React.FC = () => {
   const [filteredOrders, setFilteredOrders] = useState<ExtendedOrderSummary[]>([]);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Hide the React Navigation header when this screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      navigation.setOptions({
+        headerShown: false
+      });
+    }, [navigation])
+  );
   
   // Load orders on component mount
   useEffect(() => {
@@ -490,7 +499,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#E5E5EA',
   },
   backButton: {
-    padding: 4,
+    padding: 8,
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
     fontSize: 18,
@@ -498,6 +511,7 @@ const styles = StyleSheet.create({
     color: '#000',
     flex: 1,
     textAlign: 'center',
+    marginHorizontal: 10,
   },
   refreshButton: {
     padding: 4,

@@ -32,6 +32,7 @@ import MyBusinessesScreen from '../screens/business/MyBusinessesScreen';
 // Importar nuevas pantallas
 import PromotionsScreen from '../screens/business/PromotionsScreen';
 import ReservationsScreen from '../screens/business/ReservationsScreen';
+import MyReservationsScreen from '../screens/reservations/MyReservationsScreen';
 
 // Importar pantallas de chat
 import ConversationsScreen from '../screens/chat/ConversationsScreen';
@@ -93,6 +94,11 @@ export type RootStackParamList = {
     businessName: string;
     isNewBusiness?: boolean;
   };
+  // Nueva ruta para gestión de reservaciones
+  MyReservations: {
+    businessId?: string;
+    isBusinessView?: boolean;
+  };
   // Rutas para el chat
   Conversations: undefined;
   Chat: { conversationId: string };
@@ -145,16 +151,16 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const CustomAddButton = ({onPress}: {onPress: () => void}) => (
   <TouchableOpacity
     style={{
-      top: -20,
+      top: Platform.OS === 'ios' ? -30 : -25,
       justifyContent: 'center',
       alignItems: 'center',
     }}
     onPress={onPress}
   >
     <View style={{
-      width: 56,
-      height: 56,
-      borderRadius: 28,
+      width: 60,
+      height: 60,
+      borderRadius: 30,
       backgroundColor: '#007AFF',
       justifyContent: 'center',
       alignItems: 'center',
@@ -164,7 +170,7 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
       shadowRadius: 8,
       elevation: 6,
     }}>
-      <MaterialIcons name="add" size={28} color="white" />
+      <MaterialIcons name="add" size={30} color="white" />
     </View>
   </TouchableOpacity>
 );
@@ -229,9 +235,11 @@ function MainTabs() {
         tabBarStyle: {
           elevation: 0,
           borderTopWidth: 0,
-          height: 60,
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
+          height: Platform.OS === 'ios' ? 85 : 70,
+          paddingBottom: Platform.OS === 'ios' ? 25 : 10,
+          paddingTop: 8,
+          borderTopLeftRadius: 25,
+          borderTopRightRadius: 25,
           backgroundColor: 'white',
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
@@ -435,6 +443,14 @@ const AppNavigator = () => {
             <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
             <Stack.Screen name="Promotions" component={PromotionsScreen} />
             <Stack.Screen name="Reservations" component={ReservationsScreen} />
+            <Stack.Screen 
+              name="MyReservations" 
+              component={MyReservationsScreen} 
+              options={{ 
+                title: 'Reservaciones', 
+                headerShown: false 
+              }} 
+            />
             
             {/* New Business Detail Enhancement Screens */}
             <Stack.Screen 

@@ -13,7 +13,8 @@ import {
   Alert,
   Modal,
   ScrollView,
-  Switch
+  Switch,
+  Platform
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -607,7 +608,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <Image
-            source={require('../../assets/Icon.png')}
+            source={require('../../assets/icon.png')}
             style={styles.logo}
           />
           <Text style={styles.title}>Localfy</Text>
@@ -1001,8 +1002,8 @@ const styles = StyleSheet.create({
     marginBottom: 16, // Add vertical spacing between rows
   },
   listContent: {
-    paddingBottom: 80,
-    paddingTop: 16, // Add padding at the top
+    paddingBottom: Platform.OS === 'ios' ? 150 : 120,
+    paddingTop: 16,
   },
   gridItemContainer: {
     width: '48%', // Ensure two cards fit in a row with spacing

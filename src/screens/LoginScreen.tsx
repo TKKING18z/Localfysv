@@ -23,6 +23,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import googleLogo from '../../assets/google_logo.png'; // Import the Google PNG logo
+import { useGoogleAuth, googleAuthService } from '../services/googleAuthService';
+import * as Google from 'expo-auth-session/providers/google';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -31,7 +33,10 @@ const { width } = Dimensions.get('window');
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
     // Usar el hook de autenticación actualizado
-    const { login, signInWithGoogle, isGoogleLoading, loading: authLoading } = useAuth();
+    const { login, isGoogleLoading, loading: authLoading } = useAuth();
+    
+    // Usar el hook de autenticación de Google
+    const { request, response, promptAsync } = useGoogleAuth();
     
     // Form state
     const [email, setEmail] = useState('');
@@ -45,6 +50,13 @@ const LoginScreen: React.FC = () => {
     const slideAnim = useRef(new Animated.Value(30)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const buttonAnim = useRef(new Animated.Value(1)).current;
+    
+    // Procesar la respuesta de Google cuando cambie
+    useEffect(() => {
+        if (response?.type) {
+            handleGoogleAuthResponse();
+        }
+    }, [response]);
     
     // Cargar credenciales guardadas
     useEffect(() => {
@@ -160,11 +172,49 @@ const LoginScreen: React.FC = () => {
         }
     };
     
+    // Nueva función para manejar la respuesta de autenticación de Google
+    const handleGoogleAuthResponse = async () => {
+        try {
+            setLoading(true);
+            
+            if (!response) {
+                return;
+            }
+            
+            // Convertir la respuesta a GoogleAuthResponse
+            // Para Google.useIdTokenAuthRequest, la respuesta success incluye params con id_token
+            const googleResponse = {
+                type: response.type,
+                params: {
+                    id_token: response.type === 'success' ? response.authentication?.idToken || '' : ''
+                }
+            };
+            
+            const result = await googleAuthService.handleSignInWithGoogle(googleResponse);
+            
+            if (!result.success && result.error) {
+                if (result.error !== "Inicio de sesión con Google cancelado") {
+                    Alert.alert("Error", result.error);
+                }
+            }
+        } catch (error) {
+            console.error("Error procesando autenticación de Google:", error);
+            Alert.alert("Error", "No se pudo iniciar sesión con Google");
+        } finally {
+            setLoading(false);
+        }
+    };
+    
     // Nueva función para manejar el login con Google
     const handleGoogleLogin = async () => {
         try {
             console.log("Iniciando proceso de login con Google");
-            await signInWithGoogle();
+            if (!request) {
+                Alert.alert("Error", "No se pudo iniciar el proceso de autenticación con Google");
+                return;
+            }
+            
+            await promptAsync();
         } catch (error) {
             console.error("Error al intentar login con Google:", error);
             Alert.alert("Error", "No se pudo iniciar sesión con Google");
@@ -195,7 +245,7 @@ const LoginScreen: React.FC = () => {
                 >
                     <View style={styles.logoWrapper}>
                         <Image
-                            source={require('../../assets/Icon.png')}
+                            source={require('../../assets/icon.png')}
                             style={styles.logo}
                         />
                     </View>
