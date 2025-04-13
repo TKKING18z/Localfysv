@@ -7,7 +7,7 @@ node_modules/
 .expo/
 dist/
 web-build/
-expo-env.d.ts
+.expo-shared/
 
 # Native
 *.orig.*
@@ -31,15 +31,57 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
+.env.development
+.env.production
+.env.staging
 
 # typescript
 *.tsbuildinfo
-.env
+
+# Firebase config
 src/config/firebase.ts
 assets/GoogleService-Info-10.plist
 assets/google-services.json
 assets/GoogleService-Info.plist
-assets/google-services.json
-assets/GoogleService-Info.plist
-assets/google-services.json
-assets/GoogleService-Info.plist
+
+# iOS
+ios/build/
+ios/Pods/
+ios/Podfile.lock
+ios/*.xcodeproj/*
+!ios/*.xcodeproj/project.pbxproj
+!ios/*.xcodeproj/xcshareddata/
+!ios/*.xcworkspace/contents.xcworkspacedata
+
+# Android
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/app/debug/
+android/app/release/
+android/captures/
+android/gradlew
+android/gradlew.bat
+android/gradle/
+android/*.iml
+
+# Testing
+coverage/
+
+# Temporary files
+*.swp
+*.swo
+.tmp/
+tmp/
+
+# EAS
+ios/build-*
+eas.json
+
+# Editor directories
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace

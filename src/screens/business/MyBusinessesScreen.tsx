@@ -171,6 +171,13 @@ const MyBusinessesScreen: React.FC = () => {
         }
       } catch (error) {
         console.error('Error al obtener datos analíticos:', error);
+        // Verificar si el error está relacionado con SVG
+        if (error instanceof Error && 
+            (error.message.includes('UIManager') || 
+             error.message.includes('RNSVG') || 
+             error.message.includes('RNSVGRect'))) {
+          console.warn('Error relacionado con SVG. Los gráficos no estarán disponibles:', error.message);
+        }
         // Usar datos de muestra en caso de error
         setAnalytics(createSampleAnalyticsData(businessIds));
       }
@@ -178,6 +185,13 @@ const MyBusinessesScreen: React.FC = () => {
       setAnalyticsLoading(false);
     } catch (error) {
       console.error('Error loading analytics data:', error);
+      // Verificar si el error está relacionado con SVG
+      if (error instanceof Error && 
+          (error.message.includes('UIManager') || 
+           error.message.includes('RNSVG') || 
+           error.message.includes('RNSVGRect'))) {
+        console.warn('Error relacionado con SVG. Los gráficos no estarán disponibles:', error.message);
+      }
       // Usar datos de muestra en caso de error
       setAnalytics(createSampleAnalyticsData(businessIds));
       setAnalyticsLoading(false);
@@ -398,6 +412,16 @@ const MyBusinessesScreen: React.FC = () => {
             onPress={() => handleEditBusiness(item)}
           >
             <MaterialIcons name="edit" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
+            onPress={() => navigation.navigate('BusinessOrders', { 
+              businessId: item.id,
+              businessName: item.name
+            })}
+          >
+            <MaterialIcons name="shopping-basket" size={20} color="#007AFF" />
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -698,9 +722,9 @@ const styles = StyleSheet.create({
   floatingButton: {
     position: 'absolute',
     right: 20,
-    bottom: 80,
-    width: 56,
-    height: 56,
+    bottom: 90,
+    width: 55,
+    height: 55,
     borderRadius: 28,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
@@ -710,6 +734,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 3,
     elevation: 5,
+    borderWidth: 3,
+    borderColor: 'white',
   },
   bottomNavigation: {
     position: 'absolute',
@@ -718,7 +744,9 @@ const styles = StyleSheet.create({
     right: 0,
     backgroundColor: 'white',
     flexDirection: 'row',
-    height: 60,
+    height: 70,
+    paddingTop: 8,
+    paddingBottom: 10,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     shadowColor: '#000',
@@ -738,13 +766,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   navItemCenterButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: '#007AFF',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 15,
     shadowColor: '#007AFF',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -752,14 +780,14 @@ const styles = StyleSheet.create({
     elevation: 6,
   },
   navItemText: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#8E8E93',
-    marginTop: 4,
+    marginTop: 3,
   },
   navItemTextActive: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#007AFF',
-    marginTop: 4,
+    marginTop: 3,
     fontWeight: '600',
   },
 });

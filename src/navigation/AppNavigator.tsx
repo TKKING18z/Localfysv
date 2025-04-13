@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -6,7 +6,13 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet, AppState, Platform } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useChat, ChatProvider } from '../context/ChatContext';
+import { useOrders } from '../context/OrderContext';
 import * as Notifications from 'expo-notifications';
+import OrderStatusNotification from '../components/notifications/OrderStatusNotification';
+import { useAppInitialization } from '../hooks/useAppInitialization';
+
+// Añadir importaciones de NavigationService aquí para que estén disponibles globalmente
+import NavigationService, { navigationRef } from './services/NavigationService';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -18,6 +24,7 @@ import FavoritesScreen from '../screens/FavoritesScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import MapScreen from '../screens/MapScreen';
 import AddBusinessScreen from '../screens/AddBusinessScreen';
+import OnboardingScreen from '../screens/onboarding/OnboardingScreen';
 
 // New Screens for Business Detail Enhancements
 import BusinessHoursScreen from '../screens/business/BusinessHoursScreen';
@@ -46,7 +53,7 @@ import SupportScreen from '../screens/SupportScreen';
 import TermsConditionsScreen from '../screens/TermsConditionsScreen';
 
 // Importar pantalla de Payment
-import PaymentScreen from '../screens/PaymentScreen';
+import PaymentScreen from '../screens/tmp/PaymentScreen';
 
 // Importar pantalla de Cart
 import { CartScreen } from '../screens/CartScreen';
@@ -60,6 +67,9 @@ import OrdersListScreen from '../screens/orders/OrdersListScreen';
 // @ts-ignore
 import BusinessOrdersScreen from '../screens/orders/BusinessOrdersScreen';
 
+// Importar pantalla de carga de pedidos
+import OrderLoadingScreen from '../screens/orders/OrderLoadingScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Auth: undefined;
@@ -68,6 +78,12 @@ export type RootStackParamList = {
   ForgotPassword: undefined;
   MainTabs: { screen?: keyof MainTabParamList };  // Allow specifying which tab to navigate to
   BusinessDetail: { businessId: string };
+  // Add Onboarding screen to the param list
+  Onboarding: { 
+    onboardingContext?: { 
+      completeOnboarding: () => Promise<boolean> 
+    } 
+  };
   // Business enhancement screens
   BusinessHours: { initialHours?: any; callbackId?: string };
   PaymentMethods: { initialMethods?: string[]; callbackId?: string };
@@ -114,9 +130,14 @@ export type RootStackParamList = {
   // Nueva ruta para carrito
   Cart: undefined;
   // Nuevas rutas para ordenes
+  OrderLoading: {
+    orderId: string;
+    orderNumber: string;
+  };
   OrderConfirmation: { 
     orderId: string;
     orderNumber: string;
+    preloadedOrder?: any; // Permitir pasar los datos precargados
   };
   OrderDetails: { 
     orderId: string;
@@ -145,15 +166,15 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const CustomAddButton = ({onPress}: {onPress: () => void}) => (
   <TouchableOpacity
     style={{
-      top: -20,
+      top: -25,
       justifyContent: 'center',
       alignItems: 'center',
     }}
     onPress={onPress}
   >
     <View style={{
-      width: 56,
-      height: 56,
+      width: 55,
+      height: 55,
       borderRadius: 28,
       backgroundColor: '#007AFF',
       justifyContent: 'center',
@@ -163,21 +184,26 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
       shadowOpacity: 0.3,
       shadowRadius: 8,
       elevation: 6,
+      borderWidth: 3,
+      borderColor: 'white',
     }}>
       <MaterialIcons name="add" size={28} color="white" />
     </View>
+    <Text style={{
+      color: '#8E8E93',
+      fontSize: 11,
+      fontWeight: '500',
+      marginTop: 6,
+    }}>Añadir</Text>
   </TouchableOpacity>
 );
 
-// Hook useChat ya importado arriba
-
 // Bottom Tab Navigator
 function MainTabs() {
-  // Usamos el hook de chat, pero nos aseguramos que sea seguro
-  // Definimos un valor por defecto para evitar errores
+  // Reactivamos el contexto de chat
   const chatContext = useChat();
-  // Obtenemos el número de mensajes no leídos directamente del contexto
   const unreadTotal = chatContext?.unreadTotal || 0;
+  // const unreadTotal = 0; // Temporary fix
   
   return (
     <Tab.Navigator
@@ -229,7 +255,9 @@ function MainTabs() {
         tabBarStyle: {
           elevation: 0,
           borderTopWidth: 0,
-          height: 60,
+          height: 70,  // Reducir altura
+          paddingTop: 8, // Reducir padding superior
+          paddingBottom: 10, // Reducir padding inferior
           borderTopLeftRadius: 20,
           borderTopRightRadius: 20,
           backgroundColor: 'white',
@@ -238,6 +266,14 @@ function MainTabs() {
           shadowOpacity: 0.1,
           shadowRadius: 4,
           position: 'absolute',
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '500',
+          marginTop: 3,
+        },
+        tabBarIconStyle: {
+          marginTop: 3,
         },
         headerShown: false,
       })}
@@ -286,11 +322,268 @@ function MainTabs() {
 }
 
 // Authentication Flow Navigator
-const AuthStack = () => (
-  <Stack.Navigator screenOptions={{ headerShown: false }}>
-    <Stack.Screen name="Login" component={LoginScreen} />
-    <Stack.Screen name="Register" component={RegisterScreen} />
-    <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+const AuthStack = () => {
+  // Get the app initialization state to check if it's first launch
+  const { isFirstLaunch, completeOnboarding } = useAppInitialization();
+
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      {isFirstLaunch ? (
+        <Stack.Screen 
+          name="Onboarding" 
+          component={OnboardingScreen} 
+          initialParams={{ onboardingContext: { completeOnboarding } }}
+        />
+      ) : (
+        <>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Register" component={RegisterScreen} />
+          <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+        </>
+      )}
+    </Stack.Navigator>
+  );
+};
+
+// Componente interno para manejar el token de notificaciones
+const AppWithChat = () => (
+  <Stack.Navigator initialRouteName="MainTabs">
+    <Stack.Screen
+      name="MainTabs"
+      component={MainTabs}
+      options={{ headerShown: false }}
+    />
+    
+    <Stack.Screen 
+      name="BusinessDetail" 
+      component={BusinessDetailScreen} 
+      options={{ 
+        headerShown: true,
+        title: 'Detalles del Negocio'
+      }}
+    />
+    {/* Mantén solo esta definición de Payment */}
+    <Stack.Screen 
+      name="Payment" 
+      component={PaymentScreen} 
+      options={{
+        headerShown: true,
+        title: 'Realizar Pago',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF',
+      }} 
+    />
+    
+    {/* Agregar las nuevas pantallas */}
+    <Stack.Screen 
+      name="EditBusiness" 
+      component={EditBusinessScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Editar Negocio'
+      }} 
+    />
+    <Stack.Screen 
+      name="MyBusinesses" 
+      component={MyBusinessesScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Mis Negocios'
+      }} 
+    />
+    <Stack.Screen 
+      name="Promotions" 
+      component={PromotionsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Promociones'
+      }} 
+    />
+    <Stack.Screen 
+      name="Reservations" 
+      component={ReservationsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Reservaciones'
+      }} 
+    />
+    
+    {/* New Business Detail Enhancement Screens */}
+    <Stack.Screen 
+      name="BusinessHours" 
+      component={BusinessHoursScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Horarios de Atención',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    <Stack.Screen 
+      name="PaymentMethods" 
+      component={PaymentMethodsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Métodos de Pago',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    <Stack.Screen 
+      name="SocialLinks" 
+      component={SocialLinksScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Redes Sociales',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    <Stack.Screen 
+      name="MenuEditor" 
+      component={MenuEditorScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Editor de Menú',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    
+    {/* Añadir las pantallas del Centro de Ayuda */}
+    <Stack.Screen 
+      name="FAQs" 
+      component={FAQsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Preguntas Frecuentes'
+      }} 
+    />
+    <Stack.Screen 
+      name="Support" 
+      component={SupportScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Soporte'
+      }} 
+    />
+    <Stack.Screen 
+      name="TermsConditions" 
+      component={TermsConditionsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Términos y Condiciones'
+      }} 
+    />
+    
+    {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
+    <Stack.Screen 
+      name="Map" 
+      component={MapScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Mapa'
+      }} 
+    />
+    <Stack.Screen 
+      name="Favorites" 
+      component={FavoritesScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Favoritos'
+      }} 
+    />
+    <Stack.Screen 
+      name="Profile" 
+      component={ProfileScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Perfil'
+      }} 
+    />
+    <Stack.Screen 
+      name="AddBusiness" 
+      component={AddBusinessScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Añadir Negocio'
+      }} 
+    />
+    
+    {/* Chat screens */}
+    <Stack.Screen 
+      name="Conversations" 
+      component={ConversationsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Conversaciones'
+      }} 
+    />
+    <Stack.Screen 
+      name="Chat" 
+      component={ChatScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Chat'
+      }} 
+    />
+    
+    {/* Notifications screen */}
+    <Stack.Screen 
+      name="Notifications" 
+      component={NotificationsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Notificaciones'
+      }} 
+    />
+
+    {/* Cart screen */}
+    <Stack.Screen name="Cart" component={CartScreen} options={{ headerShown: false }} />
+    
+    {/* Order screens */}
+    <Stack.Screen 
+      name="OrderLoading" 
+      component={OrderLoadingScreen}
+      options={{ 
+        headerShown: false,
+        gestureEnabled: false // Desactivar gestos para evitar problemas de navegación
+      }} 
+    />
+    <Stack.Screen 
+      name="OrderConfirmation" 
+      component={OrderConfirmationScreen}
+      options={{ 
+        headerShown: false
+      }} 
+    />
+    <Stack.Screen 
+      name="OrderDetails" 
+      component={OrderDetailsScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Detalles del Pedido',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    <Stack.Screen 
+      name="OrdersList" 
+      component={OrdersListScreen}
+      options={{ 
+        headerShown: true,
+        title: 'Mis Pedidos',
+        headerStyle: { backgroundColor: '#FFFFFF' },
+        headerTintColor: '#007AFF'
+      }} 
+    />
+    <Stack.Screen 
+      name="BusinessOrders" 
+      component={BusinessOrdersScreen}
+      options={{ 
+        headerShown: false // Changed to false to avoid duplicate headers 
+      }} 
+    />
   </Stack.Navigator>
 );
 
@@ -298,254 +591,77 @@ const AuthStack = () => (
 const AppNavigator = () => {
   // Usar el hook de autenticación
   const { user, isLoading } = useAuth();
-  const responseListener = useRef<any>();
-  const notificationListener = useRef<any>();
-  const appState = useRef(AppState.currentState);
-  // Estados para manejar funciones del contexto
-  const [updateNotificationToken, setUpdateNotificationToken] = React.useState<((token: string) => Promise<void>) | undefined>(undefined);
-
-  // Configurar manejadores de notificaciones
-  useEffect(() => {
-    // Configurar cómo se manejarán las notificaciones cuando se reciban
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      }),
-    });
-    
-    // Escuchar cuando se reciben notificaciones mientras la app está abierta
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('[AppNavigator] Notification received in foreground:', notification);
-      // Aquí podrías reproducir un sonido, mostrar una alerta, etc.
-    });
-
-    // Escuchar cuando el usuario interactúa con una notificación
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('[AppNavigator] User tapped on notification:', response);
-      
-      // Obtener datos de la notificación
-      const data = response.notification.request.content.data;
-      console.log('[AppNavigator] Notification data:', data);
-      
-      // Navegar basado en el tipo de notificación
-      if (data && data.type === 'chat') {
-        // Navegar a la conversación específica
-        if (data.conversationId) {
-          // Aquí necesitaríamos tener acceso al objeto de navegación
-          // Esto se implementaría con una función separada o usando un contexto de navegación
-          console.log('[AppNavigator] Should navigate to conversation:', data.conversationId);
-          // navigation.navigate('Chat', { conversationId: data.conversationId });
-        } else {
-          // Navegar a la lista de conversaciones
-          console.log('[AppNavigator] Should navigate to conversations list');
-          // navigation.navigate('Conversations');
-        }
-      }
-    });
-    
-    // Configurar listener para cambios en el estado de la app
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      if (
-        appState.current.match(/inactive|background/) && 
-        nextAppState === 'active' && 
-        user
-      ) {
-        console.log('[AppNavigator] App has come to the foreground, refreshing notification token');
-        // Volver a registrar el token cuando la app vuelve a primer plano
-        refreshNotificationToken();
-      }
-      
-      appState.current = nextAppState;
-    });
-
-    return () => {
-      // Limpiar listeners al desmontar
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
-      subscription.remove();
-    };
-  }, [user]);
+  const { newStatusNotification, dismissNotification } = useOrders();
+  const { appIsReady, onNavigationReady } = useAppInitialization();
   
-  // Función para refrescar token de notificaciones
-  const refreshNotificationToken = async () => {
+  // Todas las referencias y estados deben declararse al principio, antes de cualquier lógica
+  const isMounted = useRef<boolean>(true);
+  const notificationServiceRef = useRef<any>(null);
+  const responseListener = useRef<any>(null);
+  const notificationListener = useRef<any>(null);
+  const appState = useRef<string>(AppState.currentState);
+  const lastTokenRefresh = useRef<number>(0);
+  
+  // Estados
+  const [updateNotificationToken, setUpdateNotificationToken] = useState<((token: string) => Promise<void>) | undefined>(undefined);
+  
+  // Usar el hook onReady de NavigationContainer 
+  const handleNavigationReady = useCallback(() => {
+    console.log("[AppNavigator] NavigationContainer is ready");
+    NavigationService.setNavigationReady();
+  }, []);
+  
+  // Función para refrescar token de notificaciones (versión dummy para evitar errores de tipo)
+  const refreshNotificationToken = useCallback(() => {
+    console.log("[AppNavigator] Token refresh requested but disabled");
+  }, []);
+  
+  // Cargar el servicio de notificaciones (una vez)
+  useEffect(() => {
+    try {
+      const { notificationService } = require('../../services/NotificationService');
+      notificationServiceRef.current = notificationService;
+    } catch (error) {
+      console.error('[AppNavigator] Error loading notification service:', error);
+    }
+    
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+  
+  // Efecto para la navegación
+  useEffect(() => {
+    if (!isLoading && navigationRef.current) {
+      NavigationService.setNavigationReady();
+    }
+  }, [isLoading]);
+  
+  // Efecto simplificado para manejar cambios de estado de la app
+  useEffect(() => {
+    // Solo ejecutar si hay un usuario
     if (!user) return;
     
-    try {
-      // Cargar dinámicamente el servicio de notificaciones
-      const notificationService = require('../../services/NotificationService').notificationService;
-      if (!notificationService) {
-        console.log('[AppNavigator] Notification service not available');
-        return;
-      }
-      
-      // Verificar permisos
-      const permissionResult = await notificationService.requestNotificationPermissions();
-      if (permissionResult.success && permissionResult.data?.granted) {
-        // Registrar para notificaciones
-        const tokenResult = await notificationService.registerForPushNotifications();
-        if (tokenResult.success && tokenResult.data?.token) {
-          // Actualizar token en Firestore
-          await notificationService.saveTokenToFirestore(user.uid, tokenResult.data.token);
-          if (typeof updateNotificationToken === 'function') {
-            updateNotificationToken(tokenResult.data.token);
-          }
-          console.log('[AppNavigator] Notification token refreshed successfully');
-        }
-      }
-    } catch (error) {
-      console.error('[AppNavigator] Error refreshing notification token:', error);
-    }
-  };
+    console.log("[AppNavigator] Setting up app state change listener");
+    
+    // Configurar el escucha básico
+    const subscription = AppState.addEventListener('change', nextAppState => {
+      console.log(`[AppNavigator] App state changed from ${appState.current} to ${nextAppState}`);
+      appState.current = nextAppState;
+    });
+    
+    // Limpieza
+    return () => {
+      console.log("[AppNavigator] Cleaning up app state listener");
+      subscription.remove();
+    };
+  }, [user?.uid]);
   
-  // Componente interno para manejar el token de notificaciones
-  const AppWithChat = () => {
-    // Usar el hook de chat dentro del contexto
-    const chatContext = useChat();
-    
-    // Actualizar el token cuando el contexto cambie
-    useEffect(() => {
-      if (chatContext && chatContext.updateNotificationToken) {
-        setUpdateNotificationToken(() => chatContext.updateNotificationToken);
-      }
-    }, [chatContext]);
-    
-    return (
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        {user ? (
-          <>
-            <Stack.Screen name="MainTabs" component={MainTabs} />
-            <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
-            {/* Mantén solo esta definición de Payment */}
-            <Stack.Screen 
-              name="Payment" 
-              component={PaymentScreen} 
-              options={{
-                headerShown: true,
-                title: 'Realizar Pago',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF',
-              }} 
-            />
-            
-            {/* Agregar las nuevas pantallas */}
-            <Stack.Screen name="EditBusiness" component={EditBusinessScreen} />
-            <Stack.Screen name="MyBusinesses" component={MyBusinessesScreen} />
-            <Stack.Screen name="Promotions" component={PromotionsScreen} />
-            <Stack.Screen name="Reservations" component={ReservationsScreen} />
-            
-            {/* New Business Detail Enhancement Screens */}
-            <Stack.Screen 
-              name="BusinessHours" 
-              component={BusinessHoursScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Horarios de Atención',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="PaymentMethods" 
-              component={PaymentMethodsScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Métodos de Pago',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="SocialLinks" 
-              component={SocialLinksScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Redes Sociales',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="MenuEditor" 
-              component={MenuEditorScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Editor de Menú',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            
-            {/* Añadir las pantallas del Centro de Ayuda */}
-            <Stack.Screen name="FAQs" component={FAQsScreen} />
-            <Stack.Screen name="Support" component={SupportScreen} />
-            <Stack.Screen name="TermsConditions" component={TermsConditionsScreen} />
-            
-            {/* Add direct routes to these screens for when navigating from outside their tab navigator */}
-            <Stack.Screen name="Map" component={MapScreen} />
-            <Stack.Screen name="Favorites" component={FavoritesScreen} />
-            <Stack.Screen name="Profile" component={ProfileScreen} />
-            <Stack.Screen name="AddBusiness" component={AddBusinessScreen} />
-            
-            {/* Chat screens */}
-            <Stack.Screen name="Conversations" component={ConversationsScreen} />
-            <Stack.Screen name="Chat" component={ChatScreen} />
-            
-            {/* Notifications screen */}
-            <Stack.Screen name="Notifications" component={NotificationsScreen} />
-
-            {/* Cart screen */}
-            <Stack.Screen name="Cart" component={CartScreen} options={{ headerShown: false }} />
-            
-            {/* Order screens */}
-            <Stack.Screen 
-              name="OrderConfirmation" 
-              component={OrderConfirmationScreen}
-              options={{ 
-                headerShown: false
-              }} 
-            />
-            <Stack.Screen 
-              name="OrderDetails" 
-              component={OrderDetailsScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Detalles del Pedido',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="OrdersList" 
-              component={OrdersListScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Mis Pedidos',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-            <Stack.Screen 
-              name="BusinessOrders" 
-              component={BusinessOrdersScreen}
-              options={{ 
-                headerShown: true,
-                title: 'Pedidos del Negocio',
-                headerStyle: { backgroundColor: '#FFFFFF' },
-                headerTintColor: '#007AFF'
-              }} 
-            />
-          </>
-        ) : (
-          <Stack.Screen name="Auth" component={AuthStack} />
-        )}
-      </Stack.Navigator>
-    );
-  };
-
-  if (isLoading) {
+  // Use both loading states to determine if the app is ready
+  const isAppLoading = isLoading || !appIsReady;
+  
+  // Render: siempre la misma estructura
+  if (isAppLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -553,14 +669,16 @@ const AppNavigator = () => {
       </View>
     );
   }
-
-  // ChatProvider ya está importado
-
+  
   return (
-    <NavigationContainer>
-      <ChatProvider>
-        <AppWithChat />
-      </ChatProvider>
+    <NavigationContainer 
+      ref={navigationRef}
+      onReady={() => {
+        handleNavigationReady();
+        onNavigationReady();
+      }}
+    >
+      {user ? <AppWithChat /> : <AuthStack />}
     </NavigationContainer>
   );
 };

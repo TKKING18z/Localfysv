@@ -195,6 +195,19 @@ const OrderDetailsScreen: React.FC = () => {
     }
   };
   
+  const getStatusColorForHistory = (status: string) => {
+    switch(status) {
+      case 'created': return '#007AFF'; // Blue
+      case 'paid': return '#5856D6';    // Purple 
+      case 'preparing': return '#FF9500'; // Orange
+      case 'in_transit': return '#FF3B30'; // Red
+      case 'delivered': return '#34C759'; // Green
+      case 'canceled': return '#8E8E93';  // Gray
+      case 'refunded': return '#FF2D55';  // Pink
+      default: return '#8E8E93';
+    }
+  };
+  
   // This would be used by a business user to update the order status
   const handleUpdateStatus = (newStatus: string) => {
     if (!order) return;
@@ -466,6 +479,39 @@ const OrderDetailsScreen: React.FC = () => {
             <Text style={styles.sectionTitle}>Notas adicionales</Text>
             <View style={styles.notesContainer}>
               <Text style={styles.notesText}>{order.notes}</Text>
+            </View>
+          </View>
+        )}
+        
+        {/* Historial de estados del pedido */}
+        {order.statusHistory && order.statusHistory.length > 0 && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Historial de estados</Text>
+            <View style={styles.historyContainer}>
+              {order.statusHistory.map((entry, index) => (
+                <View key={index} style={styles.historyItem}>
+                  <View style={styles.historyHeader}>
+                    <View style={[styles.historyStatusBadge, { backgroundColor: getStatusColorForHistory(entry.status) }]}>
+                      <Text style={styles.historyStatusText}>{getStatusText(entry.status)}</Text>
+                    </View>
+                    <Text style={styles.historyTime}>{formatDate(entry.timestamp)}</Text>
+                  </View>
+                  {entry.note && (
+                    <View style={styles.historyNoteContainer}>
+                      <MaterialIcons name="comment" size={16} color="#8E8E93" style={styles.historyNoteIcon} />
+                      <Text style={styles.historyNote}>{entry.note}</Text>
+                    </View>
+                  )}
+                  {entry.status === 'in_transit' && order.estimatedDeliveryTime && (
+                    <View style={styles.estimatedTimeContainer}>
+                      <MaterialIcons name="access-time" size={16} color="#FF9500" style={styles.historyNoteIcon} />
+                      <Text style={styles.estimatedTimeText}>
+                        Tiempo estimado de entrega: {formatDate(order.estimatedDeliveryTime)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
             </View>
           </View>
         )}
@@ -927,6 +973,54 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontWeight: '600',
     marginLeft: 8,
+  },
+  historyContainer: {
+    marginTop: 8,
+  },
+  historyItem: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E5EA',
+  },
+  historyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  historyStatusBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  historyStatusText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  historyTime: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  historyNoteContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  historyNoteIcon: {
+    marginRight: 8,
+  },
+  historyNote: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  estimatedTimeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  estimatedTimeText: {
+    fontSize: 14,
+    color: '#8E8E93',
   },
 });
 

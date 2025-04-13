@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,28 +10,72 @@ import {
   ScrollView,
   TextInput,
   BackHandler,
+  Platform,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useStripe } from '@stripe/stripe-react-native';
-import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAuth } from '../context/AuthContext';
-import { useCart, CartItem } from '../context/CartContext';
-import { useOrders, PaymentMethod } from '../context/OrderContext';
+import { useCart } from '../context/CartContext';
+import { useOrders } from '../context/OrderContext';
 
 type PaymentScreenRouteProp = RouteProp<RootStackParamList, 'Payment'>;
 type PaymentScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Payment'>;
 
 // URL de tu servidor - Usa IP local para emuladores/dispositivos físicos
-// En un emulador Android puedes usar 10.0.2.2 para acceder a localhost
-// En un emulador iOS puedes usar localhost
-// Para dispositivos físicos, usa tu dirección IP de la red local (ej: 192.168.1.X)
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001'; // Puerto configurado en server/.env
-// const API_URL = 'http://10.0.2.2:3001'; // Para emulador Android
-// const API_URL = 'http://192.168.X.X:3001'; // Para dispositivos físicos (reemplaza X.X con tu IP)
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
+
+// Define tipos explícitos para los items del carrito y opciones
+interface CartItemOption {
+  name: string;
+  choice: string;
+  extraPrice: number | string;
+}
+
+interface CartItemType {
+  id: string;
+  name: string;
+  price: number | string;
+  quantity: number | string;
+  businessId: string;
+  options?: CartItemOption[];
+}
+
+// Define el tipo para RootStackParamList si no puede importarlo
+type RootStackParamList = {
+  Payment: {
+    businessId?: string;
+    businessName?: string;
+    amount?: number;
+    cartItems?: CartItemType[];
+    isCartPayment?: boolean;
+  };
+  OrderConfirmation: {
+    orderId: string;
+    orderNumber: string;
+  };
+  MainTabs: undefined;
+};
+
+// Define el tipo PaymentMethod si no puede importarlo
+type PaymentMethod = 'card' | 'cash';
+
+// Define el tipo de usuario Auth si no puede importarlo
+interface User {
+  uid: string;
+  email: string | null;
+}
 
 const PaymentScreen: React.FC = () => {
+  // Referencias para manejo de ciclo de vida
+  const isMountedRef = useRef(true);
+  const initialDataValidatedRef = useRef(false);
+  const processingPaymentRef = useRef(false);
+  const alertTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const serverCheckTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Hooks de navegación y contextos
   const navigation = useNavigation<PaymentScreenNavigationProp>();
   const route = useRoute<PaymentScreenRouteProp>();
   const { initPaymentSheet, presentPaymentSheet } = useStripe();
@@ -39,55 +83,102 @@ const PaymentScreen: React.FC = () => {
   const { clearCart } = useCart();
   const { createOrder } = useOrders();
 
-  // Obtener parámetros de la ruta con validación
-  const params = route.params || {};
-  const businessId = params.businessId || '';
-  const businessName = params.businessName || 'Negocio';
-  const initialAmount = params.amount || 0;
-  const cartItems = Array.isArray(params.cartItems) ? params.cartItems : [];
-  const isCartPayment = Boolean(params.isCartPayment);
+  // Capturar parámetros de la ruta al iniciar (inmutables)
+  const routeParamsRef = useRef({
+    businessId: route.params?.businessId || '',
+    businessName: route.params?.businessName || 'Negocio',
+    initialAmount: route.params?.amount || 0,
+    cartItems: Array.isArray(route.params?.cartItems) ? route.params.cartItems : [],
+    isCartPayment: Boolean(route.params?.isCartPayment)
+  });
 
   // Estados
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [amount, setAmount] = useState(initialAmount ? initialAmount.toFixed(2) : '');
+  const [amount, setAmount] = useState(
+    routeParamsRef.current.initialAmount 
+      ? routeParamsRef.current.initialAmount.toFixed(2) 
+      : ''
+  );
   const [paymentMethod, setPaymentMethod] = useState<'card'>('card');
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [processingPayment, setProcessingPayment] = useState(false);
 
-  // Manejar el botón de retroceso para prevenir navegación accidental durante el pago
+  // Efecto de inicialización
   useEffect(() => {
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (processingPayment) {
-        Alert.alert(
-          'Pago en proceso',
-          '¿Estás seguro de que deseas cancelar el pago?',
-          [
-            { text: 'Continuar con el pago', style: 'cancel', onPress: () => {} },
-            { text: 'Cancelar pago', style: 'destructive', onPress: () => {
+    console.log('PaymentScreen montado');
+    isMountedRef.current = true;
+    
+    // Validar datos y comprobar servidor una sola vez al montar
+    if (!initialDataValidatedRef.current) {
+      validateInitialData();
+      checkServerStatus();
+      initialDataValidatedRef.current = true;
+    }
+    
+    // Manejar el botón de retroceso hardware
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+
+    // Limpieza al desmontar
+    return () => {
+      console.log('PaymentScreen desmontado - limpiando estados');
+      isMountedRef.current = false;
+      
+      // Limpiar todos los timeouts
+      if (alertTimeoutRef.current) {
+        clearTimeout(alertTimeoutRef.current);
+        alertTimeoutRef.current = null;
+      }
+      
+      if (serverCheckTimeoutRef.current) {
+        clearTimeout(serverCheckTimeoutRef.current);
+        serverCheckTimeoutRef.current = null;
+      }
+      
+      // Remover listener de botón atrás
+      backHandler.remove();
+      
+      // Resetear refs
+      processingPaymentRef.current = false;
+    };
+  }, []); // Sin dependencias para evitar remontaje
+
+  // Handler para el botón físico de retroceso
+  const handleBackPress = () => {
+    if (processingPaymentRef.current) {
+      Alert.alert(
+        'Pago en proceso',
+        '¿Estás seguro de que deseas cancelar el pago?',
+        [
+          { text: 'Continuar con el pago', style: 'cancel', onPress: () => {} },
+          { text: 'Cancelar pago', style: 'destructive', onPress: () => {
+            processingPaymentRef.current = false;
+            if (isMountedRef.current) {
               setProcessingPayment(false);
               navigation.goBack();
-            }}
-          ]
-        );
-        return true;
-      }
-      return false;
-    });
+            }
+          }}
+        ]
+      );
+      return true;
+    }
+    return false;
+  };
 
-    return () => backHandler.remove();
-  }, [processingPayment, navigation]);
-
+  // Handler para botón de retroceso en UI
   const handleBack = () => {
-    if (processingPayment) {
+    if (processingPaymentRef.current) {
       Alert.alert(
         'Pago en proceso',
         '¿Estás seguro de que deseas cancelar el pago?',
         [
           { text: 'Continuar con el pago', style: 'cancel' },
           { text: 'Cancelar pago', style: 'destructive', onPress: () => {
-            setProcessingPayment(false);
-            navigation.goBack();
+            processingPaymentRef.current = false;
+            if (isMountedRef.current) {
+              setProcessingPayment(false);
+              navigation.goBack();
+            }
           }}
         ]
       );
@@ -96,15 +187,12 @@ const PaymentScreen: React.FC = () => {
     }
   };
 
-  // Verificar los datos iniciales
-  useEffect(() => {
-    validateInitialData();
-    checkServerStatus();
-  }, []);
-
+  // Validación de datos iniciales
   const validateInitialData = () => {
+    const params = routeParamsRef.current;
+    
     // Validar que tengamos una cantidad válida
-    if (isCartPayment && (isNaN(initialAmount) || initialAmount <= 0)) {
+    if (params.isCartPayment && (isNaN(params.initialAmount) || params.initialAmount <= 0)) {
       Alert.alert(
         'Error en el monto',
         'El monto a pagar no es válido. Por favor, regresa al carrito.',
@@ -114,7 +202,7 @@ const PaymentScreen: React.FC = () => {
     }
 
     // Validar que tengamos items en el carrito para pagos de carrito
-    if (isCartPayment && (!cartItems || cartItems.length === 0)) {
+    if (params.isCartPayment && (!params.cartItems || params.cartItems.length === 0)) {
       Alert.alert(
         'Carrito vacío',
         'No hay productos en el carrito. Por favor, agrega productos antes de continuar.',
@@ -124,7 +212,7 @@ const PaymentScreen: React.FC = () => {
     }
 
     // Validar businessId
-    if (!businessId) {
+    if (!params.businessId) {
       Alert.alert(
         'Error de negocio',
         'No se pudo identificar el negocio. Por favor, intenta de nuevo.',
@@ -136,34 +224,75 @@ const PaymentScreen: React.FC = () => {
     return true;
   };
 
+  // Verificación del estado del servidor
   const checkServerStatus = async () => {
+    if (!isMountedRef.current) return;
+    
     try {
-      setServerStatus('checking');
+      if (isMountedRef.current) {
+        setServerStatus('checking');
+      }
+      
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 segundos de timeout
+      // Definir un timeout para la solicitud
+      serverCheckTimeoutRef.current = setTimeout(() => controller.abort(), 60000);
+      
+      // Referencia para controlar la alerta
+      let alertShown = false;
+      alertTimeoutRef.current = setTimeout(() => {
+        if (!isMountedRef.current) return;
+        
+        alertShown = true;
+        Alert.alert(
+          'Conectando con el servidor',
+          'El servidor puede tardar hasta 30 segundos en responder si estaba inactivo. Por favor espera...',
+          [{ text: 'Esperar', style: 'cancel' }],
+          { cancelable: false }
+        );
+      }, 2000);
       
       const response = await fetch(`${API_URL}`, {
         signal: controller.signal
       });
       
-      clearTimeout(timeoutId);
+      // Limpiar timeouts
+      if (serverCheckTimeoutRef.current) {
+        clearTimeout(serverCheckTimeoutRef.current);
+        serverCheckTimeoutRef.current = null;
+      }
+      
+      if (alertTimeoutRef.current) {
+        clearTimeout(alertTimeoutRef.current);
+        alertTimeoutRef.current = null;
+      }
+      
+      if (!isMountedRef.current) return;
       
       if (response.ok) {
         console.log('Servidor en línea:', await response.text());
-        setServerStatus('online');
+        if (isMountedRef.current) {
+          setServerStatus('online');
+        }
       } else {
         console.error('El servidor no está respondiendo correctamente');
-        setServerStatus('offline');
-        showServerErrorAlert();
+        if (isMountedRef.current) {
+          setServerStatus('offline');
+          showServerErrorAlert();
+        }
       }
     } catch (error) {
       console.error('Error conectando al servidor:', error);
-      setServerStatus('offline');
-      showServerErrorAlert();
+      if (isMountedRef.current) {
+        setServerStatus('offline');
+        showServerErrorAlert();
+      }
     }
   };
 
+  // Alerta de error del servidor
   const showServerErrorAlert = () => {
+    if (!isMountedRef.current) return;
+    
     Alert.alert(
       'Error de conexión',
       'No se puede conectar al servidor de pagos. Verifica tu conexión a internet o intenta más tarde.',
@@ -174,8 +303,13 @@ const PaymentScreen: React.FC = () => {
     );
   };
 
+  // Obtención de parámetros para la hoja de pago
   const fetchPaymentSheetParams = async () => {
+    if (!isMountedRef.current) return null;
+    
     try {
+      const params = routeParamsRef.current;
+      
       // Validar monto
       if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
         Alert.alert('Error', 'Por favor ingresa un monto válido');
@@ -191,7 +325,7 @@ const PaymentScreen: React.FC = () => {
       const amountInCents = Math.round(parseFloat(amount) * 100);
 
       // Validar cartItems para pagos de carrito
-      const payloadCartItems = isCartPayment ? cartItems.map(item => ({
+      const payloadCartItems = params.isCartPayment ? params.cartItems.map((item: CartItemType) => ({
         id: item.id,
         name: item.name,
         price: Number(item.price),
@@ -205,12 +339,15 @@ const PaymentScreen: React.FC = () => {
         amount: amountInCents,
         currency: 'usd',
         email: user?.email || '',
-        businessId,
+        businessId: params.businessId,
         cartItems: payloadCartItems,
       });
 
+      // Crear un controlador para la petición con un timeout adecuado
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 segundos de timeout
+      // Si el servidor ya está online, usar un timeout más corto
+      const timeoutMs = serverStatus === 'online' ? 30000 : 60000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
       
       const response = await fetch(`${API_URL}/create-payment-intent`, {
         method: 'POST',
@@ -221,13 +358,15 @@ const PaymentScreen: React.FC = () => {
           amount: amountInCents,
           currency: 'usd',
           email: user?.email || '',
-          businessId,
+          businessId: params.businessId,
           cartItems: payloadCartItems,
         }),
         signal: controller.signal
       });
       
       clearTimeout(timeoutId);
+      
+      if (!isMountedRef.current) return null;
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -251,6 +390,8 @@ const PaymentScreen: React.FC = () => {
         customer: data.customer,
       };
     } catch (error: any) {
+      if (!isMountedRef.current) return null;
+      
       const errorMessage = error.name === 'AbortError'
         ? 'La solicitud tardó demasiado tiempo. Verifica tu conexión a internet.'
         : 'No se pudo procesar el pago. Verifica tu conexión a internet.';
@@ -261,17 +402,24 @@ const PaymentScreen: React.FC = () => {
     }
   };
 
+  // Inicialización de la hoja de pago
   const initializePaymentSheet = async () => {
+    if (!isMountedRef.current) return false;
+    
     try {
-      setLoading(true);
-      setInitialized(false);
+      if (isMountedRef.current) {
+        setLoading(true);
+        setInitialized(false);
+      }
 
       console.log('Obteniendo parámetros para la hoja de pago...');
       const params = await fetchPaymentSheetParams();
 
-      if (!params) {
+      if (!params || !isMountedRef.current) {
         console.log('No se pudieron obtener los parámetros necesarios');
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
         return false;
       }
 
@@ -280,30 +428,41 @@ const PaymentScreen: React.FC = () => {
         paymentIntentClientSecret: params.paymentIntent,
         customerEphemeralKeySecret: params.ephemeralKey,
         customerId: params.customer,
-        merchantDisplayName: businessName || 'Localfy',
+        merchantDisplayName: routeParamsRef.current.businessName || 'Localfy',
         style: 'automatic',
       });
+
+      if (!isMountedRef.current) return false;
 
       if (error) {
         console.error('Error al inicializar payment sheet:', error);
         Alert.alert('Error', error.message || 'No se pudo inicializar el pago');
-        setLoading(false);
+        if (isMountedRef.current) {
+          setLoading(false);
+        }
         return false;
       }
 
       console.log('Payment sheet inicializado correctamente');
-      setInitialized(true);
-      setLoading(false);
+      if (isMountedRef.current) {
+        setInitialized(true);
+        setLoading(false);
+      }
       return true;
     } catch (error) {
       console.error('Error en initializePaymentSheet:', error);
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
       Alert.alert('Error', 'Hubo un problema al inicializar el pago. Por favor, intenta de nuevo.');
       return false;
     }
   };
 
+  // Apertura de la hoja de pago
   const openPaymentSheet = async () => {
+    if (!isMountedRef.current) return;
+    
     // Validar monto
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
       Alert.alert('Error', 'Por favor ingresa un monto válido');
@@ -311,35 +470,74 @@ const PaymentScreen: React.FC = () => {
     }
 
     try {
-      setLoading(true);
-      setProcessingPayment(true);
+      // Prevenir múltiples inicios de pago simultáneos
+      if (loading || processingPaymentRef.current) {
+        console.log('Ya hay un pago en proceso, ignorando solicitud');
+        return;
+      }
+
+      processingPaymentRef.current = true;
+      if (isMountedRef.current) {
+        setLoading(true);
+        setProcessingPayment(true);
+      }
+
+      // Referencias a alertas para poder descartarlas si es necesario
+      let serverWaitingAlert: any = null;
+
+      // Solo mostrar alerta de espera si el servidor no está confirmado como online
+      if (serverStatus !== 'online') {
+        serverWaitingAlert = Alert.alert(
+          'Conectando con el servidor de pagos',
+          'El servidor puede tardar hasta 30 segundos en responder si estaba inactivo. Por favor espera mientras se prepara el pago...',
+          [{ text: 'Esperar', style: 'cancel' }],
+          { cancelable: false }
+        );
+      }
 
       const success = await initializePaymentSheet();
 
+      if (!isMountedRef.current) return;
+
       if (!success) {
-        setLoading(false);
-        setProcessingPayment(false);
+        processingPaymentRef.current = false;
+        if (isMountedRef.current) {
+          setLoading(false);
+          setProcessingPayment(false);
+        }
         return;
       }
 
       console.log('Presentando payment sheet...');
       const { error } = await presentPaymentSheet();
 
+      if (!isMountedRef.current) return;
+
       if (error) {
         if (error.code === 'Canceled') {
           console.log('El usuario canceló el pago');
-          setLoading(false);
-          setProcessingPayment(false);
+          processingPaymentRef.current = false;
+          if (isMountedRef.current) {
+            setLoading(false);
+            setProcessingPayment(false);
+          }
           return;
         }
         console.error('Error en presentPaymentSheet:', error);
         Alert.alert('Error de pago', error.message || 'Hubo un problema al procesar el pago');
-        setProcessingPayment(false);
+        processingPaymentRef.current = false;
+        if (isMountedRef.current) {
+          setProcessingPayment(false);
+          setLoading(false);
+        }
       } else {
         try {
+          // Obtener referencias inmutables
+          const params = routeParamsRef.current;
+          
           // Crear orden después de un pago exitoso
           const amountValue = parseFloat(amount);
-          const subtotalValue = isCartPayment ? calculatedTotal : amountValue; // En pagos directos, subtotal = total
+          const subtotalValue = params.isCartPayment ? calculatedTotal : amountValue; // En pagos directos, subtotal = total
           
           // Verificar que el usuario esté autenticado
           if (!user || !user.uid || !user.email) {
@@ -350,20 +548,20 @@ const PaymentScreen: React.FC = () => {
           const orderPaymentMethod: PaymentMethod = 'card';
           
           // Validar que todos los campos necesarios estén definidos
-          if (!businessId) {
+          if (!params.businessId) {
             throw new Error('businessId is undefined');
           }
           
-          if (!businessName) {
+          if (!params.businessName) {
             throw new Error('businessName is undefined');
           }
           
-          const cartToUse = isCartPayment ? cartItems : [{
+          const cartToUse = params.isCartPayment ? params.cartItems : [{
             id: 'direct-payment',
             name: 'Pago directo',
             price: amountValue,
             quantity: 1,
-            businessId: businessId
+            businessId: params.businessId
           }];
           
           if (!cartToUse || cartToUse.length === 0) {
@@ -371,7 +569,7 @@ const PaymentScreen: React.FC = () => {
           }
           
           // Validar cada item del carrito
-          cartToUse.forEach((item, index) => {
+          cartToUse.forEach((item: CartItemType, index: number) => {
             if (!item.id) {
               throw new Error(`Item at index ${index} has undefined id`);
             }
@@ -390,7 +588,7 @@ const PaymentScreen: React.FC = () => {
           });
           
           // Create a sanitized cart without undefined values that could cause Firestore errors
-          const sanitizedCart = cartToUse.map((item) => {
+          const sanitizedCart = cartToUse.map((item: CartItemType) => {
             // Definir un tipo básico para el item limpio
             const cleanItem: {
               id: string;
@@ -408,7 +606,7 @@ const PaymentScreen: React.FC = () => {
               name: item.name || 'Producto',
               price: Number(item.price) || 0,
               quantity: Number(item.quantity) || 1,
-              businessId: item.businessId || businessId
+              businessId: item.businessId || params.businessId
             };
             
             // Solo incluir opciones si existen y no son undefined
@@ -436,8 +634,8 @@ const PaymentScreen: React.FC = () => {
           }
           
           console.log('Creating order with params:', {
-            businessId,
-            businessName,
+            businessId: params.businessId,
+            businessName: params.businessName,
             cartItemsCount: sanitizedCart.length,
             amountValue,
             subtotalValue,
@@ -451,8 +649,8 @@ const PaymentScreen: React.FC = () => {
           // Crear la orden en la base de datos
           try {
             const orderId = await createOrder(
-              businessId,
-              businessName,
+              params.businessId,
+              params.businessName,
               sanitizedCart,
               amountValue,
               subtotalValue,
@@ -460,25 +658,35 @@ const PaymentScreen: React.FC = () => {
               false // isDelivery: false por defecto para pagos directos
             );
             
-            if (isCartPayment) {
+            if (params.isCartPayment) {
               await clearCart();
             }
             
-            // Navegamos a la pantalla de confirmación de pedido
-            navigation.reset({
-              index: 0,
-              routes: [
-                { 
-                  name: 'OrderConfirmation',
-                  params: { 
-                    orderId,
-                    orderNumber: orderId // El orderNumber lo generamos en el backend
-                  }
-                }
-              ],
-            });
+            // Aseguramos que processingPayment se desactiva antes de navegar
+            processingPaymentRef.current = false;
+            if (isMountedRef.current) {
+              setLoading(false);
+              setProcessingPayment(false);
+            }
+            
+            // Pequeño retraso para permitir que las animaciones actuales se completen
+            setTimeout(() => {
+              if (!isMountedRef.current) return;
+              
+              // Navegamos a la pantalla de confirmación de pedido usando navigate en lugar de reset
+              // para evitar problemas con animaciones pendientes
+              navigation.navigate('OrderConfirmation', { 
+                orderId,
+                orderNumber: orderId
+              });
+            }, 300);
           } catch (orderError) {
             console.error('Error creating order with details:', orderError);
+            processingPaymentRef.current = false;
+            if (isMountedRef.current) {
+              setLoading(false);
+              setProcessingPayment(false);
+            }
             throw orderError; // Re-throw to be caught by outer catch block
           }
         } catch (error) {
@@ -491,10 +699,16 @@ const PaymentScreen: React.FC = () => {
               {
                 text: 'OK',
                 onPress: () => {
-                  navigation.reset({
-                    index: 0,
-                    routes: [{ name: 'MainTabs' }],
-                  });
+                  // Limpiamos estados antes de navegar
+                  processingPaymentRef.current = false;
+                  if (isMountedRef.current) {
+                    setLoading(false);
+                    setProcessingPayment(false);
+                  }
+                  setTimeout(() => {
+                    if (!isMountedRef.current) return;
+                    navigation.navigate('MainTabs' as any);
+                  }, 300);
                 },
               },
             ]
@@ -502,19 +716,25 @@ const PaymentScreen: React.FC = () => {
         }
       }
 
-      setLoading(false);
-      setProcessingPayment(false);
+      processingPaymentRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+        setProcessingPayment(false);
+      }
     } catch (error) {
       console.error('Error al abrir payment sheet:', error);
-      setLoading(false);
-      setProcessingPayment(false);
+      processingPaymentRef.current = false;
+      if (isMountedRef.current) {
+        setLoading(false);
+        setProcessingPayment(false);
+      }
       Alert.alert('Error', 'Hubo un problema al procesar el pago. Por favor, intenta de nuevo.');
     }
   };
 
   // Calcular monto total de los productos (solo para verificación)
-  const calculatedTotal = isCartPayment && cartItems.length > 0 
-    ? cartItems.reduce((total, item) => {
+  const calculatedTotal = routeParamsRef.current.isCartPayment && routeParamsRef.current.cartItems.length > 0 
+    ? routeParamsRef.current.cartItems.reduce((total: number, item: CartItemType) => {
         // Calcular precio base del producto
         let itemTotal = Number(item.price) * Number(item.quantity);
         
@@ -529,29 +749,13 @@ const PaymentScreen: React.FC = () => {
       }, 0)
     : 0;
 
-  // Verificar que el monto a pagar coincida con el calculado (para pagos de carrito)
-  useEffect(() => {
-    if (isCartPayment && calculatedTotal > 0 && Math.abs(calculatedTotal - initialAmount) > 0.01) {
-      console.warn('Discrepancia en monto a pagar:', {
-        calculatedTotal,
-        initialAmount,
-        difference: calculatedTotal - initialAmount
-      });
-      Alert.alert(
-        'Advertencia',
-        'Se detectó una diferencia en el monto a pagar. Por favor, verifica tu carrito.',
-        [{ text: 'OK' }]
-      );
-    }
-  }, [isCartPayment, calculatedTotal, initialAmount]);
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <TouchableOpacity onPress={handleBack} style={styles.backButton}>
           <MaterialIcons name="arrow-back" size={24} color="black" />
         </TouchableOpacity>
-        <Text style={styles.title}>Pago en línea a {businessName}</Text>
+        <Text style={styles.title}>Pago en línea a {routeParamsRef.current.businessName}</Text>
         {serverStatus === 'checking' && (
           <ActivityIndicator size="small" color="#007AFF" />
         )}
@@ -565,7 +769,7 @@ const PaymentScreen: React.FC = () => {
 
       <ScrollView style={styles.content}>
         <View style={styles.formContainer}>
-          {!isCartPayment && (
+          {!routeParamsRef.current.isCartPayment && (
             <>
               <Text style={styles.label}>Monto a pagar (USD)</Text>
               <TextInput
@@ -578,12 +782,12 @@ const PaymentScreen: React.FC = () => {
             </>
           )}
 
-          {isCartPayment && (
+          {routeParamsRef.current.isCartPayment && (
             <View style={styles.orderSummary}>
               <Text style={styles.summaryTitle}>Resumen del pedido</Text>
 
-              {cartItems && cartItems.length > 0 ? (
-                cartItems.map((item: CartItem, index: number) => (
+              {routeParamsRef.current.cartItems && routeParamsRef.current.cartItems.length > 0 ? (
+                routeParamsRef.current.cartItems.map((item: CartItemType, index: number) => (
                   <View key={item.id || `item-${index}`} style={styles.summaryItem}>
                     <View style={styles.summaryItemInfo}>
                       <Text style={styles.summaryItemName}>
@@ -823,4 +1027,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default PaymentScreen;
+export default PaymentScreen; 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -24,6 +24,7 @@ import { useBusinesses } from '../context/BusinessContext';
 import { TextInput } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import 'firebase/compat/storage';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -84,7 +85,8 @@ const ProfileScreen: React.FC = () => {
             // Asegúrate de que la propiedad role se lea correctamente
             // Y se mapee al formato que espera la UI (Cliente/Propietario)
             const userRole = userData.role === 'business_owner' ? 'Propietario' : 'Cliente';
-            console.log('User role mapped as:', userRole); // added for debugging
+            // Remove this debug logging that's causing infinite logs
+            // console.log('User role mapped as:', userRole); // added for debugging
             
             setProfile({
               uid: user.uid,
@@ -133,11 +135,11 @@ const ProfileScreen: React.FC = () => {
           // Get favorites count
           const favoriteCount = getFavoriteBusinesses().length;
           
-          // Set user stats; include 'reviews' initialized to 0 for later real-time updates
+          // Fix this to not reference profile which could trigger re-renders
           setUserStats({
             favorites: favoriteCount,
-            reviews: 0, // agregado para cumplir con el tipo
-            businessesOwned: profile?.userType === 'Propietario' ? Math.floor(Math.random() * 5) + 1 : 0,
+            reviews: 0,
+            businessesOwned: userDoc.exists && userDoc.data()?.role === 'business_owner' ? Math.floor(Math.random() * 5) + 1 : 0,
             totalViews: Math.floor(Math.random() * 200) + 50
           });
         }
@@ -447,21 +449,52 @@ const ProfileScreen: React.FC = () => {
               <TouchableOpacity 
                 style={styles.menuItem}
                 onPress={() => {
-                  // Si no hay un negocio seleccionado, deberíamos mostrar una lista
-                  // Por simplicidad, aquí vamos a navegar directamente si hay un negocio
-                  if (profile.uid) {
-                    // TODO: Aquí deberíamos obtener el businessId del usuario
-                    // Por ahora usaremos un placeholder
-                    // En una implementación real, deberías consultar el primer negocio del usuario
-                    const businessId = profile.uid; // Usar el ID del usuario como placeholder
-                    const businessName = "Mi Negocio"; // Placeholder
-                    navigation.navigate('BusinessOrders', { 
-                      businessId,
-                      businessName
-                    });
-                  } else {
-                    Alert.alert('Aviso', 'No tienes negocios registrados aún.');
-                  }
+                  // Consultar los negocios del usuario
+                  const db = firebase.firestore();
+                  const businessesRef = collection(db, 'businesses');
+                  const q = query(
+                    businessesRef,
+                    where('ownerId', '==', profile.uid)
+                  );
+                  
+                  getDocs(q).then(snapshot => {
+                    if (snapshot.empty) {
+                      Alert.alert('Aviso', 'No tienes negocios registrados aún.');
+                      return;
+                    }
+                    
+                    // Si solo hay un negocio, ir directamente a la pantalla de pedidos
+                    if (snapshot.size === 1) {
+                      const businessDoc = snapshot.docs[0];
+                      const businessData = businessDoc.data();
+                      navigation.navigate('BusinessOrders', { 
+                        businessId: businessDoc.id,
+                        businessName: businessData.name || "Mi Negocio"
+                      });
+                    } else {
+                      // Si hay múltiples negocios, mostrar una alerta de selección
+                      const businesses = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        name: doc.data().name
+                      }));
+                      
+                      Alert.alert(
+                        'Selecciona un Negocio',
+                        'Elige un negocio para ver sus pedidos:',
+                        businesses.map(business => ({
+                          text: business.name,
+                          onPress: () => navigation.navigate('BusinessOrders', { 
+                            businessId: business.id,
+                            businessName: business.name
+                          })
+                        })),
+                        { cancelable: true }
+                      );
+                    }
+                  }).catch(error => {
+                    console.error('Error al cargar negocios:', error);
+                    Alert.alert('Error', 'No se pudieron cargar tus negocios. Intenta nuevamente.');
+                  });
                 }}
               >
                 <MaterialIcons name="shopping-basket" size={24} color="#007AFF" />

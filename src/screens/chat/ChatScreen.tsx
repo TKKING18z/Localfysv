@@ -888,7 +888,7 @@ const styles = StyleSheet.create({
   scrollToBottomButton: {
     position: 'absolute',
     right: 20,
-    bottom: 80,
+    bottom: 90,
     borderRadius: 28,
     shadowColor: '#0A84FF',
     shadowOffset: { width: 0, height: 4 },

@@ -4,6 +4,8 @@ import { useAuth } from './AuthContext';
 import { collection, addDoc, updateDoc, getDoc, doc, getDocs, query, where, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
 import firebase from '../../firebase.config';
 import { CartItem } from './CartContext';
+// Importar el servicio de notificaciones - ajustando la ruta
+import { notificationService } from '../../services/NotificationService';
 
 // Get Firestore instance from Firebase config
 const db = firebase.firestore();
@@ -33,6 +35,12 @@ export type OrderAddress = {
   notes?: string;
 };
 
+export type OrderStatusHistory = {
+  status: OrderStatus;
+  timestamp: Timestamp | Date;
+  note?: string;
+};
+
 export type Order = {
   id: string;
   orderNumber: string;
@@ -43,6 +51,13 @@ export type Order = {
   businessName: string;
   items: CartItem[];
   status: OrderStatus;
+  statusHistory?: OrderStatusHistory[];
+  statusNotes?: {
+    [key in OrderStatus]?: {
+      note: string;
+      timestamp: Timestamp | Date;
+    };
+  };
   total: number;
   subtotal: number;
   tax?: number;
@@ -70,6 +85,13 @@ export type OrderSummary = {
   itemCount: number;
 };
 
+// Nuevo estado para manejar el pedido recién creado
+interface PendingOrderNavigation {
+  orderId: string;
+  shouldNavigate: boolean;
+  timestamp: number;
+}
+
 interface OrderContextType {
   orders: Order[];
   userOrders: OrderSummary[];
@@ -77,6 +99,13 @@ interface OrderContextType {
   currentOrderId: string | null;
   isLoading: boolean;
   error: string | null;
+  newStatusNotification: {
+    orderId: string;
+    orderNumber: string;
+    status: OrderStatus;
+    timestamp: Date;
+  } | null;
+  dismissNotification: () => void;
   createOrder: (
     businessId: string,
     businessName: string,
@@ -92,12 +121,19 @@ interface OrderContextType {
     deliveryFee?: number
   ) => Promise<string>;
   getOrder: (orderId: string) => Promise<Order | null>;
-  updateOrderStatus: (orderId: string, status: OrderStatus) => Promise<boolean>;
+  updateOrderStatus: (orderId: string, status: OrderStatus, options?: {
+    notes?: string;
+    estimatedDeliveryTime?: Date | Timestamp;
+  }) => Promise<boolean>;
   loadUserOrders: () => Promise<void>;
   loadBusinessOrders: (businessId: string) => Promise<void>;
   setCurrentOrderId: (orderId: string | null) => void;
+  setBusinessOrders: (orders: OrderSummary[]) => void;
   cancelOrder: (orderId: string) => Promise<boolean>;
   getLastUncompletedOrder: () => Promise<Order | null>;
+  pendingOrderNavigation: PendingOrderNavigation | null;
+  setPendingOrderNavigation: (data: { orderId: string }) => void;
+  clearPendingOrderNavigation: () => void;
 }
 
 const OrderContext = createContext<OrderContextType | undefined>(undefined);
@@ -110,6 +146,13 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
   const [currentOrderId, setCurrentOrderId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [newStatusNotification, setNewStatusNotification] = useState<{
+    orderId: string;
+    orderNumber: string;
+    status: OrderStatus;
+    timestamp: Date;
+  } | null>(null);
+  const [pendingOrderNavigation, setPendingOrderNavigationState] = useState<PendingOrderNavigation | null>(null);
 
   useEffect(() => {
     // Load current order ID from AsyncStorage when component mounts
@@ -252,7 +295,10 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
   };
 
   // Update an order's status
-  const updateOrderStatus = async (orderId: string, status: OrderStatus): Promise<boolean> => {
+  const updateOrderStatus = async (orderId: string, status: OrderStatus, options?: {
+    notes?: string;
+    estimatedDeliveryTime?: Date | Timestamp;
+  }): Promise<boolean> => {
     if (!orderId) return false;
     
     setIsLoading(true);
@@ -260,17 +306,68 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
     
     try {
       const orderRef = doc(db, 'orders', orderId);
-      await updateDoc(orderRef, {
+      
+      // Obtener el documento actual para actualizar el historial de estados
+      const orderDoc = await getDoc(orderRef);
+      
+      if (!orderDoc.exists()) {
+        setError('Pedido no encontrado');
+        return false;
+      }
+      
+      const orderData = orderDoc.data();
+      const currentTimestamp = Timestamp.now();
+      
+      // Crear nueva entrada para el historial
+      const statusHistoryEntry: OrderStatusHistory = {
         status,
-        updatedAt: Timestamp.now(),
-        ...(status === 'delivered' ? { deliveredAt: Timestamp.now() } : {})
-      });
+        timestamp: currentTimestamp,
+        note: options?.notes
+      };
+      
+      // Obtener historial existente o crear uno nuevo
+      const currentHistory = orderData.statusHistory || [];
+      
+      // Datos a actualizar
+      const updateData: any = {
+        status,
+        updatedAt: currentTimestamp,
+        statusHistory: [...currentHistory, statusHistoryEntry],
+        ...(status === 'delivered' ? { deliveredAt: currentTimestamp } : {})
+      };
+      
+      // Agregar notas si se proporcionan
+      if (options?.notes) {
+        // Si ya hay notas, añadir a las existentes
+        const existingNotes = orderData.statusNotes || {};
+        updateData.statusNotes = {
+          ...existingNotes,
+          [status]: {
+            note: options.notes,
+            timestamp: currentTimestamp
+          }
+        };
+      }
+      
+      // Agregar tiempo estimado de entrega si se proporciona
+      if (options?.estimatedDeliveryTime && status === 'in_transit') {
+        updateData.estimatedDeliveryTime = options.estimatedDeliveryTime;
+      }
+      
+      await updateDoc(orderRef, updateData);
       
       // Update orders in state
       setOrders(prevOrders => 
         prevOrders.map(order => 
           order.id === orderId 
-            ? { ...order, status, updatedAt: Timestamp.now() } 
+            ? { 
+                ...order, 
+                status, 
+                updatedAt: currentTimestamp,
+                statusHistory: [...(order.statusHistory || []), statusHistoryEntry],
+                ...(updateData.statusNotes && { statusNotes: updateData.statusNotes }),
+                ...(updateData.estimatedDeliveryTime && { estimatedDeliveryTime: updateData.estimatedDeliveryTime })
+              } 
             : order
         )
       );
@@ -279,12 +376,87 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
       const updateOrderSummary = (list: OrderSummary[]) => 
         list.map(order => 
           order.id === orderId 
-            ? { ...order, status, updatedAt: Timestamp.now() } 
+            ? { ...order, status, updatedAt: currentTimestamp } 
             : order
         );
       
       setUserOrders(updateOrderSummary);
       setBusinessOrders(updateOrderSummary);
+      
+      // Notify about the status change for in-app notification
+      setNewStatusNotification({
+        orderId,
+        orderNumber: orderData.orderNumber,
+        status,
+        timestamp: new Date()
+      });
+      
+      // Enviar una notificación local usando el NotificationService
+      try {
+        // Solo enviar notificaciones al usuario que hizo el pedido
+        if (orderData.userId && user?.uid !== orderData.userId) {
+          // No enviar notificación si el que actualiza no es el dueño del pedido
+          console.log('No enviando notificación porque el usuario actual no es el dueño del pedido');
+          return true;
+        }
+        
+        // Títulos y mensajes según el estado
+        const getNotificationTitle = () => {
+          switch(status) {
+            case 'paid': return 'Pago confirmado';
+            case 'preparing': return 'Pedido en preparación';
+            case 'in_transit': return 'Pedido en camino';
+            case 'delivered': return '¡Pedido entregado!';
+            case 'canceled': return 'Pedido cancelado';
+            case 'refunded': return 'Pedido reembolsado';
+            default: return 'Actualización de pedido';
+          }
+        };
+        
+        const getNotificationBody = () => {
+          switch(status) {
+            case 'paid': return `Tu pago para el pedido #${orderData.orderNumber} ha sido confirmado.`;
+            case 'preparing': return `Tu pedido #${orderData.orderNumber} está siendo preparado.`;
+            case 'in_transit': return `Tu pedido #${orderData.orderNumber} está en camino.${options?.estimatedDeliveryTime ? ' Llegará pronto.' : ''}`;
+            case 'delivered': return `Tu pedido #${orderData.orderNumber} ha sido entregado. ¡Buen provecho!`;
+            case 'canceled': return `Tu pedido #${orderData.orderNumber} ha sido cancelado.`;
+            case 'refunded': return `Se ha procesado un reembolso para tu pedido #${orderData.orderNumber}.`;
+            default: return `El estado de tu pedido #${orderData.orderNumber} ha sido actualizado.`;
+          }
+        };
+
+        // Usar el notificationService para enviar la notificación local
+        await notificationService.sendLocalNotification(
+          getNotificationTitle(),
+          getNotificationBody(),
+          {
+            type: 'order_status',
+            orderId,
+            status,
+            orderNumber: orderData.orderNumber
+          }
+        );
+        
+        // También guardar en la colección de notificaciones para que aparezca en el historial
+        const notificationRef = collection(db, 'notifications');
+        await addDoc(notificationRef, {
+          userId: orderData.userId,
+          businessId: orderData.businessId,
+          title: getNotificationTitle(),
+          message: getNotificationBody(),
+          type: 'order',
+          read: false,
+          data: {
+            orderId,
+            status,
+            orderNumber: orderData.orderNumber
+          },
+          createdAt: currentTimestamp
+        });
+      } catch (notifError) {
+        // Si falla el envío de notificación, solo lo registramos pero no fallamos la actualización
+        console.error('Error al enviar notificación:', notifError);
+      }
       
       return true;
     } catch (error: any) {
@@ -458,6 +630,24 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
     }
   };
 
+  const dismissNotification = () => {
+    setNewStatusNotification(null);
+  };
+
+  // Nueva función para establecer la navegación pendiente
+  const setPendingOrderNavigation = (data: { orderId: string }) => {
+    setPendingOrderNavigationState({
+      orderId: data.orderId,
+      shouldNavigate: true,
+      timestamp: Date.now()
+    });
+  };
+
+  // Nueva función para limpiar la navegación pendiente
+  const clearPendingOrderNavigation = () => {
+    setPendingOrderNavigationState(null);
+  };
+
   return (
     <OrderContext.Provider
       value={{
@@ -467,14 +657,20 @@ export const OrderProvider: React.FC<{children: React.ReactNode}> = ({ children 
         currentOrderId,
         isLoading,
         error,
+        newStatusNotification,
+        dismissNotification,
         createOrder,
         getOrder,
         updateOrderStatus,
         loadUserOrders,
         loadBusinessOrders,
         setCurrentOrderId,
+        setBusinessOrders,
         cancelOrder,
-        getLastUncompletedOrder
+        getLastUncompletedOrder,
+        pendingOrderNavigation,
+        setPendingOrderNavigation,
+        clearPendingOrderNavigation
       }}
     >
       {children}

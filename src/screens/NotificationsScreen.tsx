@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl
 } from 'react-native';
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -18,6 +18,8 @@ import { useChat } from '../context/ChatContext';
 import { Conversation } from '../../models/chatTypes';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
+import 'firebase/compat/firestore';
+import { OrderStatus } from '../context/OrderContext';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -27,7 +29,7 @@ interface NotificationItem {
   message: string;
   timestamp: Date;
   read: boolean;
-  type: 'chat' | 'system' | 'promo';
+  type: 'chat' | 'system' | 'promo' | 'order';
   data?: any;
 }
 
@@ -38,6 +40,10 @@ const NotificationsScreen: React.FC = () => {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Ref for listener and mount state
+  const isMounted = useRef(true);
+  const notificationsListener = useRef<(() => void) | null>(null);
 
   // Convert chat conversations with unread messages to notifications
   const generateNotificationsFromChats = useCallback((convs: Conversation[]) => {
@@ -97,65 +103,164 @@ const NotificationsScreen: React.FC = () => {
     return new Date();
   };
   
-  // Load notifications when component mounts
+  // Setup lifecycle and cleanup
   useEffect(() => {
-    loadNotifications();
-  }, [conversations]);
+    isMounted.current = true;
+    
+    return () => {
+      isMounted.current = false;
+      
+      // Clean up listener if it exists
+      if (notificationsListener.current) {
+        console.log('[NotificationsScreen] Cleaning up notifications listener on unmount');
+        notificationsListener.current();
+        notificationsListener.current = null;
+      }
+    };
+  }, []);
   
-  // Refresh data when screen gets focus
-  useFocusEffect(
-    useCallback(() => {
-      refreshNotifications();
-      return () => {};
-    }, [])
-  );
+  // Setup real-time listener for notifications - separate from conversations effect
+  useEffect(() => {
+    const currentUser = firebase.auth().currentUser;
+    if (!currentUser || !isMounted.current) return;
+    
+    const userId = currentUser.uid;
+    console.log('[NotificationsScreen] Setting up notifications listener');
+    
+    // Cargar notificaciones iniciales
+    loadNotifications();
+    
+    // Only set up the listener if it doesn't already exist
+    if (!notificationsListener.current) {
+      // Set up real-time listener for order notifications
+      const notificationsRef = firebase.firestore().collection('notifications');
+      const query = notificationsRef
+        .where('userId', '==', userId)
+        .where('type', '==', 'order')
+        .orderBy('createdAt', 'desc')
+        .limit(50);
+      
+      // Store the unsubscribe function
+      notificationsListener.current = query.onSnapshot(
+        (snapshot) => {
+          // Only update if component is still mounted
+          if (!isMounted.current) return;
+          
+          console.log(`[NotificationsScreen] Notifications listener triggered with ${snapshot.docs.length} items`);
+          
+          const orderNotifications = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              title: data.title || 'Actualización de pedido',
+              message: data.message || 'El estado de tu pedido ha cambiado',
+              timestamp: convertTimestamp(data.createdAt),
+              read: data.read || false,
+              type: 'order' as const,
+              data: data.data || {}
+            };
+          });
+          
+          // Generate chat notifications
+          const chatNotifications = generateNotificationsFromChats(conversations);
+          
+          // Combine and sort all notifications
+          const allNotifications = [
+            ...chatNotifications,
+            ...orderNotifications,
+          ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+          
+          setNotifications(allNotifications);
+          setLoading(false);
+          setRefreshing(false);
+        },
+        (error) => {
+          console.error('[NotificationsScreen] Error in notifications listener:', error);
+          if (!isMounted.current) return;
+          
+          setLoading(false);
+          setRefreshing(false);
+          
+          // Fallback to chat notifications only if Firestore listener fails
+          const chatNotifications = generateNotificationsFromChats(conversations);
+          setNotifications(chatNotifications);
+        }
+      );
+    }
+  }, [firebase.auth().currentUser?.uid]); // Reference current user uid correctly
+  
+  // Update notifications when conversations change
+  useEffect(() => {
+    if (!isMounted.current) return;
+    
+    // Only update if we're not already refreshing
+    if (!refreshing) {
+      const chatNotifications = generateNotificationsFromChats(conversations);
+      
+      if (notifications.length > 0) {
+        // Preserve order notifications and update chat notifications
+        const orderNotifications = notifications.filter(n => n.type === 'order');
+        
+        const allNotifications = [
+          ...chatNotifications,
+          ...orderNotifications,
+        ].sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        
+        setNotifications(allNotifications);
+      } else {
+        setNotifications(chatNotifications);
+      }
+    }
+  }, [conversations]);
 
-  // Load notifications
+  // Load notifications (manual non-listener version)
   const loadNotifications = () => {
+    if (!isMounted.current) return;
+    
     setLoading(true);
     
     try {
       // Convert chat conversations to notifications
       const chatNotifications = generateNotificationsFromChats(conversations);
       
-      // Here you could add other types of notifications (system, promos, etc.)
-      // const systemNotifications = [...];
-      // const promoNotifications = [...];
-      
-      // Combine all notifications
-      const allNotifications = [
-        ...chatNotifications,
-        // ...systemNotifications,
-        // ...promoNotifications
-      ];
-      
-      setNotifications(allNotifications);
+      // We'll get order notifications from the listener, but set initial value
+      setNotifications(chatNotifications);
     } catch (error) {
       console.error('[NotificationsScreen] Error loading notifications:', error);
-    } finally {
-      setLoading(false);
     }
   };
   
   // Pull-to-refresh handler
   const refreshNotifications = async () => {
+    if (!isMounted.current) return;
+    
     setRefreshing(true);
     
     try {
       // Refresh conversations to get latest unread messages
       await refreshConversations();
       
-      // Refresh notifications
-      loadNotifications();
+      // The listeners will update the UI automatically
     } catch (error) {
       console.error('[NotificationsScreen] Error refreshing notifications:', error);
-    } finally {
       setRefreshing(false);
     }
   };
   
   // Handle notification press
   const handleNotificationPress = (notification: NotificationItem) => {
+    if (!isMounted.current) return;
+    
+    // Marcar notificación como leída (solo si es de Firestore)
+    if (!notification.id.includes('_')) {
+      // Solo actualizar si es una notificación real de Firestore (no tiene '_' en el ID)
+      firebase.firestore()
+        .collection('notifications')
+        .doc(notification.id)
+        .update({ read: true })
+        .catch(error => console.error('[NotificationsScreen] Error marking notification as read:', error));
+    }
+    
     // Navigate based on notification type
     switch (notification.type) {
       case 'chat':
@@ -163,6 +268,15 @@ const NotificationsScreen: React.FC = () => {
         if (notification.data?.conversationId) {
           navigation.navigate('Chat', { 
             conversationId: notification.data.conversationId 
+          });
+        }
+        break;
+        
+      case 'order':
+        // Navigate to the order details
+        if (notification.data?.orderId) {
+          navigation.navigate('OrderDetails', { 
+            orderId: notification.data.orderId 
           });
         }
         break;
@@ -227,6 +341,13 @@ const NotificationsScreen: React.FC = () => {
         {item.type === 'promo' && (
           <MaterialIcons name="local-offer" size={24} color="#34C759" />
         )}
+        {item.type === 'order' && (
+          <MaterialIcons 
+            name={getOrderStatusIcon(item.data?.status)} 
+            size={24} 
+            color={getOrderStatusColor(item.data?.status)} 
+          />
+        )}
       </View>
       
       <View style={styles.notificationContent}>
@@ -251,6 +372,34 @@ const NotificationsScreen: React.FC = () => {
       </View>
     </TouchableOpacity>
   );
+  
+  // Obtener el icono según el estado del pedido
+  const getOrderStatusIcon = (status?: OrderStatus): any => {
+    switch(status) {
+      case 'created': return 'receipt';
+      case 'paid': return 'payments';
+      case 'preparing': return 'restaurant';
+      case 'in_transit': return 'local-shipping';
+      case 'delivered': return 'check-circle';
+      case 'canceled': return 'cancel';
+      case 'refunded': return 'money-off';
+      default: return 'shopping-bag';
+    }
+  };
+  
+  // Obtener el color según el estado del pedido
+  const getOrderStatusColor = (status?: OrderStatus): string => {
+    switch(status) {
+      case 'created': return '#007AFF'; // Blue
+      case 'paid': return '#5856D6';    // Purple
+      case 'preparing': return '#FF9500'; // Orange
+      case 'in_transit': return '#FF3B30'; // Red
+      case 'delivered': return '#34C759'; // Green
+      case 'canceled': return '#8E8E93';  // Gray
+      case 'refunded': return '#FF2D55';  // Pink
+      default: return '#007AFF';         // Default blue
+    }
+  };
   
   // Render empty state
   const renderEmptyState = () => (

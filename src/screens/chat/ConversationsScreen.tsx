@@ -530,30 +530,6 @@ const ConversationsScreen: React.FC = () => {
     }
   }, [isMultiSelectActive, toggleConversationSelection, actionBarSlideAnim]);
   
-  // Función para probar notificaciones locales
-  const testNotification = useCallback(async () => {
-    try {
-      // Usar el servicio importado correctamente
-      const result = await NotificationService.sendLocalNotification(
-        "Notificación de prueba",
-        "Esta es una notificación local de prueba para Localfy",
-        { type: 'test' }
-      );
-      
-      if (result.success) {
-        // Vibración para confirmar
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        console.log('[ConversationsScreen] Notificación de prueba enviada');
-      } else {
-        console.warn('[ConversationsScreen] Error enviando notificación:', result.error);
-        Alert.alert("Error", result.error?.message || "No se pudo enviar la notificación de prueba");
-      }
-    } catch (error: any) {
-      console.error('[ConversationsScreen] Error enviando notificación de prueba:', error);
-      Alert.alert("Error", "No se pudo enviar la notificación de prueba");
-    }
-  }, []);
-  
   // Determine which conversations to show
   const displayedConversations = useMemo(() => {
     const convList = isSearchActive ? filteredConversations : conversations;
@@ -1152,20 +1128,6 @@ const ConversationsScreen: React.FC = () => {
         </TouchableOpacity>
       </Animated.View>
       
-      {/* Botón flotante para probar notificaciones (solo en desarrollo) */}
-      {__DEV__ && !isMultiSelectActive && (
-        <TouchableOpacity 
-          style={[
-            styles.testNotificationButton,
-            isMultiSelectActive && { bottom: 150 } // Mover más arriba si está en modo selección
-          ]}
-          onPress={testNotification}
-          activeOpacity={0.8}
-        >
-          <MaterialIcons name="notifications" size={24} color="#FFFFFF" />
-        </TouchableOpacity>
-      )}
-      
       {/* Añadimos un indicador en la parte superior cuando estamos en modo selección */}
       {isMultiSelectActive && (
         <View style={styles.selectionModeBar}>
@@ -1393,23 +1355,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 15,
   },
-  testNotificationButton: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 5,
-    elevation: 5,
-    zIndex: 999,
-  },
   headerButtons: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1430,7 +1375,7 @@ const styles = StyleSheet.create({
   },
   actionBar: {
     position: 'absolute',
-    bottom: Platform.OS === 'ios' ? 80 : 60, // Ajustamos para que esté por encima de la navegación
+    bottom: Platform.OS === 'ios' ? 85 : 75, // Ajustamos para que esté por encima de la navegación
     left: 16,
     right: 16,
     backgroundColor: '#FFFFFF',

@@ -4,10 +4,26 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Business } from '../../context/BusinessContext';
 import { BusinessAnalytics, TimePeriod } from '../../types/analyticsTypes';
 import StatisticCard from './StatisticCard';
-import TrendsChart from './TrendsChart';
-import PerformanceIndicator from './PerformanceIndicator';
 import ActionCenter from './ActionCenter';
 import { analyticsService } from '../../services/analyticsService';
+
+// Import TrendsChart with error handling
+let TrendsChart;
+try {
+  TrendsChart = require('./TrendsChart').default;
+} catch (error) {
+  console.warn('Failed to import TrendsChart component:', error);
+  TrendsChart = null;
+}
+
+// Import PerformanceIndicator with error handling
+let PerformanceIndicator;
+try {
+  PerformanceIndicator = require('./PerformanceIndicator').default;
+} catch (error) {
+  console.warn('Failed to import PerformanceIndicator component:', error);
+  PerformanceIndicator = null;
+}
 
 interface BusinessDashboardProps {
   analytics: BusinessAnalytics | null;
@@ -226,11 +242,20 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
           </ScrollView>
           
           {/* Gráfico de tendencias */}
-          <TrendsChart 
-            data={analytics.visitsData?.[selectedPeriod] || []} 
-            period={selectedPeriod} 
-            isLoading={isRefreshing}
-          />
+          {TrendsChart ? (
+            <TrendsChart 
+              data={analytics.visitsData?.[selectedPeriod] || []} 
+              period={selectedPeriod} 
+              isLoading={isRefreshing}
+            />
+          ) : (
+            <View style={styles.chartFallback}>
+              <MaterialIcons name="analytics" size={32} color="#C7C7CC" />
+              <Text style={styles.chartFallbackText}>
+                Los gráficos no están disponibles en este momento.
+              </Text>
+            </View>
+          )}
           
           {/* Indicadores de rendimiento */}
           <View style={styles.sectionHeader}>
@@ -247,15 +272,23 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = ({
             )}
           </View>
           
-          {businesses.slice(0, 3).map((business) => (
-            <PerformanceIndicator 
-              key={business.id}
-              business={business}
-              analytics={analytics.businessesAnalytics?.[business.id]}
-              onPress={() => onSelectBusiness(business.id)}
-              isLoading={isRefreshing}
-            />
-          ))}
+          {PerformanceIndicator ? (
+            businesses.slice(0, 3).map((business) => (
+              <PerformanceIndicator 
+                key={business.id}
+                business={business}
+                analytics={analytics.businessesAnalytics?.[business.id]}
+                onPress={() => onSelectBusiness(business.id)}
+                isLoading={isRefreshing}
+              />
+            ))
+          ) : (
+            <View style={styles.chartFallback}>
+              <Text style={styles.chartFallbackText}>
+                Los indicadores de rendimiento no están disponibles en este momento.
+              </Text>
+            </View>
+          )}
           
           {/* Centro de acción */}
           <ActionCenter 
@@ -404,7 +437,22 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontSize: 14,
     marginLeft: 4,
-  }
+  },
+  chartFallback: {
+    backgroundColor: '#F5F7FF',
+    padding: 20,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 12,
+    minHeight: 150,
+  },
+  chartFallbackText: {
+    color: '#8E8E93',
+    textAlign: 'center',
+    marginTop: 12,
+    fontSize: 14,
+  },
 });
 
 export default BusinessDashboard;

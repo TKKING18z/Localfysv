@@ -10,6 +10,7 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import { StoreProvider } from './src/context/StoreContext';
 import { CartProvider } from './src/context/CartContext';
 import { OrderProvider } from './src/context/OrderContext';
+import { ChatProvider } from './src/context/ChatContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from './firebase.config';
 import 'react-native-gesture-handler';
@@ -25,11 +26,17 @@ LogBox.ignoreLogs([
   'AsyncStorage has been extracted',
   'Deprecation warning: value provided is not in a recognized RFC2822',
   'NativeEventEmitter',
-  'ViewPropTypes will be removed'
+  'ViewPropTypes will be removed',
+  // Añadir otras advertencias específicas de Expo SDK 52 que podamos necesitar ignorar
+  'Linking API error:',
+  'expo-constants is now autolinking',
+  'expo-location requires',
+  'react-native-safe-area-context changes'
 ]);
 
 // Prevenir que la pantalla de splash se oculte automáticamente
-SplashScreen.preventAutoHideAsync().catch(() => {
+SplashScreen.preventAutoHideAsync().catch((error) => {
+  console.warn('Error preventing splash screen auto hide:', error);
   /* revert to default behavior if something goes wrong */
 });
 
@@ -73,9 +80,6 @@ export default function App() {
       // Mantener pantalla de carga por al menos 1.5 segundos para mejor UX
       const timer = setTimeout(() => {
         setIsLoading(false);
-        SplashScreen.hideAsync().catch(() => {
-          /* ignore if something goes wrong */
-        });
       }, 1500);
       
       return () => clearTimeout(timer);
@@ -119,7 +123,9 @@ export default function App() {
                 <BusinessProvider>
                   <CartProvider>
                     <OrderProvider>
-                      <AppNavigator />
+                      <ChatProvider>
+                        <AppNavigator />
+                      </ChatProvider>
                     </OrderProvider>
                   </CartProvider>
                 </BusinessProvider>

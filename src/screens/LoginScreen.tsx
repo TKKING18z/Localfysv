@@ -195,7 +195,7 @@ const LoginScreen: React.FC = () => {
                 >
                     <View style={styles.logoWrapper}>
                         <Image
-                            source={require('../../assets/Icon.png')}
+                            source={require('../../assets/icon.png')}
                             style={styles.logo}
                         />
                     </View>

@@ -19,12 +19,13 @@ type OnboardingNavigationProp = NativeStackNavigationProp<RootStackParamList, 'O
 
 type OnboardingScreenRouteProp = RouteProp<RootStackParamList, 'Onboarding'>;
 
+// Utilizando animaciones Lottie
 const slides = [
   {
     id: '1',
     title: 'Descubre Negocios Locales',
     description: 'Encuentra los mejores negocios cerca de ti en El Salvador.',
-    image: require('../../../assets/animations/discover.json'), // Reemplaza con tus imágenes
+    image: require('../../../assets/animations/discover.json'), 
   },
   {
     id: '2',

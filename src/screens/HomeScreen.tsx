@@ -607,7 +607,7 @@ const HomeScreen: React.FC = () => {
       <View style={styles.header}>
         <View style={styles.logoContainer}>
           <Image
-            source={require('../../assets/Icon.png')}
+            source={require('../../assets/icon.png')}
             style={styles.logo}
           />
           <Text style={styles.title}>Localfy</Text>

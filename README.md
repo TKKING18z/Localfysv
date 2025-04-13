@@ -121,6 +121,91 @@ La aplicación cuenta con un servidor de procesamiento de pagos que:
 
 Para contribuir al proyecto, consulta el archivo CLAUDE.md para conocer las convenciones de código y estilo.
 
+## Patrones de optimización implementados
+
+### Prevención de ciclos de montaje/desmontaje
+
+Se ha implementado un patrón específico para resolver problemas de ciclos infinitos de montaje/desmontaje en varias pantallas críticas:
+
+#### Problema identificado
+- Algunas pantallas (BusinessOrdersScreen, OrdersListScreen, PaymentScreen) entraban en un ciclo infinito de montaje/desmontaje
+- Esto generaba logs infinitos en la consola y problemas de rendimiento
+- Causado por dependencias circulares entre listeners de Firestore y estados globales de contexto
+
+#### Solución implementada
+La solución consiste en:
+
+1. **Uso de referencias inmutables con useRef**:
+   - `isMountedRef` para controlar si el componente está montado
+   - `routeParamsRef` para almacenar los parámetros de ruta de forma inmutable
+   - Referencias a listeners y recursos para su limpieza adecuada
+
+2. **Un solo efecto principal sin dependencias**:
+   ```jsx
+   useEffect(() => {
+     // Inicialización
+     isMountedRef.current = true;
+     
+     // Configurar listeners
+     const unsubscribe = setupResourceListener();
+     
+     // Limpieza
+     return () => {
+       isMountedRef.current = false;
+       if (unsubscribe) unsubscribe();
+     };
+   }, []); // Sin dependencias para evitar remontaje
+   ```
+
+3. **Verificación de estado de montaje**:
+   - Revisar `isMountedRef.current` antes de actualizar estados
+   - No realizar operaciones asíncronas si el componente ya no está montado
+
+4. **Manejo local de estados en vez de sincronización bidireccional**:
+   - Evitar actualizar el estado global y local simultáneamente
+   - Preferir el estado local para datos recuperados de Firestore
+
+#### Pantallas optimizadas
+Este patrón se aplicó en:
+- `BusinessOrdersScreen.tsx`
+- `OrdersListScreen.tsx`
+- `PaymentScreen.tsx`
+
 ## Licencia
 
 Propiedad de Localfy. Todos los derechos reservados.
+
+## Soluciones técnicas avanzadas
+
+### Resolución de navegación post-pago
+
+Se implementó una solución robusta para resolver los problemas de navegación entre la pantalla de pago (PaymentScreen) y la confirmación de orden (OrderConfirmationScreen). El problema se manifestaba como ciclos infinitos de montaje/desmontaje sin llegar a mostrar la confirmación.
+
+#### Técnicas aplicadas
+
+1. **Servicio de navegación global**
+   - Se implementó un servicio NavigationService centralizado que maneja todas las solicitudes de navegación fuera del ciclo de vida de los componentes.
+   - Incluye una cola de navegación que procesa las solicitudes secuencialmente con intervalos controlados.
+   - Utiliza navigationRef para acceder al NavigationContainer desde cualquier parte.
+
+2. **Pantalla intermedia de carga**
+   - Se creó OrderLoadingScreen como buffer entre el pago y la confirmación.
+   - Esta pantalla maneja la carga de datos de forma independiente y navega solo cuando tiene datos completos.
+   - Implementa reintentos automáticos y comunicación clara al usuario.
+
+3. **Gestión avanzada de ciclo de vida**
+   - Se implementó un patrón con referencias inmutables (useRef) para controlar el estado de montaje.
+   - Las referencias clave incluyen: isMountedRef, routeParamsRef, processingPaymentRef.
+   - Verificación sistemática de estado de montaje antes de cualquier actualización de estado o navegación.
+
+4. **Prevención de condiciones de carrera**
+   - Control de montajes simultáneos mediante Set global (loadingOrders).
+   - Uso de useEffect con dependencias vacías [] para ejecutar código solo una vez.
+   - InteractionManager para asegurar que la navegación ocurra después de terminadas las animaciones.
+
+5. **Hooks consistentes**
+   - Eliminación de componentes anidados que causaban problemas de hooks (AppWithChat extraído).
+   - Evitar returns tempranos en useEffect que pudieran afectar la ejecución de otros hooks.
+   - Estructura consistente de hooks en cada componente para prevenir errores "Rendered more hooks than during previous render".
+
+Esta combinación de técnicas resolvió completamente el problema de navegación, permitiendo un flujo fluido desde el pago hasta la confirmación de pedido, incluso en dispositivos con recursos limitados o conexiones inestables.

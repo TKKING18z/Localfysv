@@ -9,9 +9,18 @@ import {
   ScrollView,
   Platform
 } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
-import { DataPoint, TimePeriod } from '../../types/analyticsTypes';
 import { MaterialIcons } from '@expo/vector-icons';
+import { DataPoint, TimePeriod } from '../../types/analyticsTypes';
+
+// Import LineChart with error handling to avoid crash
+let LineChart;
+try {
+  LineChart = require('react-native-chart-kit').LineChart;
+} catch (error) {
+  // SVG dependency not available
+  console.warn('SVG charts are not available:', error);
+  LineChart = null;
+}
 
 interface TrendsChartProps {
   data: DataPoint[];
@@ -334,32 +343,41 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.scrollContainer}
         >
-          <LineChart
-            data={chartData}
-            width={getChartWidth()}
-            height={height}
-            chartConfig={chartConfig}
-            bezier
-            style={styles.chart}
-            withDots={optimizedData.length <= 15} // Mostrar puntos solo si hay pocos datos
-            withShadow
-            withInnerLines
-            withOuterLines
-            withVerticalLines={optimizedData.length <= 20} // Líneas verticales solo si hay pocos datos
-            withHorizontalLines
-            fromZero
-            yAxisSuffix={yAxisSuffix}
-            segments={5}
-            // Configuración para prevenir sobresaturación
-            withHorizontalLabels={true}
-            horizontalLabelRotation={0}
-            verticalLabelRotation={0}
-          />
+          {LineChart ? (
+            <LineChart
+              data={chartData}
+              width={getChartWidth()}
+              height={height}
+              chartConfig={chartConfig}
+              bezier
+              style={styles.chart}
+              withDots={optimizedData.length <= 15}
+              withShadow
+              withInnerLines
+              withOuterLines
+              withVerticalLines={optimizedData.length <= 20}
+              withHorizontalLines
+              fromZero
+              yAxisSuffix={yAxisSuffix}
+              segments={5}
+              withHorizontalLabels={true}
+              horizontalLabelRotation={0}
+              verticalLabelRotation={0}
+            />
+          ) : (
+            <View style={[styles.noDataContainer, { width: getChartWidth() }]}>
+              <MaterialIcons name="bar-chart" size={32} color="#C7C7CC" />
+              <Text style={styles.noDataText}>Los gráficos no están disponibles en este momento.</Text>
+              <Text style={[styles.noDataText, { fontSize: 14, marginTop: 8 }]}>
+                Se requiere react-native-svg para mostrar gráficos.
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </View>
       
       {/* Leyenda para distinguir comportamientos */}
-      {optimizedData.length > 0 && (
+      {optimizedData.length > 0 && LineChart && (
         <View style={styles.chartLegend}>
           <Text style={styles.legendText}>
             {selectedPeriod === TimePeriod.DAY 

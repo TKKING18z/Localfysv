@@ -687,7 +687,7 @@ const BusinessDetailScreen: React.FC = () => {
               transition={500}
               cachePolicy="memory-disk"
               contentPosition="center"
-              placeholder={Platform.OS === 'ios' ? null : { color: getPlaceholderColor }}
+              placeholder={Platform.OS === 'ios' ? null : getPlaceholderColor}
               accessibilityLabel={`Imagen principal de ${business.name}`}
             />
           ) : (
@@ -1505,6 +1505,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 20,
+    backgroundColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
@@ -1652,6 +1653,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 14,
+    backgroundColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1740,6 +1742,7 @@ const styles = StyleSheet.create({
     margin: 5,
     overflow: 'hidden',
     elevation: 4,
+    backgroundColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.2,
@@ -1750,6 +1753,7 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 16,
     marginHorizontal: -44, // Increased horizontal margin for more separation
+    backgroundColor: 'white',
   },
   actionButtonGradient: {
     flexDirection: 'column',

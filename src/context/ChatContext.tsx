@@ -60,15 +60,36 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   const [unreadTotal, setUnreadTotal] = useState<number>(0);
   const [isOffline, setIsOffline] = useState<boolean>(false);
   
-  // Referencia para almacenar IDs de mensajes que ya se notificaron
-  // Usamos useRef para mantener este valor sin causar re-renders
-  const notifiedMessageIds = useRef<Set<string>>(new Set());
+  // Add flag to track if conversations have already been loaded for this user
+  const conversationsLoadedForUser = useRef<string | null>(null);
   
-  // Initialize network connectivity listener
+  // Reference for storing message IDs that have already been notified
+  const notifiedMessageIds = useRef<Set<string>>(new Set());
+
+  // Reference for conversation listener unsubscribe function
+  const conversationListenerUnsubscribe = useRef<(() => void) | null>(null);
+  
+  // Use a ref to store active message listeners to avoid dependency issues
+  const activeMessageListener = useRef<(() => void) | null>(null);
+  
+  // Reference for connection listener
+  const connectionListenerUnsubscribe = useRef<(() => void) | null>(null);
+  
+  // Initialize network connectivity listener with better cleanup
   useEffect(() => {
+    // Prevent duplicate listeners
+    if (connectionListenerUnsubscribe.current) {
+      connectionListenerUnsubscribe.current();
+      connectionListenerUnsubscribe.current = null;
+    }
+    
+    console.log('[ChatContext] Setting up network connectivity listener');
     const unsubscribe = NetInfo.addEventListener(state => {
       setIsOffline(!state.isConnected);
     });
+    
+    // Store the unsubscribe function
+    connectionListenerUnsubscribe.current = unsubscribe;
     
     // Check initial connection state
     NetInfo.fetch().then(state => {
@@ -76,10 +97,47 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     });
     
     return () => {
-      unsubscribe();
+      console.log('[ChatContext] Cleaning up network connectivity listener');
+      if (connectionListenerUnsubscribe.current) {
+        connectionListenerUnsubscribe.current();
+        connectionListenerUnsubscribe.current = null;
+      }
     };
   }, []);
-
+  
+  // Cleanup function for all listeners
+  const cleanupAllListeners = useCallback(() => {
+    console.log('[ChatContext] Cleaning up all listeners');
+    
+    // Clean up active message listener
+    if (activeMessageListener.current) {
+      console.log('[ChatContext] Cleaning up active message listener');
+      activeMessageListener.current();
+      activeMessageListener.current = null;
+    }
+    
+    // Clean up conversation listener
+    if (conversationListenerUnsubscribe.current) {
+      console.log('[ChatContext] Cleaning up conversation listener');
+      conversationListenerUnsubscribe.current();
+      conversationListenerUnsubscribe.current = null;
+    }
+    
+    // Clean up connection listener
+    if (connectionListenerUnsubscribe.current) {
+      console.log('[ChatContext] Cleaning up connection listener');
+      connectionListenerUnsubscribe.current();
+      connectionListenerUnsubscribe.current = null;
+    }
+  }, []);
+  
+  // Clean up all listeners when the component unmounts
+  useEffect(() => {
+    return () => {
+      cleanupAllListeners();
+    };
+  }, [cleanupAllListeners]);
+  
   // Define markConversationAsRead early to avoid circular dependency
   const markConversationAsRead = useCallback(async () => {
     if (!user || !activeConversation) {
@@ -212,6 +270,12 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
       return;
     }
     
+    // Skip if already loaded for this user to prevent infinite loops
+    if (conversationsLoadedForUser.current === user.uid) {
+      console.log('[ChatContext] Conversations already loaded for this user, skipping');
+      return;
+    }
+    
     setLoading(true);
     setError(null);
     
@@ -249,6 +313,9 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         } catch (cacheError) {
           console.warn('[ChatContext] Failed to cache conversations:', cacheError);
         }
+        
+        // Mark as loaded for this user to prevent repeated loading
+        conversationsLoadedForUser.current = user.uid;
       } else {
         console.error('[ChatContext] Failed to load conversations:', result.error);
         setError(result.error?.message || 'Error al cargar conversaciones');
@@ -304,26 +371,57 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   // Load initial conversations
   useEffect(() => {
     if (user) {
-      console.log('[ChatContext] Loading initial conversations for user:', user.uid);
-      loadConversations();
+      // Check if we already loaded for this user
+      if (conversationsLoadedForUser.current !== user.uid) {
+        console.log('[ChatContext] Loading initial conversations for user:', user.uid);
+        loadConversations();
+      } else {
+        console.log('[ChatContext] Skipping initial load - already loaded for user:', user.uid);
+      }
     } else {
       console.log('[ChatContext] No user logged in, resetting conversations');
       setConversations([]);
       setActiveConversation(null);
       setActiveMessages([]);
       setUnreadTotal(0);
+      conversationsLoadedForUser.current = null;
     }
   }, [user, loadConversations]);
   
-  // Load active conversation when ID changes
+  // Load active conversation when ID changes - with better cleanup
   useEffect(() => {
+    // Clean up previous active message listener
+    if (activeMessageListener.current) {
+      console.log('[ChatContext] Cleaning up previous message listener');
+      activeMessageListener.current();
+      activeMessageListener.current = null;
+    }
+    
     if (activeConversationId && user) {
       console.log(`[ChatContext] Loading active conversation: ${activeConversationId}`);
-      loadActiveConversation(activeConversationId);
+      
+      // Use a separate function to prevent hook dependency issues
+      const setupActiveConversation = async () => {
+        const unsubscribe = await loadActiveConversation(activeConversationId);
+        if (typeof unsubscribe === 'function') {
+          activeMessageListener.current = unsubscribe;
+        }
+      };
+      
+      setupActiveConversation();
     } else {
       setActiveConversation(null);
       setActiveMessages([]);
     }
+    
+    // Clean up when component unmounts or conversation ID changes
+    return () => {
+      if (activeMessageListener.current) {
+        console.log('[ChatContext] Cleaning up message listener on conversation change');
+        activeMessageListener.current();
+        activeMessageListener.current = null;
+      }
+    };
   }, [activeConversationId, user]);
 
   // Function to update unread count
@@ -497,6 +595,9 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
         } catch (cacheError) {
           console.warn('[ChatContext] Failed to update conversation cache:', cacheError);
         }
+        
+        // Update load flag for the current user since we've refreshed
+        conversationsLoadedForUser.current = user.uid;
       } else {
         console.error('[ChatContext] Failed to refresh conversations:', result.error);
         setError(result.error?.message || 'Error al cargar conversaciones');

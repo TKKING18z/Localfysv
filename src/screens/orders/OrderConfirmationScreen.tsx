@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,61 +25,164 @@ type OrderConfirmationScreenNavigationProp = StackNavigationProp<RootStackParamL
 const OrderConfirmationScreen: React.FC = () => {
   const navigation = useNavigation<OrderConfirmationScreenNavigationProp>();
   const route = useRoute<OrderConfirmationScreenRouteProp>();
-  const { orderId, orderNumber } = route.params;
-  const { getOrder, isLoading, error } = useOrders();
   
-  const [order, setOrder] = useState<Order | null>(null);
+  // Referencias para manejo de ciclo de vida
+  const isMountedRef = useRef(true);
+  const routeParamsRef = useRef({
+    orderId: route.params?.orderId || '',
+    orderNumber: route.params?.orderNumber || '',
+    preloadedOrder: route.params?.preloadedOrder // Capturar el pedido precargado
+  });
+  
+  // Referencias a servicios y navegación
+  const { getOrder, pendingOrderNavigation, clearPendingOrderNavigation } = useOrders();
+  
+  // Estados locales
+  const [order, setOrder] = useState<Order | null>(
+    routeParamsRef.current.preloadedOrder || null // Usar el pedido precargado si existe
+  );
+  const [isLoading, setIsLoading] = useState(!routeParamsRef.current.preloadedOrder);
+  const [error, setError] = useState<string | null>(null);
   const [successAnimation] = useState(new Animated.Value(0));
   
+  // Verificar si hay datos en el contexto
   useEffect(() => {
-    const loadOrder = async () => {
-      const orderData = await getOrder(orderId);
-      if (orderData) {
-        setOrder(orderData);
+    // Comprobar si tenemos información pendiente en el contexto
+    if (pendingOrderNavigation && pendingOrderNavigation.shouldNavigate) {
+      console.log('Se encontró una navegación pendiente en OrderContext:', pendingOrderNavigation);
+      
+      // Si no tenemos orderId o estamos viendo otro pedido, actualizar
+      if (!routeParamsRef.current.orderId || 
+          routeParamsRef.current.orderId !== pendingOrderNavigation.orderId) {
         
-        // Animate success checkmark
-        Animated.timing(successAnimation, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }).start();
+        console.log('Actualizando orderId con datos del contexto:', pendingOrderNavigation.orderId);
+        routeParamsRef.current.orderId = pendingOrderNavigation.orderId;
+      }
+      
+      // Limpiar la navegación pendiente
+      clearPendingOrderNavigation();
+    }
+  }, [pendingOrderNavigation, clearPendingOrderNavigation]);
+  
+  // Efecto principal único - patrón del README.md
+  useEffect(() => {
+    console.log("OrderConfirmationScreen montada con orderId:", routeParamsRef.current.orderId);
+    console.log("¿Tiene pedido precargado?", routeParamsRef.current.preloadedOrder ? "Sí" : "No");
+    
+    // Inicialización
+    isMountedRef.current = true;
+    
+    // Si tenemos un pedido precargado, solo iniciamos la animación
+    if (routeParamsRef.current.preloadedOrder) {
+      console.log("Usando pedido precargado, iniciando animación");
+      
+      // Animar el checkmark
+      Animated.timing(successAnimation, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }).start();
+      
+      // No necesitamos cargar datos adicionales
+      return;
+    }
+    
+    // Función para cargar el pedido (solo se ejecuta si no hay pedido precargado)
+    const loadOrder = async () => {
+      if (!routeParamsRef.current.orderId) {
+        console.error("No se recibió orderId en los parámetros de ruta");
+        if (isMountedRef.current) {
+          setError("No se pudo identificar el pedido");
+          setIsLoading(false);
+        }
+        return;
+      }
+      
+      try {
+        console.log("Intentando cargar datos del pedido:", routeParamsRef.current.orderId);
+        const orderData = await getOrder(routeParamsRef.current.orderId);
+        
+        // Verificar estado de montaje antes de actualizar el estado
+        if (!isMountedRef.current) {
+          console.log("Componente desmontado antes de recibir datos, cancelando actualización");
+          return;
+        }
+        
+        if (orderData) {
+          console.log("Datos del pedido cargados correctamente");
+          setOrder(orderData);
+          setIsLoading(false);
+          
+          // Animación de éxito
+          Animated.timing(successAnimation, {
+            toValue: 1,
+            duration: 800,
+            useNativeDriver: true,
+          }).start();
+        } else {
+          console.error("No se encontraron datos para el pedido");
+          setError("No se pudo encontrar información para este pedido");
+          setIsLoading(false);
+        }
+      } catch (err) {
+        console.error("Error al cargar el pedido:", err);
+        if (isMountedRef.current) {
+          setError("Error al cargar los detalles del pedido");
+          setIsLoading(false);
+        }
       }
     };
     
+    // Cargar datos solo si no hay pedido precargado
     loadOrder();
-  }, [orderId]);
+    
+    // Limpieza según el patrón README
+    return () => {
+      console.log("OrderConfirmationScreen desmontada - limpiando referencias");
+      isMountedRef.current = false;
+    };
+  }, []); // Sin dependencias - patrón del README
   
   const handleShareOrder = async () => {
-    if (!order) return;
+    // Verificar que el componente esté montado y que tenemos datos del pedido
+    if (!isMountedRef.current || !order) return;
     
     try {
+      console.log("Compartiendo información del pedido");
       const result = await Share.share({
         message: `¡He realizado un pedido en ${order.businessName}! Mi número de pedido es ${order.orderNumber}. Total: $${order.total.toFixed(2)}`,
         title: 'Mi pedido en Localfy',
       });
       
+      // Verificar nuevamente que el componente esté montado después de la operación asíncrona
+      if (!isMountedRef.current) return;
+      
       if (result.action === Share.sharedAction) {
-        if (result.activityType) {
-          // Shared with activity type of result.activityType
-          console.log(`Shared with ${result.activityType}`);
-        } else {
-          // Shared
-          console.log('Shared successfully');
-        }
+        console.log('Pedido compartido exitosamente');
       } else if (result.action === Share.dismissedAction) {
-        // Dismissed
-        console.log('Share dismissed');
+        console.log('Compartir cancelado por el usuario');
       }
     } catch (error: any) {
-      Alert.alert('Error', error.message);
+      // Verificar que el componente esté montado antes de mostrar una alerta
+      if (isMountedRef.current) {
+        Alert.alert('Error', error.message);
+      }
     }
   };
   
   const handleViewOrderDetails = () => {
-    navigation.navigate('OrderDetails', { orderId });
+    // Verificar que el componente esté montado antes de iniciar la navegación
+    if (!isMountedRef.current) return;
+    
+    console.log("Navegando a detalles del pedido:", routeParamsRef.current.orderId);
+    navigation.navigate('OrderDetails', { orderId: routeParamsRef.current.orderId });
   };
   
   const handleBackToHome = () => {
+    // Verificar que el componente esté montado antes de iniciar la navegación
+    if (!isMountedRef.current) return;
+    
+    console.log("Volviendo al inicio");
     navigation.reset({
       index: 0,
       routes: [{ name: 'MainTabs' }],
@@ -166,7 +269,7 @@ const OrderConfirmationScreen: React.FC = () => {
         <View style={styles.orderInfoContainer}>
           <View style={styles.orderNumberContainer}>
             <Text style={styles.orderNumberLabel}>Número de Pedido:</Text>
-            <Text style={styles.orderNumber}>{order.orderNumber}</Text>
+            <Text style={styles.orderNumber}>{order?.orderNumber || routeParamsRef.current.orderNumber}</Text>
           </View>
           
           <View style={styles.infoRow}>
