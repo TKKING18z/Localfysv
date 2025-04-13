@@ -116,6 +116,8 @@ export type RootStackParamList = {
     amount?: number;
     cartItems?: any[]; // Añadir cartItems como parámetro opcional
     isCartPayment?: boolean; // Flag para indicar si el pago viene del carrito
+    deliveryAddress?: string | null; // Dirección de entrega
+    deliveryNotes?: string | null; // Notas para el repartidor
   };
   // Nueva ruta para carrito
   Cart: undefined;

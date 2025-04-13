@@ -30,6 +30,8 @@ type StatusFilter = OrderStatus | 'all';
 // Extender el tipo OrderSummary para incluir el nombre de usuario si está disponible
 type ExtendedOrderSummary = OrderSummary & {
   userName?: string;
+  deliveryAddress?: string | any; // Dirección de entrega
+  notes?: string; // Notas del cliente
 };
 
 const BusinessOrdersScreen: React.FC = () => {
@@ -90,7 +92,9 @@ const BusinessOrdersScreen: React.FC = () => {
             createdAt: data.createdAt,
             updatedAt: data.updatedAt,
             itemCount: data.items?.length || 0,
-            userName: data.userName
+            userName: data.userName,
+            deliveryAddress: data.address, // Agregar dirección
+            notes: data.notes // Agregar notas
           };
         });
         
@@ -274,6 +278,26 @@ const BusinessOrdersScreen: React.FC = () => {
             <MaterialIcons name="person" size={18} color="#666" />
             <Text style={styles.detailText}>
               {item.userName}
+            </Text>
+          </View>
+        )}
+        
+        {item.deliveryAddress && (
+          <View style={styles.detailRow}>
+            <MaterialIcons name="location-on" size={18} color="#666" />
+            <Text style={styles.detailText} numberOfLines={1}>
+              {typeof item.deliveryAddress === 'string' 
+                ? item.deliveryAddress 
+                : `${item.deliveryAddress.street}, ${item.deliveryAddress.city}`}
+            </Text>
+          </View>
+        )}
+        
+        {item.notes && (
+          <View style={styles.detailRow}>
+            <MaterialIcons name="notes" size={18} color="#666" />
+            <Text style={styles.detailText} numberOfLines={1}>
+              Notas: {item.notes}
             </Text>
           </View>
         )}

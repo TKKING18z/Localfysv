@@ -111,7 +111,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
             style={styles.image}
             contentFit="cover"
             cachePolicy="memory-disk"
-            placeholder={{ color: getPlaceholderColor() }}
+            placeholder={getPlaceholderColor()}
             transition={200}
           />
         ) : (

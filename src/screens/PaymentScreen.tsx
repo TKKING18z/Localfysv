@@ -46,6 +46,8 @@ const PaymentScreen: React.FC = () => {
   const initialAmount = params.amount || 0;
   const cartItems = Array.isArray(params.cartItems) ? params.cartItems : [];
   const isCartPayment = Boolean(params.isCartPayment);
+  const deliveryAddress = params.deliveryAddress || null;
+  const deliveryNotes = params.deliveryNotes || null;
 
   // Estados
   const [loading, setLoading] = useState(false);
@@ -457,7 +459,9 @@ const PaymentScreen: React.FC = () => {
               amountValue,
               subtotalValue,
               orderPaymentMethod,
-              false // isDelivery: false por defecto para pagos directos
+              false, // isDelivery: false por defecto para pagos directos
+              deliveryAddress || undefined, // Convertir null a undefined
+              deliveryNotes || undefined // Convertir null a undefined
             );
             
             if (isCartPayment) {
@@ -602,6 +606,21 @@ const PaymentScreen: React.FC = () => {
                 ))
               ) : (
                 <Text style={styles.emptyCartText}>No hay productos en el carrito</Text>
+              )}
+
+              {/* Información de entrega */}
+              {deliveryAddress && (
+                <View style={styles.deliveryInfoSection}>
+                  <Text style={styles.deliveryInfoTitle}>Dirección de entrega:</Text>
+                  <Text style={styles.deliveryInfoText}>{deliveryAddress}</Text>
+                  
+                  {deliveryNotes && (
+                    <>
+                      <Text style={styles.deliveryInfoTitle}>Notas para el repartidor:</Text>
+                      <Text style={styles.deliveryInfoText}>{deliveryNotes}</Text>
+                    </>
+                  )}
+                </View>
               )}
 
               <View style={styles.summaryTotal}>
@@ -820,6 +839,23 @@ const styles = StyleSheet.create({
     color: '#6C757D',
     fontStyle: 'italic',
     padding: 16,
+  },
+  deliveryInfoSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E9ECEF',
+  },
+  deliveryInfoTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#495057',
+    marginBottom: 4,
+  },
+  deliveryInfoText: {
+    fontSize: 14,
+    color: '#212529',
+    marginBottom: 8,
   },
 });
 

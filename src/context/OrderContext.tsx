@@ -31,7 +31,7 @@ export type OrderAddress = {
     longitude: number;
   };
   notes?: string;
-};
+} | string;
 
 export type Order = {
   id: string;

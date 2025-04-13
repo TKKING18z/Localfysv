@@ -27,6 +27,8 @@ type CartState = {
   businessName: string | null;
   paymentMethod: PaymentMethodType;
   acceptsCashOnDelivery: boolean; // Si el negocio acepta pago contra entrega
+  deliveryAddress: string | null; // Dirección de entrega
+  deliveryNotes: string | null; // Notas para el repartidor
 };
 
 type CartAction =
@@ -36,7 +38,9 @@ type CartAction =
   | { type: 'CLEAR' }
   | { type: 'SET_CART'; payload: CartState }
   | { type: 'SET_PAYMENT_METHOD'; payload: PaymentMethodType }
-  | { type: 'SET_ACCEPTS_CASH_ON_DELIVERY'; payload: boolean };
+  | { type: 'SET_ACCEPTS_CASH_ON_DELIVERY'; payload: boolean }
+  | { type: 'SET_DELIVERY_ADDRESS'; payload: string }
+  | { type: 'SET_DELIVERY_NOTES'; payload: string };
 
 type CartContextType = {
   cart: CartState;
@@ -46,6 +50,8 @@ type CartContextType = {
   clearCart: () => Promise<void>;
   setPaymentMethod: (method: PaymentMethodType) => Promise<void>;
   setAcceptsCashOnDelivery: (accepts: boolean) => Promise<void>;
+  setDeliveryAddress: (address: string) => Promise<void>;
+  setDeliveryNotes: (notes: string) => Promise<void>;
   totalItems: number;
   totalPrice: number;
 };
@@ -133,7 +139,9 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         businessId: null,
         businessName: null,
         paymentMethod: 'card',
-        acceptsCashOnDelivery: false
+        acceptsCashOnDelivery: false,
+        deliveryAddress: null,
+        deliveryNotes: null
       };
     
     case 'SET_CART':
@@ -151,6 +159,18 @@ const cartReducer = (state: CartState, action: CartAction): CartState => {
         acceptsCashOnDelivery: action.payload
       };
     
+    case 'SET_DELIVERY_ADDRESS':
+      return {
+        ...state,
+        deliveryAddress: action.payload
+      };
+    
+    case 'SET_DELIVERY_NOTES':
+      return {
+        ...state,
+        deliveryNotes: action.payload
+      };
+    
     default:
       return state;
   }
@@ -163,7 +183,9 @@ export const CartProvider: React.FC<{children: React.ReactNode}> = ({ children }
     businessId: null,
     businessName: null,
     paymentMethod: 'card',
-    acceptsCashOnDelivery: false
+    acceptsCashOnDelivery: false,
+    deliveryAddress: null,
+    deliveryNotes: null
   };
   
   const [cart, dispatch] = useReducer(cartReducer, initialState);
@@ -246,6 +268,14 @@ export const CartProvider: React.FC<{children: React.ReactNode}> = ({ children }
     dispatch({ type: 'SET_ACCEPTS_CASH_ON_DELIVERY', payload: accepts });
   };
   
+  const setDeliveryAddress = async (address: string) => {
+    dispatch({ type: 'SET_DELIVERY_ADDRESS', payload: address });
+  };
+  
+  const setDeliveryNotes = async (notes: string) => {
+    dispatch({ type: 'SET_DELIVERY_NOTES', payload: notes });
+  };
+  
   return (
     <CartContext.Provider value={{
       cart,
@@ -255,6 +285,8 @@ export const CartProvider: React.FC<{children: React.ReactNode}> = ({ children }
       clearCart,
       setPaymentMethod,
       setAcceptsCashOnDelivery,
+      setDeliveryAddress,
+      setDeliveryNotes,
       totalItems,
       totalPrice
     }}>

@@ -445,16 +445,22 @@ const OrderDetailsScreen: React.FC = () => {
             <View style={styles.addressContainer}>
               <MaterialIcons name="location-on" size={20} color="#007AFF" style={styles.addressIcon} />
               <View style={styles.addressInfo}>
-                <Text style={styles.addressText}>
-                  {order.address.street}, {order.address.city}
-                </Text>
-                <Text style={styles.addressText}>
-                  {order.address.state}, {order.address.zipCode}
-                </Text>
-                {order.address.notes && (
-                  <Text style={styles.addressNotes}>
-                    Notas: {order.address.notes}
-                  </Text>
+                {typeof order.address === 'string' ? (
+                  <Text style={styles.addressText}>{order.address}</Text>
+                ) : (
+                  <>
+                    <Text style={styles.addressText}>
+                      {order.address.street}, {order.address.city}
+                    </Text>
+                    <Text style={styles.addressText}>
+                      {order.address.state}, {order.address.zipCode}
+                    </Text>
+                    {order.address.notes && (
+                      <Text style={styles.addressNotes}>
+                        Notas: {order.address.notes}
+                      </Text>
+                    )}
+                  </>
                 )}
               </View>
             </View>

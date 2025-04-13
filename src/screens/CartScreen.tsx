@@ -13,6 +13,7 @@ import {
   Modal,
   Dimensions,
   ScrollView,
+  TextInput,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -29,7 +30,7 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const CartScreen: React.FC = () => {
   const navigation = useNavigation<CartNavigationProp>();
-  const { cart, removeFromCart, updateQuantity, clearCart, totalPrice, setPaymentMethod } = useCart();
+  const { cart, removeFromCart, updateQuantity, clearCart, totalPrice, setPaymentMethod, setDeliveryAddress, setDeliveryNotes } = useCart();
   const [loading, setLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<CartItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
@@ -98,6 +99,12 @@ export const CartScreen: React.FC = () => {
     // Validar que el precio total sea un número válido y mayor que cero
     if (isNaN(totalPrice) || totalPrice <= 0) {
       Alert.alert("Error de precio", "El total a pagar no es válido. Por favor, revisa tu carrito.");
+      return;
+    }
+    
+    // Validar dirección de entrega
+    if (!cart.deliveryAddress) {
+      Alert.alert("Dirección requerida", "Por favor, ingresa una dirección de entrega para continuar.");
       return;
     }
 
@@ -222,7 +229,9 @@ export const CartScreen: React.FC = () => {
                 businessName: businessName,
                 amount: totalPrice,
                 cartItems: sanitizedCartItems,
-                isCartPayment: true
+                isCartPayment: true,
+                deliveryAddress: cart.deliveryAddress,
+                deliveryNotes: cart.deliveryNotes
               });
               
               // Usamos setTimeout para asegurarnos de que la navegación se complete antes de quitar el indicador de carga
@@ -373,10 +382,56 @@ export const CartScreen: React.FC = () => {
                   <Text style={styles.totalValue}>${totalPrice.toFixed(2)}</Text>
                 </View>
                 
+                {/* Sección de Dirección de Entrega */}
+                <View style={styles.deliverySection}>
+                  <Text style={styles.deliverySectionTitle}>Dirección de Entrega</Text>
+                  
+                  <TouchableOpacity 
+                    style={styles.addressSelector}
+                    onPress={() => {
+                      // En el futuro, esto podría abrir un modal para seleccionar entre múltiples direcciones
+                      Alert.alert(
+                        "Funcionalidad en desarrollo",
+                        "La selección de múltiples direcciones estará disponible pronto."
+                      );
+                    }}
+                  >
+                    <View style={styles.addressInfo}>
+                      <MaterialIcons name="location-on" size={20} color="#007AFF" />
+                      <TextInput
+                        style={styles.addressInput}
+                        placeholder="Ingresa tu dirección de entrega"
+                        multiline={true}
+                        numberOfLines={2}
+                        value={cart.deliveryAddress || ''}
+                        onChangeText={(text) => {
+                          // Necesitarías agregar esta propiedad al contexto del carrito
+                          setDeliveryAddress(text);
+                        }}
+                      />
+                    </View>
+                    <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
+                  </TouchableOpacity>
+                  
+                  {/* Notas de Entrega */}
+                  <Text style={styles.deliverySectionTitle}>Notas para el repartidor</Text>
+                  <TextInput
+                    style={styles.notesInput}
+                    placeholder="Ej: Tocar el timbre, dejar con el portero, etc."
+                    multiline={true}
+                    numberOfLines={3}
+                    value={cart.deliveryNotes || ''}
+                    onChangeText={(text) => {
+                      // Necesitarías agregar esta propiedad al contexto del carrito
+                      setDeliveryNotes(text);
+                    }}
+                  />
+                </View>
+                
                 <TouchableOpacity 
                   style={[
                     styles.checkoutButton,
-                    { marginBottom: insets.bottom > 0 ? insets.bottom : 16 }
+                    { marginBottom: insets.bottom > 0 ? insets.bottom + 28 : 40 }
                   ]}
                   onPress={handleConfirmOrder}
                   disabled={loading}
@@ -979,6 +1034,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
     marginTop: 2,
+  },
+  // Estilos para la sección de dirección de entrega
+  deliverySection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  deliverySectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#666',
+    marginBottom: 8,
+  },
+  addressSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  addressInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  addressInput: {
+    flex: 1,
+    padding: 8,
+  },
+  notesInput: {
+    padding: 12,
   },
 });
 

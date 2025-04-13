@@ -46,7 +46,6 @@ const ProfileScreen: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [tempProfile, setTempProfile] = useState<Partial<UserProfile>>({});
-  const [darkMode, setDarkMode] = useState(false);
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [notifications, setNotifications] = useState(true);
@@ -515,19 +514,6 @@ const ProfileScreen: React.FC = () => {
             <Switch
               value={notifications}
               onValueChange={setNotifications}
-              trackColor={{ false: '#D1D1D6', true: '#007AFF' }}
-              thumbColor={'#FFFFFF'}
-            />
-          </View>
-          
-          <View style={styles.settingItem}>
-            <View style={styles.settingInfo}>
-              <MaterialIcons name="nightlight-round" size={22} color="#007AFF" />
-              <Text style={styles.settingLabel}>Modo oscuro</Text>
-            </View>
-            <Switch
-              value={darkMode}
-              onValueChange={setDarkMode}
               trackColor={{ false: '#D1D1D6', true: '#007AFF' }}
               thumbColor={'#FFFFFF'}
             />
