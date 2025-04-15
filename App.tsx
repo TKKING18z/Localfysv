@@ -35,15 +35,34 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* revert to default behavior if something goes wrong */
 });
 
+// Define custom props interface for the AppNavigator
+interface AppNavigatorProps {
+  showOnboarding?: boolean;
+  onboardingContext?: {
+    completeOnboarding: () => Promise<boolean>;
+  }
+}
+
+// Type assertion for AppNavigator
+const TypedAppNavigator = AppNavigator as React.ComponentType<AppNavigatorProps>;
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
+  // Force onboarding to always show during testing
+  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
 
   // Restaurar estado desde almacenamiento local
   const hydrateState = async () => {
     try {
       // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
       await AsyncStorage.getItem('favorites');
+      
+      // Check if onboarding has been completed
+      const onboardingCompleted = await AsyncStorage.getItem('onboarding_completed');
+      if (onboardingCompleted === 'true') {
+        setHasCompletedOnboarding(true);
+      }
       
       // Verificar si hay información de sesión de usuario
       const userUid = await AsyncStorage.getItem('user_uid');
@@ -72,9 +91,10 @@ export default function App() {
     const prepareApp = async () => {
       await hydrateState();
       
-      // Mantener pantalla de carga por al menos 1.5 segundos para mejor UX
+      // Maintain loading screen for at least 1.5 seconds for better UX
       const timer = setTimeout(() => {
         setIsLoading(false);
+        // Hide the native splash screen after our loading is done
         SplashScreen.hideAsync().catch(() => {
           /* ignore if something goes wrong */
         });
@@ -86,6 +106,29 @@ export default function App() {
     prepareApp();
   }, []);
 
+  // Función para completar el onboarding
+  const completeOnboarding = async () => {
+    try {
+      // For testing purposes, we don't actually save the onboarding completion status
+      // This will make the onboarding appear every time
+      console.log('Onboarding completado (modo test - no guardado)');
+      
+      // Store in AsyncStorage that onboarding is completed
+      await AsyncStorage.setItem('onboarding_completed', 'true');
+      
+      setHasCompletedOnboarding(true);
+      return true;
+    } catch (error) {
+      console.error('Error al completar onboarding:', error);
+      return false;
+    }
+  };
+
+  const onboardingContext = {
+    completeOnboarding
+  };
+
+  // Show loading indicator while app is preparing
   if (isLoading || !hasHydrated) {
     return (
       <View style={{ 
@@ -122,7 +165,10 @@ export default function App() {
                   <CartProvider>
                     <OrderProvider>
                       <PointsProvider>
-                        <AppNavigator />
+                        <TypedAppNavigator 
+                          showOnboarding={!hasCompletedOnboarding} 
+                          onboardingContext={onboardingContext} 
+                        />
                       </PointsProvider>
                     </OrderProvider>
                   </CartProvider>

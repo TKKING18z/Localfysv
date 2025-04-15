@@ -211,7 +211,7 @@ const PointsScreen: React.FC = () => {
       case 'free_product':
         return <MaterialIcons name="card-giftcard" size={20} color="#34C759" />;
       case 'gift_card':
-        return <MaterialIcons name="attach-money" size={20} color="#FF2D55" />;
+        return <MaterialIcons name="attach-money" size={20} color="#007AFF" />;
       default:
         return <MaterialIcons name="stars" size={20} color="#5856D6" />;
     }
@@ -461,7 +461,7 @@ const PointsScreen: React.FC = () => {
                           color={
                             item.rewardType === 'discount' ? "#FF9500" :
                             item.rewardType === 'free_product' ? "#34C759" :
-                            item.rewardType === 'gift_card' ? "#FF2D55" : "#5856D6"
+                            item.rewardType === 'gift_card' ? "#007AFF" : "#5856D6"
                           } 
                         />
                       </View>
@@ -474,7 +474,7 @@ const PointsScreen: React.FC = () => {
                             backgroundColor: 
                               item.rewardType === 'discount' ? 'rgba(255, 149, 0, 0.1)' :
                               item.rewardType === 'free_product' ? 'rgba(52, 199, 89, 0.1)' :
-                              item.rewardType === 'gift_card' ? 'rgba(255, 45, 85, 0.1)' : 
+                              item.rewardType === 'gift_card' ? 'rgba(0, 122, 255, 0.1)' : 
                               'rgba(88, 86, 214, 0.1)'
                           }
                         ]}>

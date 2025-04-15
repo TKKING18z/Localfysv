@@ -55,9 +55,10 @@ export interface BusinessReviewsScreenProps {
 export type RootStackParamList = {
   Splash: undefined;
   Onboarding: OnboardingParams;
+  Auth: undefined;
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
-  Home: undefined; // Add this line to include the Home screen
+  Home: undefined;
   // Otras pantallas que añadirás después
 };

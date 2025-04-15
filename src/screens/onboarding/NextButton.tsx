@@ -6,9 +6,10 @@ import { AntDesign } from '@expo/vector-icons';
 interface NextButtonProps {
   percentage: number;
   onPress: () => void;
+  disabled?: boolean;
 }
 
-const NextButton: React.FC<NextButtonProps> = ({ percentage, onPress }) => {
+const NextButton: React.FC<NextButtonProps> = ({ percentage, onPress, disabled = false }) => {
   const size = 128;
   const strokeWidth = 2;
   const center = size / 2;
@@ -53,8 +54,16 @@ const NextButton: React.FC<NextButtonProps> = ({ percentage, onPress }) => {
           ]}
         />
       </View>
-      <TouchableOpacity onPress={onPress} style={styles.button}>
-        <AntDesign name="arrowright" size={32} color="#fff" />
+      <TouchableOpacity 
+        onPress={onPress} 
+        style={[
+          styles.button,
+          disabled && styles.buttonDisabled
+        ]}
+        activeOpacity={0.8}
+        disabled={disabled}
+      >
+        <AntDesign name="arrowright" size={28} color="#fff" />
       </TouchableOpacity>
     </View>
   );
@@ -65,6 +74,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    marginBottom: 20,
   },
   circleOutlineContainer: {
     width: 80,
@@ -78,7 +88,7 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 2,
-    borderColor: '#ddd',
+    borderColor: '#E5E5EA',
     position: 'absolute',
   },
   progress: {
@@ -86,17 +96,29 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 2,
-    borderColor: '#4A55A2',
+    borderColor: '#007AFF',
     position: 'absolute',
   },
   button: {
     position: 'absolute',
-    backgroundColor: '#4A55A2',
+    backgroundColor: '#007AFF',
     borderRadius: 32,
     width: 64,
     height: 64,
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  buttonDisabled: {
+    backgroundColor: '#A0C2F0',
+    shadowOpacity: 0.1,
   },
 });
 

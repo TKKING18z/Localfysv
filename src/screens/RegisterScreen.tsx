@@ -42,6 +42,7 @@ const RegisterScreen: React.FC = () => {
   const [role, setRole] = useState<UserRole>('customer');
   const [hidePassword, setHidePassword] = useState(true);
   const [hideConfirmPassword, setHideConfirmPassword] = useState(true);
+  const [acceptedTerms, setAcceptedTerms] = useState(false); // For terms and conditions
   
   // Animation ref
   const fadeAnim = React.useRef(new Animated.Value(0)).current;
@@ -88,6 +89,10 @@ const RegisterScreen: React.FC = () => {
     return password.length >= 6;
   };
   
+  const navigateToTermsConditions = () => {
+    navigation.navigate('TermsConditions' as any); // Type cast as any to avoid type errors
+  };
+  
   const handleRegister = async () => {
     handleButtonPress();
     
@@ -109,6 +114,11 @@ const RegisterScreen: React.FC = () => {
     
     if (password !== confirmPassword) {
       Alert.alert('Error', 'Las contraseñas no coinciden');
+      return;
+    }
+    
+    if (!acceptedTerms) {
+      Alert.alert('Error', 'Debes aceptar los términos y condiciones para continuar');
       return;
     }
     
@@ -277,6 +287,29 @@ const RegisterScreen: React.FC = () => {
             </TouchableOpacity>
           </View>
           
+          <View style={styles.termsContainer}>
+            <TouchableOpacity 
+              style={styles.termsCheckbox}
+              onPress={() => setAcceptedTerms(!acceptedTerms)}
+            >
+              <MaterialIcons 
+                name={acceptedTerms ? "check-box" : "check-box-outline-blank"} 
+                size={20} 
+                color="#007AFF" 
+              />
+            </TouchableOpacity>
+            <Text style={styles.termsText}>
+              Al registrarme, acepto los{' '}
+              <Text 
+                style={styles.termsLink}
+                onPress={navigateToTermsConditions}
+              >
+                términos y condiciones
+              </Text>
+              {' '}de Localfy.
+            </Text>
+          </View>
+          
           <Animated.View style={{ transform: [{ scale: buttonAnim }], width: '100%' }}>
             <TouchableOpacity
               activeOpacity={0.8}
@@ -314,7 +347,6 @@ const RegisterScreen: React.FC = () => {
 };
 
 const styles = StyleSheet.create({
-  // ... Mantener los estilos existentes
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',
@@ -420,7 +452,7 @@ const styles = StyleSheet.create({
   roleContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 24,
+    marginBottom: 20,
   },
   roleButton: {
     flexDirection: 'row',
@@ -443,6 +475,25 @@ const styles = StyleSheet.create({
   },
   roleTextActive: {
     color: 'white',
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  termsCheckbox: {
+    marginRight: 8,
+  },
+  termsText: {
+    fontSize: 13,
+    color: '#666666',
+    flex: 1,
+  },
+  termsLink: {
+    color: '#007AFF',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   registerButton: {
     borderRadius: 12,

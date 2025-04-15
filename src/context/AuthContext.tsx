@@ -123,18 +123,49 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const login = async (email: string, password: string): Promise<boolean> => {
     try {
       setIsLoading(true);
+      console.log(`Iniciando sesión con email: ${email}`);
       
-      // Intentar iniciar sesión con Firebase
       const userCredential = await firebase.auth().signInWithEmailAndPassword(email, password);
-      console.log('Login successful:', userCredential.user?.uid);
       
-      // No necesitamos setUser aquí, ya que el onAuthStateChanged lo hará
-      
-      return true;
-    } catch (error: any) {
-      console.error('Login error:', error.message);
-      Alert.alert('Error de inicio de sesión', error.message);
+      if (userCredential.user) {
+        const userDoc = await firebase.firestore()
+          .collection('users')
+          .doc(userCredential.user.uid)
+          .get();
+        
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          setUser({
+            uid: userCredential.user.uid,
+            email: userCredential.user.email || '',
+            displayName: userData?.displayName || '',
+            photoURL: userData?.photoURL || '',
+            // otros campos
+          });
+          
+          // Guardar en AsyncStorage
+          await AsyncStorage.setItem('user_uid', userCredential.user.uid);
+          
+          console.log("Login exitoso, datos de usuario guardados");
+          return true;
+        }
+      }
       return false;
+    } catch (error: any) {
+      console.error("Error en login:", error);
+      let errorMessage = "Error al iniciar sesión. Intenta de nuevo.";
+      
+      if (error.code === 'auth/user-not-found') {
+        errorMessage = "El usuario no existe.";
+      } else if (error.code === 'auth/wrong-password') {
+        errorMessage = "Contraseña incorrecta.";
+      } else if (error.code === 'auth/invalid-email') {
+        errorMessage = "Correo electrónico inválido.";
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = "Demasiados intentos fallidos. Intenta más tarde.";
+      }
+      
+      throw new Error(errorMessage);
     } finally {
       setIsLoading(false);
     }

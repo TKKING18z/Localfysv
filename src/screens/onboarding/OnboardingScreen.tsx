@@ -1,14 +1,17 @@
 // src/screens/onboarding/OnboardingScreen.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   View, 
   StyleSheet, 
   FlatList, 
   Animated, 
   TouchableOpacity, 
-  Text 
+  Text,
+  StatusBar,
+  SafeAreaView,
+  Alert 
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
 import OnboardingItem from './OnboardingItem';
@@ -24,7 +27,7 @@ const slides = [
     id: '1',
     title: 'Descubre Negocios Locales',
     description: 'Encuentra los mejores negocios cerca de ti en El Salvador.',
-    image: require('../../../assets/animations/discover.json'), // Reemplaza con tus imágenes
+    image: require('../../../assets/animations/discover.json'),
   },
   {
     id: '2',
@@ -52,6 +55,24 @@ const OnboardingScreen: React.FC = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
   const slidesRef = useRef<FlatList>(null);
+  // Flag para evitar navegación doble
+  const [isNavigating, setIsNavigating] = useState(false);
+  // Fade-in animation for smooth entrance
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  
+  // Start entrance animation on mount
+  useEffect(() => {
+    // Slight delay before starting animation to ensure smooth transition from splash
+    const timer = setTimeout(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }).start();
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [fadeAnim]);
   
   const viewableItemsChanged = useRef(({ viewableItems }: any) => {
     setCurrentIndex(viewableItems[0].index);
@@ -59,62 +80,114 @@ const OnboardingScreen: React.FC = () => {
   
   const viewConfig = useRef({ viewAreaCoveragePercentThreshold: 50 }).current;
   
+  // Función que maneja toda la navegación desde el onboarding hacia el login
+  const completeAndNavigate = async () => {
+    // Evitar navegación doble
+    if (isNavigating) return;
+    setIsNavigating(true);
+    
+    try {
+      // Completar onboarding si está disponible el método
+      if (route.params?.onboardingContext?.completeOnboarding) {
+        await route.params.onboardingContext.completeOnboarding();
+      }
+      
+      // Primero hacer un fade-out suave
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start(() => {
+        // Usar CommonActions.reset para asegurar una navegación limpia
+        // Esto reemplaza toda la pila de navegación con solo Auth
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              { 
+                name: 'Auth'
+              }
+            ]
+          })
+        );
+      });
+    } catch (error) {
+      console.log('Error completando el onboarding:', error);
+      
+      // En caso de error, intentar navegar de todos modos
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            { 
+              name: 'Auth'
+            }
+          ]
+        })
+      );
+    }
+  };
+  
   const scrollTo = async () => {
     if (currentIndex < slides.length - 1) {
       slidesRef.current?.scrollToIndex({ index: currentIndex + 1 });
     } else {
-      try {
-        await route.params?.onboardingContext?.completeOnboarding();
-        navigation.navigate('Login');
-      } catch (error) {
-        console.log('Error completing onboarding:', error);
-      }
+      // Última diapositiva, completar onboarding y navegar
+      await completeAndNavigate();
     }
   };
   
   const skip = async () => {
-    try {
-      await route.params?.onboardingContext?.completeOnboarding();
-      navigation.navigate('Login');
-    } catch (error) {
-      console.log('Error skipping onboarding:', error);
-    }
+    // Omitir, completar onboarding y navegar
+    await completeAndNavigate();
   };
   
   return (
-    <View style={styles.container}>
-      <View style={styles.skipContainer}>
-        <TouchableOpacity onPress={skip}>
-          <Text style={styles.skipText}>Saltar</Text>
-        </TouchableOpacity>
-      </View>
+    <Animated.View style={[styles.container, { opacity: fadeAnim }]}>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar barStyle="dark-content" />
+        <View style={styles.header}>
+          <TouchableOpacity 
+            onPress={skip}
+            style={styles.skipButton}
+            hitSlop={{ top: 15, bottom: 15, left: 15, right: 15 }}
+            disabled={isNavigating} // Deshabilitar durante la navegación
+          >
+            <Text style={styles.skipText}>Omitir</Text>
+          </TouchableOpacity>
+        </View>
 
-      <View style={{ flex: 3 }}>
-        <FlatList
-          data={slides}
-          renderItem={({ item }) => <OnboardingItem item={item} />}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          pagingEnabled
-          bounces={false}
-          keyExtractor={(item) => item.id}
-          onScroll={Animated.event(
-            [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-            { useNativeDriver: false }
-          )}
-          scrollEventThrottle={32}
-          onViewableItemsChanged={viewableItemsChanged}
-          viewabilityConfig={viewConfig}
-          ref={slidesRef}
-        />
-      </View>
-      
-      <Paginator data={slides} scrollX={scrollX} />
-      <NextButton 
-        percentage={(currentIndex + 1) * (100 / slides.length)} 
-        onPress={scrollTo} 
-      />
-    </View>
+        <View style={styles.slidesContainer}>
+          <FlatList
+            data={slides}
+            renderItem={({ item }) => <OnboardingItem item={item} />}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            pagingEnabled
+            bounces={false}
+            keyExtractor={(item) => item.id}
+            onScroll={Animated.event(
+              [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+              { useNativeDriver: false }
+            )}
+            scrollEventThrottle={32}
+            onViewableItemsChanged={viewableItemsChanged}
+            viewabilityConfig={viewConfig}
+            ref={slidesRef}
+            decelerationRate="fast"
+          />
+        </View>
+        
+        <View style={styles.bottomContainer}>
+          <Paginator data={slides} scrollX={scrollX} />
+          <NextButton 
+            percentage={(currentIndex + 1) * (100 / slides.length)} 
+            onPress={scrollTo}
+            disabled={isNavigating} // Deshabilitar durante la navegación 
+          />
+        </View>
+      </SafeAreaView>
+    </Animated.View>
   );
 };
 
@@ -122,19 +195,33 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  skipContainer: {
-    width: '90%',
-    paddingTop: 20,
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    width: '100%',
+    paddingHorizontal: 20,
+    paddingTop: 10,
     flexDirection: 'row',
     justifyContent: 'flex-end',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  skipButton: {
+    padding: 5,
   },
   skipText: {
     fontSize: 16,
-    color: '#4A55A2',
+    color: '#007AFF',
     fontWeight: '600',
+  },
+  slidesContainer: {
+    flex: 3,
+  },
+  bottomContainer: {
+    flex: 1,
+    justifyContent: 'flex-start',
   },
 });
 
