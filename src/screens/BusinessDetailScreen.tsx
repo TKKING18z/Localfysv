@@ -579,7 +579,7 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Handler para navegar al carrito
   const handleGoToCart = useCallback(() => {
-    navigation.navigate('Cart');
+    navigation.navigate('Cart', {});
   }, [navigation]);
 
   // Add an useEffect to smooth out animation when changing tabs
@@ -825,7 +825,7 @@ const styles = StyleSheet.create({
   },
   tabContentContainer: {
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingTop: 4,
   },
 });
 

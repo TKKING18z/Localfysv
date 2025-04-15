@@ -19,6 +19,7 @@ import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { useAuth } from '../../context/AuthContext';
 import firebase from '../../../firebase.config';
+import BasicAdInterstitial from '../../components/ads/BasicAdInterstitial';
 
 type OrderDetailsScreenRouteProp = RouteProp<RootStackParamList, 'OrderDetails'>;
 type OrderDetailsScreenNavigationProp = StackNavigationProp<RootStackParamList, 'OrderDetails'>;
@@ -218,6 +219,29 @@ const OrderDetailsScreen: React.FC = () => {
         }}
       ]
     );
+  };
+  
+  // Función para completar un pedido sin mostrar anuncio (ya que el anuncio se maneja en el botón)
+  const handleCompleteOrder = async () => {
+    try {
+      if (!order) {
+        Alert.alert('Error', 'No hay información del pedido disponible');
+        return;
+      }
+
+      const success = await updateOrderStatus(orderId, 'delivered');
+      
+      if (!success) {
+        Alert.alert('Error', 'No se pudo completar el pedido');
+        return;
+      }
+      
+      Alert.alert('Éxito', 'Pedido marcado como entregado');
+      navigation.goBack();
+    } catch (error) {
+      console.error('Error al completar el pedido:', error);
+      Alert.alert('Error', 'No se pudo completar el pedido');
+    }
   };
   
   if (isLoading && !refreshing) {
@@ -528,6 +552,18 @@ const OrderDetailsScreen: React.FC = () => {
                   <Text style={styles.actionButtonText}>Marcar como entregado</Text>
                 </TouchableOpacity>
               )}
+              
+              {/* Botón para mostrar anuncio intersticial */}
+              <BasicAdInterstitial 
+                title="Ver anuncio de recompensa" 
+                onClose={() => {
+                  // Dar alguna recompensa o beneficio después de ver el anuncio
+                  Alert.alert(
+                    '¡Gracias por ver el anuncio!', 
+                    'Has recibido 5 créditos de promoción para tu negocio.'
+                  );
+                }}
+              />
               
               {(order.status === 'created' || order.status === 'paid') && (
                 <TouchableOpacity 

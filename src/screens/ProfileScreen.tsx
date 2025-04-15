@@ -431,6 +431,16 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Configuración</Text>
           
+          {/* Add Loyalty Points menu item */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('Points')}
+          >
+            <MaterialIcons name="loyalty" size={22} color="#007AFF" />
+            <Text style={styles.menuItemText}>Mis Puntos Localfy</Text>
+            <MaterialIcons name="chevron-right" size={22} color="#8E8E93" />
+          </TouchableOpacity>
+          
           {/* Add "Mis Negocios" button for business owners */}
           {profile?.userType === 'Propietario' && (
             <>
@@ -449,15 +459,8 @@ const ProfileScreen: React.FC = () => {
                   // Si no hay un negocio seleccionado, deberíamos mostrar una lista
                   // Por simplicidad, aquí vamos a navegar directamente si hay un negocio
                   if (profile.uid) {
-                    // TODO: Aquí deberíamos obtener el businessId del usuario
-                    // Por ahora usaremos un placeholder
-                    // En una implementación real, deberías consultar el primer negocio del usuario
-                    const businessId = profile.uid; // Usar el ID del usuario como placeholder
-                    const businessName = "Mi Negocio"; // Placeholder
-                    navigation.navigate('BusinessOrders', { 
-                      businessId,
-                      businessName
-                    });
+                    // Ahora navegamos a la pantalla de selección de negocios
+                    navigation.navigate('BusinessSelector');
                   } else {
                     Alert.alert('Aviso', 'No tienes negocios registrados aún.');
                   }
@@ -576,7 +579,7 @@ const ProfileScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItem} 
-          onPress={() => navigation.navigate('Map')}
+          onPress={() => navigation.navigate('Map', {})}
         >
           <MaterialIcons name="explore" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Explorar</Text>

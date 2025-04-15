@@ -10,6 +10,8 @@ import {
   Alert,
   RefreshControl,
   TextInput,
+  Modal,
+  Dimensions,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -21,6 +23,8 @@ import { es } from 'date-fns/locale';
 import { ScrollView } from 'react-native-gesture-handler';
 import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
 import firebase from '../../../firebase.config';
+import MapView, { Marker } from 'react-native-maps';
+import { LinearGradient } from 'expo-linear-gradient';
 
 type BusinessOrdersScreenRouteProp = RouteProp<RootStackParamList, 'BusinessOrders'>;
 type BusinessOrdersScreenNavigationProp = StackNavigationProp<RootStackParamList, 'BusinessOrders'>;
@@ -32,6 +36,44 @@ type ExtendedOrderSummary = OrderSummary & {
   userName?: string;
   deliveryAddress?: string | any; // Dirección de entrega
   notes?: string; // Notas del cliente
+  location?: {
+    latitude: number;
+    longitude: number;
+  }; // Ubicación del usuario
+};
+
+// Update color constants for a more cohesive and aesthetic color scheme
+const COLORS = {
+  primary: '#3498db',          // Modern blue - primary actions
+  secondary: '#2ecc71',        // Emerald green - secondary actions
+  location: '#16a085',         // Green-blue - location button
+  warning: '#f39c12',          // Amber - preparation state
+  danger: '#e74c3c',           // Red - cancellation
+  info: '#3498db',             // Blue - information 
+  muted: '#95a5a6',            // Gray - inactive states
+  text: '#2c3e50',             // Dark blue-gray for text
+  // Status colors
+  created: '#3498db',          // Blue for created orders
+  paid: '#1abc9c',             // Teal for paid orders
+  preparing: '#f39c12',        // Amber for orders in preparation
+  inTransit: '#e67e22',        // Orange for orders in transit
+  delivered: '#2ecc71',        // Green for delivered orders
+  canceled: '#95a5a6',         // Gray for canceled orders
+  refunded: '#e74c3c',         // Red for refunded orders
+};
+
+// Update the getStatusColor function to use the new color palette
+const getStatusColor = (status: OrderStatus) => {
+  switch (status) {
+    case 'created': return COLORS.created;
+    case 'paid': return COLORS.paid;
+    case 'preparing': return COLORS.preparing;
+    case 'in_transit': return COLORS.inTransit;
+    case 'delivered': return COLORS.delivered;
+    case 'canceled': return COLORS.canceled;
+    case 'refunded': return COLORS.refunded;
+    default: return COLORS.muted;
+  }
 };
 
 const BusinessOrdersScreen: React.FC = () => {
@@ -42,8 +84,11 @@ const BusinessOrdersScreen: React.FC = () => {
   
   const [searchQuery, setSearchQuery] = useState('');
   const [filteredOrders, setFilteredOrders] = useState<ExtendedOrderSummary[]>([]);
+  const [allOrders, setAllOrders] = useState<ExtendedOrderSummary[]>([]); // Store all orders
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [refreshing, setRefreshing] = useState(false);
+  const [mapModalVisible, setMapModalVisible] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<ExtendedOrderSummary | null>(null);
   
   // Hide the React Navigation header when this screen comes into focus
   useFocusEffect(
@@ -59,11 +104,7 @@ const BusinessOrdersScreen: React.FC = () => {
     loadOrders();
   }, [businessId]);
   
-  // Filter orders whenever the search query, status filter, or orders list changes
-  useEffect(() => {
-    filterOrders();
-  }, [searchQuery, statusFilter, businessOrders]);
-  
+  // Modify the useEffect that listens to Firestore changes
   useEffect(() => {
     if (!businessId) return;
     
@@ -94,11 +135,16 @@ const BusinessOrdersScreen: React.FC = () => {
             itemCount: data.items?.length || 0,
             userName: data.userName,
             deliveryAddress: data.address, // Agregar dirección
-            notes: data.notes // Agregar notas
+            notes: data.notes, // Agregar notas
+            location: data.location, // Agregar ubicación
           };
         });
         
-        setFilteredOrders(orders);
+        setAllOrders(orders); // Store all orders
+        filterOrdersWithStatus(orders, statusFilter, searchQuery); // Apply current filters
+      } else {
+        setAllOrders([]);
+        setFilteredOrders([]);
       }
     }, (error) => {
       console.error('Error escuchando pedidos:', error);
@@ -107,33 +153,42 @@ const BusinessOrdersScreen: React.FC = () => {
     return () => unsubscribe();
   }, [businessId]);
   
+  // Add a separate function to filter orders based on status and search query
+  const filterOrdersWithStatus = (orders: ExtendedOrderSummary[], status: StatusFilter, query: string) => {
+    let filtered = [...orders];
+    
+    // Filter by status if a specific status is selected
+    if (status !== 'all') {
+      filtered = filtered.filter(order => order.status === status);
+    }
+    
+    // Filter by search query (search in order number)
+    if (query.trim()) {
+      const searchTerm = query.toLowerCase().trim();
+      filtered = filtered.filter(
+        order => order.orderNumber.toLowerCase().includes(searchTerm)
+      );
+    }
+    
+    setFilteredOrders(filtered);
+  };
+  
+  // Adjust the filter effect to use the new function
+  useEffect(() => {
+    filterOrdersWithStatus(allOrders, statusFilter, searchQuery);
+  }, [statusFilter, searchQuery]);
+  
+  // Modify the loadOrders function
   const loadOrders = async () => {
     setRefreshing(true);
     await loadBusinessOrders(businessId);
     setRefreshing(false);
   };
   
-  const filterOrders = () => {
-    let filtered = [...businessOrders];
-    
-    // Filter by status if a specific status is selected
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(order => order.status === statusFilter);
-    }
-    
-    // Filter by search query (search in order number)
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase().trim();
-      filtered = filtered.filter(
-        order => order.orderNumber.toLowerCase().includes(query)
-      );
-    }
-    
-    // Solo actualizar filteredOrders si no hay un listener activo
-    // o si cambian los filtros
-    if (searchQuery.trim() || statusFilter !== 'all') {
-      setFilteredOrders(filtered);
-    }
+  // Modify the filter handler
+  const handleFilterChange = (filter: StatusFilter) => {
+    setStatusFilter(filter);
+    filterOrdersWithStatus(allOrders, filter, searchQuery);
   };
   
   const handleBack = () => {
@@ -217,19 +272,6 @@ const BusinessOrdersScreen: React.FC = () => {
     }
   };
   
-  const getStatusColor = (status: OrderStatus) => {
-    switch (status) {
-      case 'created': return '#007AFF'; // Blue
-      case 'paid': return '#5856D6';    // Purple 
-      case 'preparing': return '#FF9500'; // Orange
-      case 'in_transit': return '#FF3B30'; // Red
-      case 'delivered': return '#34C759'; // Green
-      case 'canceled': return '#8E8E93';  // Gray
-      case 'refunded': return '#FF2D55';  // Pink
-      default: return '#8E8E93';
-    }
-  };
-  
   const formatTimeAgo = (date: Date | any) => {
     if (!date) return '';
     
@@ -246,99 +288,130 @@ const BusinessOrdersScreen: React.FC = () => {
     await loadOrders();
   }, [businessId]);
   
-  const renderOrderItem = ({ item }: { item: ExtendedOrderSummary }) => (
-    <View style={styles.orderCard}>
-      <View style={styles.orderHeader}>
-        <View style={styles.orderInfo}>
-          <Text style={styles.orderNumber}>Pedido #{item.orderNumber}</Text>
-          <Text style={styles.timeAgo}>{formatTimeAgo(item.createdAt)}</Text>
-        </View>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
-        </View>
-      </View>
-      
-      <View style={styles.orderDetails}>
-        <View style={styles.detailRow}>
-          <MaterialIcons name="shopping-basket" size={18} color="#666" />
-          <Text style={styles.detailText}>
-            {item.itemCount} {item.itemCount === 1 ? 'producto' : 'productos'}
-          </Text>
-        </View>
-        
-        <View style={styles.detailRow}>
-          <MaterialIcons name="attach-money" size={18} color="#666" />
-          <Text style={styles.detailText}>
-            ${item.total.toFixed(2)}
-          </Text>
-        </View>
+  const handleViewLocation = (order: ExtendedOrderSummary) => {
+    setSelectedOrder(order);
+    setMapModalVisible(true);
+  };
+  
+  const renderOrderItem = ({ item }: { item: ExtendedOrderSummary }) => {
+    // Get status color
+    const statusColor = getStatusColor(item.status);
+    const nextStatusColor = getNextStatus(item.status) ? getStatusColor(getNextStatus(item.status)!) : COLORS.muted;
 
-        {item.userName && (
-          <View style={styles.detailRow}>
-            <MaterialIcons name="person" size={18} color="#666" />
-            <Text style={styles.detailText}>
-              {item.userName}
-            </Text>
-          </View>
-        )}
+    return (
+      <View style={styles.orderCard}>
+        {/* Status indicator line at top of card */}
+        <View style={[styles.statusIndicator, { backgroundColor: statusColor }]} />
         
-        {item.deliveryAddress && (
-          <View style={styles.detailRow}>
-            <MaterialIcons name="location-on" size={18} color="#666" />
-            <Text style={styles.detailText} numberOfLines={1}>
-              {typeof item.deliveryAddress === 'string' 
-                ? item.deliveryAddress 
-                : `${item.deliveryAddress.street}, ${item.deliveryAddress.city}`}
-            </Text>
+        <View style={styles.orderHeader}>
+          <View style={styles.orderInfo}>
+            <Text style={styles.orderNumber}>Pedido #{item.orderNumber}</Text>
+            <Text style={styles.timeAgo}>{formatTimeAgo(item.createdAt)}</Text>
           </View>
-        )}
-        
-        {item.notes && (
-          <View style={styles.detailRow}>
-            <MaterialIcons name="notes" size={18} color="#666" />
-            <Text style={styles.detailText} numberOfLines={1}>
-              Notas: {item.notes}
-            </Text>
+          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+            <Text style={styles.statusText}>{getStatusText(item.status)}</Text>
           </View>
-        )}
-      </View>
-      
-      <View style={styles.orderActions}>
-        <TouchableOpacity 
-          style={styles.viewButton} 
-          onPress={() => handleViewOrderDetails(item.id)}
-        >
-          <MaterialIcons name="visibility" size={18} color="#007AFF" />
-          <Text style={styles.viewButtonText}>Ver detalles</Text>
-        </TouchableOpacity>
+        </View>
         
-        {getNextStatus(item.status) && (
-          <TouchableOpacity 
-            style={[styles.updateButton, { backgroundColor: getStatusColor(getNextStatus(item.status)!) }]} 
-            onPress={() => handleUpdateStatus(item.id, item.status)}
-          >
-            <MaterialIcons name="arrow-forward" size={18} color="#FFF" />
-            <Text style={styles.updateButtonText}>
-              {item.status === 'created' ? 'Marcar pagado' :
-               item.status === 'paid' ? 'Preparar' :
-               item.status === 'preparing' ? 'Enviar' :
-               item.status === 'in_transit' ? 'Entregado' : 'Actualizar'}
-            </Text>
-          </TouchableOpacity>
-        )}
+        <View style={styles.dividerLine} />
+        
+        <View style={styles.orderContentRow}>
+          <View style={styles.orderContentLeft}>
+            <View style={styles.detailRow}>
+              <View style={styles.iconContainer}>
+                <MaterialIcons name="shopping-basket" size={16} color="#007AFF" />
+              </View>
+              <Text style={styles.detailText}>
+                {item.itemCount} {item.itemCount === 1 ? 'producto' : 'productos'}
+              </Text>
+            </View>
+            
+            <View style={styles.detailRow}>
+              <View style={styles.iconContainer}>
+                <MaterialIcons name="attach-money" size={16} color="#34C759" />
+              </View>
+              <Text style={styles.priceText}>
+                ${item.total.toFixed(2)}
+              </Text>
+            </View>
 
-        {(item.status === 'created' || item.status === 'paid') && (
+            {item.userName && (
+              <View style={styles.detailRow}>
+                <View style={styles.iconContainer}>
+                  <MaterialIcons name="person" size={16} color="#FF9500" />
+                </View>
+                <Text style={styles.detailText}>
+                  {item.userName}
+                </Text>
+              </View>
+            )}
+          </View>
+          
+          <View style={styles.orderContentRight}>
+            {item.notes && (
+              <View style={styles.notesContainer}>
+                <MaterialIcons name="notes" size={16} color="#8E8E93" />
+                <Text style={styles.notesText} numberOfLines={2}>
+                  {item.notes}
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+        
+        <View style={styles.dividerLine} />
+        
+        <View style={styles.orderActionButtons}>
           <TouchableOpacity 
-            style={styles.cancelButton} 
-            onPress={() => handleCancelOrder(item.id)}
+            style={styles.actionButton} 
+            onPress={() => handleViewOrderDetails(item.id)}
+            activeOpacity={0.7}
           >
-            <MaterialIcons name="cancel" size={18} color="#FF3B30" />
-            <Text style={styles.cancelButtonText}>Cancelar</Text>
+            <MaterialIcons name="visibility" size={16} color={COLORS.primary} />
+            <Text style={[styles.actionButtonText, { color: COLORS.primary }]}>Detalles</Text>
           </TouchableOpacity>
-        )}
+          
+          {item.deliveryAddress && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleViewLocation(item)}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="map" size={16} color={COLORS.location} />
+              <Text style={[styles.actionButtonText, { color: COLORS.location }]}>Ver ubicación</Text>
+            </TouchableOpacity>
+          )}
+          
+          {getNextStatus(item.status) && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleUpdateStatus(item.id, item.status)}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="arrow-forward" size={16} color={nextStatusColor} />
+              <Text style={[styles.actionButtonText, { color: nextStatusColor }]}>
+                {item.status === 'created' ? 'Marcar pagado' :
+                 item.status === 'paid' ? 'Preparar' :
+                 item.status === 'preparing' ? 'Enviar' :
+                 item.status === 'in_transit' ? 'Entregado' : 'Actualizar'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {(item.status === 'created' || item.status === 'paid') && (
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleCancelOrder(item.id)}
+              activeOpacity={0.7}
+            >
+              <MaterialIcons name="cancel" size={16} color={COLORS.danger} />
+              <Text style={[styles.actionButtonText, { color: COLORS.danger }]}>Cancelar</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
-    </View>
-  );
+    );
+  };
   
   const renderHeader = () => (
     <View style={styles.headerContainer}>
@@ -348,11 +421,17 @@ const BusinessOrdersScreen: React.FC = () => {
           style={styles.searchInput}
           placeholder="Buscar por # de pedido"
           value={searchQuery}
-          onChangeText={setSearchQuery}
+          onChangeText={(text) => {
+            setSearchQuery(text);
+            filterOrdersWithStatus(allOrders, statusFilter, text);
+          }}
           clearButtonMode="while-editing"
         />
         {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
+          <TouchableOpacity onPress={() => {
+            setSearchQuery('');
+            filterOrdersWithStatus(allOrders, statusFilter, '');
+          }}>
             <MaterialIcons name="clear" size={20} color="#8E8E93" />
           </TouchableOpacity>
         )}
@@ -360,7 +439,7 @@ const BusinessOrdersScreen: React.FC = () => {
       
       <ScrollableStatusFilter 
         currentFilter={statusFilter}
-        onFilterChange={setStatusFilter}
+        onFilterChange={handleFilterChange}
       />
     </View>
   );
@@ -373,8 +452,23 @@ const BusinessOrdersScreen: React.FC = () => {
         <Text style={styles.emptyText}>No hay pedidos con el estado "{getStatusText(statusFilter as OrderStatus)}"</Text>
       ) : searchQuery ? (
         <Text style={styles.emptyText}>No se encontraron pedidos para "{searchQuery}"</Text>
+      ) : allOrders.length > 0 ? (
+        <Text style={styles.emptyText}>Error al filtrar pedidos. Intenta de nuevo</Text>
       ) : (
         <Text style={styles.emptyText}>Aún no hay pedidos para este negocio</Text>
+      )}
+      
+      {(statusFilter !== 'all' || searchQuery) && (
+        <TouchableOpacity
+          style={styles.resetFiltersButton}
+          onPress={() => {
+            setStatusFilter('all');
+            setSearchQuery('');
+            setFilteredOrders(allOrders);
+          }}
+        >
+          <Text style={styles.resetFiltersButtonText}>Mostrar todos los pedidos</Text>
+        </TouchableOpacity>
       )}
     </View>
   );
@@ -456,11 +550,75 @@ const BusinessOrdersScreen: React.FC = () => {
           />
         }
       />
+      
+      {/* Map Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={mapModalVisible}
+        onRequestClose={() => setMapModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Ubicación de Entrega</Text>
+              <TouchableOpacity onPress={() => setMapModalVisible(false)}>
+                <MaterialIcons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.mapContainer}>
+              {selectedOrder?.location ? (
+                <MapView
+                  style={styles.map}
+                  initialRegion={{
+                    latitude: selectedOrder.location.latitude,
+                    longitude: selectedOrder.location.longitude,
+                    latitudeDelta: 0.005,
+                    longitudeDelta: 0.005,
+                  }}
+                >
+                  <Marker
+                    coordinate={{
+                      latitude: selectedOrder.location.latitude,
+                      longitude: selectedOrder.location.longitude,
+                    }}
+                  />
+                </MapView>
+              ) : (
+                <View style={styles.noLocationContainer}>
+                  <MaterialIcons name="location-off" size={48} color="#999" />
+                  <Text style={styles.noLocationText}>
+                    No hay coordenadas disponibles para esta dirección.
+                  </Text>
+                  <Text style={styles.addressText}>
+                    {selectedOrder?.deliveryAddress ? 
+                      (typeof selectedOrder.deliveryAddress === 'string' 
+                        ? selectedOrder.deliveryAddress 
+                        : `${selectedOrder.deliveryAddress.street}, ${selectedOrder.deliveryAddress.city}`)
+                      : 'Dirección no disponible'
+                    }
+                  </Text>
+                </View>
+              )}
+            </View>
+            
+            <View style={styles.modalFooter}>
+              <TouchableOpacity 
+                style={styles.modalButton}
+                onPress={() => setMapModalVisible(false)}
+              >
+                <Text style={styles.modalButtonText}>Cerrar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
-// Scrollable status filter component
+// Scrollable status filter component - replace with solid colors
 const ScrollableStatusFilter: React.FC<{
   currentFilter: StatusFilter;
   onFilterChange: (filter: StatusFilter) => void;
@@ -475,30 +633,47 @@ const ScrollableStatusFilter: React.FC<{
     { value: 'delivered', label: 'Entregados' },
     { value: 'canceled', label: 'Cancelados' },
   ];
+
+  // Update the filter color function to use the new color palette
+  const getFilterColor = (status: StatusFilter): string => {
+    if (status === 'all') return COLORS.primary;
+    if (status === 'created') return COLORS.created;
+    if (status === 'paid') return COLORS.paid;
+    if (status === 'preparing') return COLORS.preparing;
+    if (status === 'in_transit') return COLORS.inTransit;
+    if (status === 'delivered') return COLORS.delivered;
+    if (status === 'canceled') return COLORS.canceled;
+    if (status === 'refunded') return COLORS.refunded;
+    return COLORS.muted;
+  };
   
   return (
     <View style={styles.filterContainer}>
       <FlatList
         horizontal
         data={statusOptions}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[
-              styles.filterItem,
-              currentFilter === item.value && styles.filterItemActive
-            ]}
-            onPress={() => onFilterChange(item.value)}
-          >
-            <Text
+        renderItem={({ item }) => {
+          const isActive = currentFilter === item.value;
+          const backgroundColor = isActive ? getFilterColor(item.value) : 'transparent';
+            
+          return (
+            <TouchableOpacity
               style={[
-                styles.filterText,
-                currentFilter === item.value && styles.filterTextActive
+                styles.filterItem,
+                isActive && { backgroundColor: backgroundColor }
               ]}
+              onPress={() => onFilterChange(item.value)}
+              activeOpacity={0.7}
             >
-              {item.label}
-            </Text>
-          </TouchableOpacity>
-        )}
+              <Text style={[
+                styles.filterText,
+                isActive && styles.filterTextActive
+              ]}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
         keyExtractor={(item) => item.value}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterList}
@@ -578,6 +753,7 @@ const styles = StyleSheet.create({
   },
   filterContainer: {
     marginBottom: 8,
+    paddingTop: 8,
   },
   filterList: {
     paddingHorizontal: 16,
@@ -585,16 +761,15 @@ const styles = StyleSheet.create({
   filterItem: {
     paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
     marginRight: 8,
-    backgroundColor: '#EFEFF4',
-  },
-  filterItemActive: {
-    backgroundColor: '#007AFF',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#E2E2E8',
   },
   filterText: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#8E8E93',
+    fontWeight: '500',
   },
   filterTextActive: {
     color: '#FFFFFF',
@@ -604,19 +779,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     marginHorizontal: 16,
     marginTop: 16,
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowRadius: 8,
+    elevation: 5,
+    position: 'relative',
+  },
+  statusIndicator: {
+    height: 4,
+    width: '100%',
   },
   orderHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
   },
   orderInfo: {
     flex: 1,
@@ -628,13 +809,13 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   timeAgo: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#8E8E93',
   },
   statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     marginLeft: 8,
   },
   statusText: {
@@ -642,52 +823,184 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFF',
   },
-  orderDetails: {
+  dividerLine: {
+    height: 1,
+    backgroundColor: '#F2F2F7',
+    marginHorizontal: 16,
+  },
+  orderContentRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#EFEFEF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#EFEFEF',
-    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  orderContentLeft: {
+    flex: 1,
+  },
+  orderContentRight: {
+    flex: 1,
+    alignItems: 'flex-end',
   },
   detailRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 10,
+  },
+  iconContainer: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#F2F2F7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   detailText: {
     fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  },
+  priceText: {
+    fontSize: 15,
+    color: '#333',
+    fontWeight: 'bold',
+  },
+  notesContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#F9F9FB',
+    padding: 8,
+    borderRadius: 8,
+    maxWidth: '90%',
+  },
+  notesText: {
+    fontSize: 13,
     color: '#666',
+    fontStyle: 'italic',
     marginLeft: 6,
+    flex: 1,
   },
-  orderActions: {
+  orderActionButtons: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    padding: 14,
+    justifyContent: 'flex-start',
   },
-  viewButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  viewButtonText: {
-    fontSize: 14,
-    color: '#007AFF',
-    marginLeft: 4,
-  },
-  updateButton: {
+  actionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#34C759',
+    justifyContent: 'center',
+    backgroundColor: '#F5F5F7',
     paddingVertical: 8,
     paddingHorizontal: 12,
-    borderRadius: 16,
+    borderRadius: 10,
+    marginBottom: 8,
+    marginRight: 8,
+    minWidth: 100,
+    borderWidth: 1,
+    borderColor: '#E2E2E8',
   },
-  updateButtonText: {
-    fontSize: 14,
-    color: '#FFFFFF',
+  actionButtonText: {
+    fontSize: 12,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  mapActionButton: {
+    // Remove this style since we're now using actionButton for all buttons
+  },
+  mapActionButtonText: {
+    // Remove this style since we're now using actionButtonText for all button text
+  },
+  statusActionButton: {
+    // Remove this style since we're now using actionButton for all buttons
+  },
+  statusActionButtonText: {
+    // Remove this style since we're now using actionButtonText
+  },
+  cancelButton: {
+    // Remove this style since we're now using actionButton for all buttons
+  },
+  cancelButtonText: {
+    // Remove this style since we're now using actionButtonText for all button text
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: Dimensions.get('window').width * 0.9,
+    maxHeight: Dimensions.get('window').height * 0.8,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F2F2F7',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  mapContainer: {
+    height: 350,
+    width: '100%',
+  },
+  map: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  noLocationContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: '#F9F9FB',
+  },
+  noLocationText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 16,
+    marginBottom: 12,
+  },
+  addressText: {
+    fontSize: 15,
+    color: '#333',
+    textAlign: 'center',
+    fontWeight: '600',
+    backgroundColor: '#F0F0F5',
+    padding: 12,
+    borderRadius: 8,
+    width: '100%',
+    marginTop: 8,
+  },
+  modalFooter: {
+    padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  modalButton: {
+    width: '100%',
+    overflow: 'hidden',
+    borderRadius: 12,
+  },
+  modalButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    paddingVertical: 12,
   },
   loadingContainer: {
     flex: 1,
@@ -747,20 +1060,17 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     textAlign: 'center',
   },
-  cancelButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    marginLeft: 8,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FF3B30',
+  resetFiltersButton: {
+    marginTop: 24,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    backgroundColor: COLORS.primary,
+    borderRadius: 10,
   },
-  cancelButtonText: {
-    marginLeft: 4,
-    color: '#FF3B30',
+  resetFiltersButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
     fontSize: 14,
-    fontWeight: '500',
   },
 });
 

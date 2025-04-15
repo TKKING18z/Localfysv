@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -25,18 +25,10 @@ import { useChat } from '../context/ChatContext';
 import BusinessCard from '../components/BusinessCard';
 import SkeletonBusinessCard from '../components/SkeletonBusinessCard';
 import { useLocation } from '../hooks/useLocation';
+import BasicAdInterstitial from '../components/ads/BasicAdInterstitial';
 
-// Extended navigation params type to include all screens used in this component
-type ExtendedStackParamList = RootStackParamList & {
-  Map: undefined;
-  AddBusiness: undefined;
-  Favorites: undefined;
-  Profile: undefined;
-  Conversations: undefined;
-  Notifications: undefined;
-};
-
-type NavigationProps = StackNavigationProp<ExtendedStackParamList>;
+// Definir el tipo de navegación usando directamente RootStackParamList
+type NavigationProps = StackNavigationProp<RootStackParamList>;
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -77,6 +69,9 @@ const HomeScreen: React.FC = () => {
     sortBy: 'default' as 'default' | 'distance' | 'rating'
   });
   const [activeFiltersCount, setActiveFiltersCount] = useState(0);
+
+  // Añadir una referencia para rastrear si estamos actualizando
+  const isRefreshingRef = useRef(false);
 
   // Update displayed businesses with all filters applied
   useEffect(() => {
@@ -353,7 +348,7 @@ const HomeScreen: React.FC = () => {
 
   // Navigate to map view
   const navigateToMapView = () => {
-    navigation.navigate('Map');
+    navigation.navigate('Map', { selectingDeliveryLocation: false });
   };
 
   // Navigate to business detail
@@ -429,20 +424,38 @@ const HomeScreen: React.FC = () => {
     </View>
   );
 
-  // Refresh data when screen comes into focus
+  // Reemplazar la useFocusEffect existente
   useFocusEffect(
     useCallback(() => {
-      console.log('HomeScreen focused - refreshing data');
+      // Evitar múltiples actualizaciones consecutivas
+      if (isRefreshingRef.current) return;
       
-      // Refresh chat data when returning from Conversations screen
-      refreshConversations().catch(err => {
-        console.error('Error refreshing conversations:', err);
-      });
+      console.log('HomeScreen obtuvo el foco - actualizando datos');
+      
+      // Marcar que estamos actualizando
+      isRefreshingRef.current = true;
+      
+      // Actualizar datos secuencialmente
+      const updateData = async () => {
+        try {
+          await refreshBusinesses();
+          await refreshConversations();
+        } catch (error) {
+          console.error('Error actualizando datos:', error);
+        } finally {
+          // Permitir futuras actualizaciones después de un retraso
+          setTimeout(() => {
+            isRefreshingRef.current = false;
+          }, 1000); // Evitar actualizaciones por 1 segundo
+        }
+      };
+      
+      updateData();
       
       return () => {
-        // Cleanup if needed
+        // No es necesario limpiar nada aquí
       };
-    }, [refreshConversations])
+    }, [refreshBusinesses, refreshConversations])
   );
 
   // Render the filter modal
@@ -781,16 +794,6 @@ const HomeScreen: React.FC = () => {
           contentContainerStyle={styles.listContent}
           ListHeaderComponent={
             <>
-              {/* Welcome Message */}
-              <View style={styles.welcomeSection}>
-                <Text style={styles.welcomeTitle}>
-                  Descubre negocios locales
-                </Text>
-                <Text style={styles.welcomeSubtitle}>
-                  Apoya a los comercios de El Salvador
-                </Text>
-              </View>
-              
               {/* Categories */}
               <View style={styles.categoriesContainer}>
                 <Text style={styles.sectionTitle}>Categorías</Text>
@@ -925,20 +928,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     color: '#333333',
     paddingVertical: 8,
-  },
-  welcomeSection: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  welcomeTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333333',
-    marginBottom: 8,
-  },
-  welcomeSubtitle: {
-    fontSize: 16,
-    color: '#666666',
   },
   categoriesContainer: {
     paddingVertical: 16,
@@ -1232,7 +1221,7 @@ const styles = StyleSheet.create({
   categoriesWrapper: {
     flexDirection: 'row',
     paddingVertical: 8,
-  },
+  }
 });
 
 export default HomeScreen;

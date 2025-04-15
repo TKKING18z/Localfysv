@@ -13,7 +13,7 @@ import {
   Platform,
   KeyboardAvoidingView
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -22,6 +22,7 @@ import { Business, MenuItem as BusinessMenuItem } from '../../context/BusinessCo
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import 'firebase/compat/storage';
+import { useStore } from '../../context/StoreContext';
 
 // Define types for business data structures
 interface BusinessHours {
@@ -66,6 +67,7 @@ const EditBusinessScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<EditBusinessRouteProp>();
   const { businessId } = route.params;
+  const store = useStore();
   
   // Estados para formulario
   const [business, setBusiness] = useState<Business | null>(null);
@@ -80,13 +82,16 @@ const EditBusinessScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
-  // Cargar datos del negocio
+  // Cargar datos del negocio y configurar escucha en tiempo real
   useEffect(() => {
-    const loadBusiness = async () => {
-      try {
-        setLoading(true);
-        const doc = await firebase.firestore().collection('businesses').doc(businessId).get();
-        
+    setLoading(true);
+    
+    // Crear referencia al documento del negocio
+    const businessDocRef = firebase.firestore().collection('businesses').doc(businessId);
+    
+    // Establecer escucha en tiempo real
+    const unsubscribe = businessDocRef.onSnapshot(
+      (doc) => {
         if (!doc.exists) {
           Alert.alert('Error', 'Negocio no encontrado');
           navigation.goBack();
@@ -112,16 +117,19 @@ const EditBusinessScreen: React.FC = () => {
           const mainImage = businessData.images.find(img => img.isMain) || businessData.images[0];
           setImage(mainImage.url);
         }
-      } catch (error) {
+        
+        setLoading(false);
+      },
+      (error) => {
         console.error('Error loading business:', error);
         Alert.alert('Error', 'No se pudo cargar la información del negocio');
-      } finally {
         setLoading(false);
       }
-    };
+    );
     
-    loadBusiness();
-  }, [businessId]);
+    // Limpiar escucha cuando el componente se desmonte
+    return () => unsubscribe();
+  }, [businessId, navigation]);
   
   // Actualizar el negocio
   const handleUpdateBusiness = async () => {
@@ -191,7 +199,15 @@ const EditBusinessScreen: React.FC = () => {
       await firebase.firestore().collection('businesses').doc(businessId).update(updatedData);
       
       Alert.alert('Éxito', 'Negocio actualizado correctamente', [
-        { text: 'OK', onPress: () => navigation.goBack() }
+        { 
+          text: 'OK', 
+          onPress: () => {
+            // Usar CommonActions para asegurar que las pantallas anteriores se actualicen
+            navigation.dispatch(
+              CommonActions.goBack()
+            );
+          } 
+        }
       ]);
     } catch (error) {
       console.error('Error updating business:', error);
@@ -234,118 +250,135 @@ const EditBusinessScreen: React.FC = () => {
   const navigateToBusinessHours = () => {
     if (!business) return;
     
+    // Usar un enfoque de callback para actualizar la información
+    const callbackId = `businessHours_${Date.now()}`;
+    
+    // Definir la función de actualización
+    const updateHours = async (hours: BusinessHours) => {
+      try {
+        await firebase.firestore().collection('businesses').doc(businessId).update({
+          businessHours: hours,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Mostrar confirmación
+        Alert.alert('Éxito', 'Horarios actualizados correctamente');
+        
+        // Actualizar el estado local
+        if (business) {
+          setBusiness({
+            ...business,
+            businessHours: hours
+          });
+        }
+      } catch (error) {
+        console.error('Error updating business hours:', error);
+        Alert.alert('Error', 'No se pudieron actualizar los horarios');
+      }
+    };
+    
+    // Registrar el callback usando StoreContext
+    store.setCallback(callbackId, updateHours);
+    
+    // Navegar a la pantalla de horarios
     navigation.navigate('BusinessHours', {
       initialHours: business.businessHours,
-      onSave: async (hours: BusinessHours) => {
-        try {
-          await firebase.firestore().collection('businesses').doc(businessId).update({
-            businessHours: hours,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          // Actualizar estado local
-          setBusiness(prev => prev ? { ...prev, businessHours: hours } : null);
-        } catch (error) {
-          console.error('Error updating business hours:', error);
-          Alert.alert('Error', 'No se pudieron actualizar los horarios');
-        }
-      }
+      callbackId
     });
   };
   
   const navigateToPaymentMethods = () => {
     if (!business) return;
     
+    const callbackId = `paymentMethods_${Date.now()}`;
+    
+    // Definir la función de actualización
+    const updatePaymentMethods = async (methods: string[]) => {
+      try {
+        await firebase.firestore().collection('businesses').doc(businessId).update({
+          paymentMethods: methods,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Mostrar confirmación
+        Alert.alert('Éxito', 'Métodos de pago actualizados correctamente');
+        
+        // Actualizar el estado local
+        if (business) {
+          setBusiness({
+            ...business,
+            paymentMethods: methods
+          });
+        }
+      } catch (error) {
+        console.error('Error updating payment methods:', error);
+        Alert.alert('Error', 'No se pudieron actualizar los métodos de pago');
+      }
+    };
+    
+    // Registrar el callback usando StoreContext
+    store.setCallback(callbackId, updatePaymentMethods);
+    
     navigation.navigate('PaymentMethods', {
       initialMethods: business.paymentMethods || [],
-      onSave: async (methods: string[]) => {
-        try {
-          await firebase.firestore().collection('businesses').doc(businessId).update({
-            paymentMethods: methods,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          // Actualizar estado local
-          setBusiness(prev => prev ? { ...prev, paymentMethods: methods } : null);
-        } catch (error) {
-          console.error('Error updating payment methods:', error);
-          Alert.alert('Error', 'No se pudieron actualizar los métodos de pago');
-        }
-      }
+      callbackId
     });
   };
   
   const navigateToSocialLinks = () => {
     if (!business) return;
     
+    const callbackId = `socialLinks_${Date.now()}`;
+    
+    // Definir la función de actualización
+    const updateSocialLinks = async (links: SocialLinks) => {
+      try {
+        await firebase.firestore().collection('businesses').doc(businessId).update({
+          socialLinks: links,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        // Mostrar confirmación
+        Alert.alert('Éxito', 'Enlaces sociales actualizados correctamente');
+        
+        // Actualizar el estado local
+        if (business) {
+          setBusiness({
+            ...business,
+            socialLinks: links
+          });
+        }
+      } catch (error) {
+        console.error('Error updating social links:', error);
+        Alert.alert('Error', 'No se pudieron actualizar los enlaces sociales');
+      }
+    };
+    
+    // Registrar el callback usando StoreContext
+    store.setCallback(callbackId, updateSocialLinks);
+    
     navigation.navigate('SocialLinks', {
       initialLinks: business.socialLinks || {},
-      onSave: async (links: SocialLinks) => {
-        try {
-          await firebase.firestore().collection('businesses').doc(businessId).update({
-            socialLinks: links,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          // Actualizar estado local
-          setBusiness(prev => prev ? { ...prev, socialLinks: links } : null);
-        } catch (error) {
-          console.error('Error updating social links:', error);
-          Alert.alert('Error', 'No se pudieron actualizar los enlaces sociales');
-        }
-      }
+      callbackId
     });
   };
   
   const navigateToVideoManager = () => {
     if (!business) return;
     
-    navigation.navigate('VideoManager', {
-      businessId,
-      initialVideos: business.videos || [],
-      onSave: async (newVideos: VideoItem[]) => {
-        try {
-          await firebase.firestore().collection('businesses').doc(businessId).update({
-            videos: newVideos,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          // Actualizar estado local
-          setBusiness(prev => prev ? { ...prev, videos: newVideos } : null);
-        } catch (error) {
-          console.error('Error updating videos:', error);
-          Alert.alert('Error', 'No se pudieron actualizar los videos');
-        }
-      }
+    // Para VideoManager, usa una navegación directa si es necesario
+    // o ajusta según tu sistema de navegación
+    navigation.navigate('BusinessDetail', { 
+      businessId: businessId
     });
   };
   
   const navigateToMenuEditor = () => {
     if (!business) return;
     
-    navigation.navigate('MenuEditor', {
-      businessId,
-      initialMenu: business.menu || [],
-      menuUrl: business.menuUrl || '',
-      onSave: async (newMenu: BusinessMenuItem[], newMenuUrl: string) => {
-        try {
-          await firebase.firestore().collection('businesses').doc(businessId).update({
-            menu: newMenu,
-            menuUrl: newMenuUrl,
-            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-          });
-          
-          // Actualizar estado local
-          setBusiness(prev => prev ? { 
-            ...prev, 
-            menu: newMenu,
-            menuUrl: newMenuUrl
-          } : null);
-        } catch (error) {
-          console.error('Error updating menu:', error);
-          Alert.alert('Error', 'No se pudo actualizar el menú');
-        }
-      }
+    // Similiar a VideoManager
+    navigation.navigate('BusinessDetail', {
+      businessId: businessId
     });
   };
   

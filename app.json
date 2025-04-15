@@ -18,7 +18,16 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.zalabsdigital.localfy",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Localfy uses your location to find nearby businesses."
+        "NSLocationWhenInUseUsageDescription": "Localfy uses your location to find nearby businesses.",
+        "NSUserTrackingUsageDescription": "This allows us to provide personalized ads tailored to your interests.",
+        "SKAdNetworkItems": [
+          {
+            "SKAdNetworkIdentifier": "cstr6suwn9.skadnetwork"
+          }
+        ]
+      },
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-7380343766459097~4423545874"
       }
     },
     "android": {
@@ -27,7 +36,10 @@
         "backgroundColor": "#ffffff"
       },
       "permissions": ["ACCESS_COARSE_LOCATION", "ACCESS_FINE_LOCATION"],
-      "package": "com.zalabsdigital.localfy"
+      "package": "com.zalabsdigital.localfy",
+      "config": {
+        "googleMobileAdsAppId": "ca-app-pub-7380343766459097~4423545874"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -45,7 +57,16 @@
           "icon": "./assets/adaptive-icon.png",
           "color": "#ffffff"
         }
-      ]
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "useFrameworks": "static"
+          }
+        }
+      ],
+      "expo-ads-admob"
     ],
     "extra": {
       "EXPO_PUBLIC_FIREBASE_API_KEY": "${process.env.EXPO_PUBLIC_FIREBASE_API_KEY}",

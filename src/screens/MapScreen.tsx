@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Dimensions, SafeAreaView, ActivityIndicator, StatusBar, Platform, TextInput, FlatList } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import MapView, { Marker, PROVIDER_GOOGLE, Region, Callout } from 'react-native-maps';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -9,6 +9,21 @@ import { useBusinesses, Business } from '../context/BusinessContext';
 import { formatDistance, calculateDistance } from '../services/LocationService';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Geocoder from 'react-native-geocoding';
+
+// Define type for Geocoder's response
+interface GeocoderResponse {
+  results: Array<{
+    formatted_address: string;
+    geometry: {
+      location: {
+        lat: number;
+        lng: number;
+      }
+    }
+  }>;
+  status: string;
+}
 
 // Define location interface
 interface Location {
@@ -19,17 +34,34 @@ interface Location {
 // Extended navigation params type to include all screens used in this component
 type ExtendedStackParamList = RootStackParamList & {
   BusinessDetail: { businessId: string };
+  Cart: { selectedLocation?: Location; locationAddress?: string };
 };
 
 type NavigationProps = StackNavigationProp<ExtendedStackParamList>;
 const { width, height } = Dimensions.get('window');
 
+// Define route params types for typecasting
+type MapRouteParams = {
+  selectingDeliveryLocation?: boolean;
+  currentAddress?: string;
+};
+
+// Initialize the Geocoder
+// For a real app, use your own Google API key from Google Cloud Console
+Geocoder.init("AIzaSyAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"); // Replace with actual key in production
+
 const MapScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
+  const route = useRoute();
+  const routeParams = route.params as MapRouteParams | undefined;
   const { userLocation, isLoading } = useLocationContext();
   const { filteredBusinesses } = useBusinesses();
   const mapRef = useRef<MapView>(null);
   const insets = useSafeAreaInsets();
+
+  // Check if we're in location selection mode
+  const isSelectingLocation = routeParams?.selectingDeliveryLocation || false;
+  const currentAddress = routeParams?.currentAddress || '';
   
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
   const [mapReady, setMapReady] = useState<boolean>(false);
@@ -43,6 +75,11 @@ const MapScreen: React.FC = () => {
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
+
+  // For location selection mode
+  const [selectedLocation, setSelectedLocation] = useState<Location | null>(null);
+  const [locationAddress, setLocationAddress] = useState<string>(currentAddress);
+  const [isGeocodingAddress, setIsGeocodingAddress] = useState<boolean>(false);
 
   // Calculate search container height based on device
   const searchContainerHeight = 60;
@@ -63,6 +100,9 @@ const MapScreen: React.FC = () => {
 
   // Filter businesses based on search term
   useEffect(() => {
+    // Skip this in location selection mode
+    if (isSelectingLocation) return;
+
     if (searchTerm.trim() === '') {
       setSearchResults([]);
       setIsSearchActive(false);
@@ -81,7 +121,29 @@ const MapScreen: React.FC = () => {
     );
     
     setSearchResults(results);
-  }, [searchTerm, filteredBusinesses]);
+  }, [searchTerm, filteredBusinesses, isSelectingLocation]);
+
+  // Handle map press in location selection mode
+  const handleMapPress = (event: any) => {
+    if (!isSelectingLocation) return;
+    
+    const { coordinate } = event.nativeEvent;
+    setSelectedLocation(coordinate);
+    
+    // Get address from coordinates using geocoding
+    setIsGeocodingAddress(true);
+    Geocoder.from(coordinate.latitude, coordinate.longitude)
+      .then((response: GeocoderResponse) => {
+        const address = response.results[0].formatted_address;
+        setLocationAddress(address);
+        setIsGeocodingAddress(false);
+      })
+      .catch((error: Error) => {
+        console.warn('Geocoding error:', error);
+        setLocationAddress('Ubicación seleccionada');
+        setIsGeocodingAddress(false);
+      });
+  };
 
   // Function to focus on user location
   const focusOnUserLocation = () => {
@@ -92,6 +154,25 @@ const MapScreen: React.FC = () => {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       });
+
+      // If in location selection mode, also set as selected location
+      if (isSelectingLocation) {
+        setSelectedLocation(userLocation);
+        
+        // Get address from coordinates using geocoding
+        setIsGeocodingAddress(true);
+        Geocoder.from(userLocation.latitude, userLocation.longitude)
+          .then((response: GeocoderResponse) => {
+            const address = response.results[0].formatted_address;
+            setLocationAddress(address);
+            setIsGeocodingAddress(false);
+          })
+          .catch((error: Error) => {
+            console.warn('Geocoding error:', error);
+            setLocationAddress('Tu ubicación actual');
+            setIsGeocodingAddress(false);
+          });
+      }
     }
   };
 
@@ -99,6 +180,19 @@ const MapScreen: React.FC = () => {
   const handleMarkerPress = (business: Business) => {
     setSelectedBusiness(business);
     setShowSuggestions(false);
+  };
+
+  // Function to confirm selected location and return to CartScreen
+  const confirmSelectedLocation = () => {
+    if (!selectedLocation) {
+      alert('Por favor selecciona una ubicación en el mapa');
+      return;
+    }
+
+    navigation.navigate('Cart', {
+      selectedLocation,
+      locationAddress
+    });
   };
 
   // Function to handle suggestion item press
@@ -283,9 +377,10 @@ const MapScreen: React.FC = () => {
             onMapReady={handleMapReady}
             toolbarEnabled={false}
             onTouchStart={handleMapTouch}
+            onPress={isSelectingLocation ? handleMapPress : undefined}
           >
-            {/* Only show markers after map is ready */}
-            {mapReady && businessesToDisplay.map((business) => {
+            {/* Only show business markers when not in location selection mode */}
+            {mapReady && !isSelectingLocation && businessesToDisplay.map((business) => {
               if (!business.location) return null;
               
               // Handle location whether it's an object or needs to be parsed
@@ -314,6 +409,17 @@ const MapScreen: React.FC = () => {
                 </Marker>
               );
             })}
+            
+            {/* Show selected location marker when in location selection mode */}
+            {isSelectingLocation && selectedLocation && (
+              <Marker
+                coordinate={{
+                  latitude: selectedLocation.latitude,
+                  longitude: selectedLocation.longitude,
+                }}
+                pinColor="#FF2D55"
+              />
+            )}
           </MapView>
         </View>
       )}
@@ -341,28 +447,36 @@ const MapScreen: React.FC = () => {
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         
-        <View style={styles.searchInputContainer}>
-          <MaterialIcons name="search" size={20} color="#999" style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Buscar negocios..."
-            placeholderTextColor="#999"
-            value={searchTerm}
-            onChangeText={setSearchTerm}
-            returnKeyType="search"
-            autoCapitalize="none"
-            onFocus={handleSearchFocus}
-          />
-          {searchTerm.length > 0 && (
-            <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
-              <MaterialIcons name="close" size={20} color="#999" />
-            </TouchableOpacity>
-          )}
-        </View>
+        {isSelectingLocation ? (
+          // Title for location selection mode
+          <Text style={styles.locationSelectionTitle}>
+            Selecciona ubicación de entrega
+          </Text>
+        ) : (
+          // Normal search input for business mode
+          <View style={styles.searchInputContainer}>
+            <MaterialIcons name="search" size={20} color="#999" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Buscar negocios..."
+              placeholderTextColor="#999"
+              value={searchTerm}
+              onChangeText={setSearchTerm}
+              returnKeyType="search"
+              autoCapitalize="none"
+              onFocus={handleSearchFocus}
+            />
+            {searchTerm.length > 0 && (
+              <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                <MaterialIcons name="close" size={20} color="#999" />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
 
       {/* Suggestions List - positioned relative to search bar */}
-      {showSuggestions && searchResults.length > 0 && (
+      {!isSelectingLocation && showSuggestions && searchResults.length > 0 && (
         <View style={[
           styles.suggestionsContainer, 
           { 
@@ -388,7 +502,7 @@ const MapScreen: React.FC = () => {
       )}
 
       {/* No Results Message */}
-      {showSuggestions && searchTerm.trim() !== '' && searchResults.length === 0 && (
+      {!isSelectingLocation && showSuggestions && searchTerm.trim() !== '' && searchResults.length === 0 && (
         <View style={[
           styles.noResultsContainer, 
           { 
@@ -408,7 +522,7 @@ const MapScreen: React.FC = () => {
         style={[
           styles.myLocationButton,
           {
-            bottom: 160 + insets.bottom,
+            bottom: isSelectingLocation ? 160 + insets.bottom : 160 + insets.bottom,
             right: Math.max(16, insets.right)
           }
         ]} 
@@ -419,7 +533,7 @@ const MapScreen: React.FC = () => {
       </TouchableOpacity>
 
       {/* Business info panel - positioned with safe area insets */}
-      {selectedBusiness && (
+      {!isSelectingLocation && selectedBusiness && (
         <View style={[
           styles.businessInfoPanel,
           {
@@ -447,6 +561,46 @@ const MapScreen: React.FC = () => {
               <MaterialIcons name="arrow-forward" size={16} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
+        </View>
+      )}
+
+      {/* Location selection panel */}
+      {isSelectingLocation && (
+        <View style={[
+          styles.locationSelectionPanel,
+          {
+            bottom: 24 + insets.bottom,
+            left: Math.max(16, insets.left),
+            right: Math.max(16, insets.right)
+          }
+        ]}>
+          <View style={styles.locationContent}>
+            <View style={styles.locationTextInfo}>
+              <Text style={styles.locationTitle}>
+                {isGeocodingAddress ? 'Obteniendo dirección...' : 'Dirección de entrega'}
+              </Text>
+              <Text style={styles.locationAddress} numberOfLines={2}>{locationAddress || 'Selecciona un punto en el mapa'}</Text>
+              {isGeocodingAddress && (
+                <ActivityIndicator size="small" color="#007AFF" style={{ marginTop: 8 }} />
+              )}
+            </View>
+            <TouchableOpacity 
+              style={[
+                styles.confirmButton,
+                !selectedLocation && styles.disabledButton
+              ]} 
+              onPress={confirmSelectedLocation}
+              disabled={!selectedLocation}
+            >
+              <Text style={styles.confirmButtonText}>Confirmar</Text>
+              <MaterialIcons name="check" size={16} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+          {selectedLocation && (
+            <Text style={styles.locationHelpText}>
+              Coordenadas: {selectedLocation.latitude.toFixed(6)}, {selectedLocation.longitude.toFixed(6)}
+            </Text>
+          )}
         </View>
       )}
     </View>
@@ -495,6 +649,14 @@ const styles = StyleSheet.create({
     shadowRadius: 5,
     elevation: 6,
     height: Platform.OS === 'ios' ? 56 : 60, // Adjusted height for iOS vs Android
+  },
+  locationSelectionTitle: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    textAlign: 'center',
+    marginRight: 40, // Balance with back button width
   },
   searchInputContainer: {
     flex: 1,
@@ -696,6 +858,62 @@ const styles = StyleSheet.create({
     color: 'white',
     fontWeight: '600',
     marginRight: 4,
+  },
+  // Location selection panel styles
+  locationSelectionPanel: {
+    position: 'absolute',
+    backgroundColor: 'white',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+    padding: 16,
+    zIndex: 3,
+  },
+  locationContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  locationTextInfo: {
+    flex: 1,
+  },
+  locationTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  locationAddress: {
+    fontSize: 16,
+    color: '#333',
+    fontWeight: '500',
+  },
+  confirmButton: {
+    backgroundColor: '#4CD964', // Green for confirm
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  disabledButton: {
+    backgroundColor: '#C7C7CC',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  locationHelpText: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
 

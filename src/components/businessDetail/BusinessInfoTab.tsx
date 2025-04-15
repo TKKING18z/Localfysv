@@ -52,8 +52,9 @@ const BusinessInfoTab: React.FC<BusinessInfoTabProps> = ({
           <Text style={styles.sectionTitle}>Información General</Text>
         </View>
         
-        <View style={styles.descriptionContainer}>
-          <Text style={styles.description}>{business.description || "No hay descripción disponible."}</Text>
+        <View style={styles.quickInfoItem}>
+          <MaterialIcons name="description" size={20} color="#007aff" style={styles.quickInfoIcon} />
+          <Text style={styles.quickInfoText}>{business.description || "No hay descripción disponible."}</Text>
         </View>
         
         {business.address && (
@@ -227,7 +228,7 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(0,122,255,0.1)',
@@ -238,13 +239,11 @@ const styles = StyleSheet.create({
     color: '#333',
     marginLeft: 10,
   },
-  descriptionContainer: {
-    marginBottom: 16,
-  },
   description: {
     fontSize: 16,
     lineHeight: 24,
     color: '#555',
+    marginBottom: 16,
   },
   quickInfoItem: {
     flexDirection: 'row',

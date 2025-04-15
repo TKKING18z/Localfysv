@@ -52,6 +52,9 @@ import PaymentScreen from '../screens/PaymentScreen';
 // Importar pantalla de Cart
 import { CartScreen } from '../screens/CartScreen';
 
+// Importar pantalla de Puntos
+import PointsScreen from '../screens/PointsScreen';
+
 // Importar pantallas de órdenes
 import OrderConfirmationScreen from '../screens/orders/OrderConfirmationScreen';
 // @ts-ignore
@@ -60,6 +63,8 @@ import OrderDetailsScreen from '../screens/orders/OrderDetailsScreen';
 import OrdersListScreen from '../screens/orders/OrdersListScreen';
 // @ts-ignore
 import BusinessOrdersScreen from '../screens/orders/BusinessOrdersScreen';
+// @ts-ignore
+import BusinessSelectorScreen from '../screens/orders/BusinessSelectorScreen';
 
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
@@ -76,7 +81,10 @@ export type RootStackParamList = {
   MenuEditor: { businessId: string; initialMenu?: any[]; menuUrl?: string; callbackId?: string };
   // Individual screens that can be accessed directly
   Home: undefined;
-  Map: undefined;
+  Map: {
+    selectingDeliveryLocation?: boolean;
+    currentAddress?: string;
+  };
   Favorites: undefined;
   Profile: undefined;
   AddBusiness: undefined;
@@ -109,6 +117,8 @@ export type RootStackParamList = {
   Support: undefined;
   Tutorials: undefined;
   TermsConditions: undefined;
+  // Nueva ruta para puntos
+  Points: undefined;
   // Nueva ruta para pagos
   Payment: {
     businessId?: string;
@@ -120,7 +130,13 @@ export type RootStackParamList = {
     deliveryNotes?: string | null; // Notas para el repartidor
   };
   // Nueva ruta para carrito
-  Cart: undefined;
+  Cart: {
+    selectedLocation?: {
+      latitude: number;
+      longitude: number;
+    };
+    locationAddress?: string;
+  };
   // Nuevas rutas para ordenes
   OrderConfirmation: { 
     orderId: string;
@@ -134,6 +150,8 @@ export type RootStackParamList = {
     businessId: string;
     businessName: string;
   };
+  // Nueva ruta para seleccionar negocio
+  BusinessSelector: undefined;
 };
 
 // Define tab navigator parameter list
@@ -514,6 +532,15 @@ const AppNavigator = () => {
             {/* Notifications screen */}
             <Stack.Screen name="Notifications" component={NotificationsScreen} />
 
+            {/* Points screen */}
+            <Stack.Screen 
+              name="Points" 
+              component={PointsScreen}
+              options={{ 
+                headerShown: false
+              }} 
+            />
+
             {/* Cart screen */}
             <Stack.Screen name="Cart" component={CartScreen} options={{ headerShown: false }} />
             
@@ -551,6 +578,16 @@ const AppNavigator = () => {
               options={{ 
                 headerShown: true,
                 title: 'Pedidos del Negocio',
+                headerStyle: { backgroundColor: '#FFFFFF' },
+                headerTintColor: '#007AFF'
+              }} 
+            />
+            <Stack.Screen 
+              name="BusinessSelector" 
+              component={BusinessSelectorScreen}
+              options={{ 
+                headerShown: true,
+                title: 'Seleccionar Negocio',
                 headerStyle: { backgroundColor: '#FFFFFF' },
                 headerTintColor: '#007AFF'
               }} 

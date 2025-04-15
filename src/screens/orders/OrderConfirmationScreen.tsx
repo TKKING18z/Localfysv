@@ -16,6 +16,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useOrders, Order } from '../../context/OrderContext';
+import { usePoints } from '../../context/PointsContext';
 import { formatDistanceToNow } from 'date-fns';
 import { es } from 'date-fns/locale';
 
@@ -27,15 +28,30 @@ const OrderConfirmationScreen: React.FC = () => {
   const route = useRoute<OrderConfirmationScreenRouteProp>();
   const { orderId, orderNumber } = route.params;
   const { getOrder, isLoading, error } = useOrders();
+  const { transactions } = usePoints();
   
   const [order, setOrder] = useState<Order | null>(null);
   const [successAnimation] = useState(new Animated.Value(0));
+  const [pointsEarned, setPointsEarned] = useState<number | null>(null);
   
   useEffect(() => {
     const loadOrder = async () => {
       const orderData = await getOrder(orderId);
       if (orderData) {
         setOrder(orderData);
+        
+        // Find the transaction related to this order to get points
+        const orderTransaction = transactions.find(
+          t => t.orderId === orderId && t.type === 'purchase'
+        );
+        
+        if (orderTransaction) {
+          setPointsEarned(orderTransaction.points);
+        } else {
+          // If no transaction found, set default points for purchase (2 points)
+          // This is a fallback in case the transactions haven't loaded yet
+          setPointsEarned(2);
+        }
         
         // Animate success checkmark
         Animated.timing(successAnimation, {
@@ -47,7 +63,7 @@ const OrderConfirmationScreen: React.FC = () => {
     };
     
     loadOrder();
-  }, [orderId]);
+  }, [orderId, transactions]);
   
   const handleShareOrder = async () => {
     if (!order) return;
@@ -161,6 +177,15 @@ const OrderConfirmationScreen: React.FC = () => {
           </Animated.View>
           <Text style={styles.title}>¡Pedido confirmado!</Text>
           <Text style={styles.subtitle}>Tu pedido ha sido recibido exitosamente.</Text>
+          
+          {pointsEarned !== null && (
+            <View style={styles.pointsContainer}>
+              <MaterialIcons name="loyalty" size={24} color="#FFFFFF" />
+              <Text style={styles.pointsText}>
+                ¡Has ganado {pointsEarned} puntos Localfy!
+              </Text>
+            </View>
+          )}
         </View>
         
         <View style={styles.orderInfoContainer}>
@@ -516,6 +541,21 @@ const styles = StyleSheet.create({
     color: '#666',
     textAlign: 'center',
     marginBottom: 20,
+  },
+  pointsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#007AFF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    marginTop: 16,
+  },
+  pointsText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginLeft: 8,
   },
 });
 

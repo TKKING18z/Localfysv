@@ -116,10 +116,10 @@ const BusinessTabs: React.FC<BusinessTabsProps> = ({
 
 const styles = StyleSheet.create({
   tabsContainer: {
-    marginBottom: 16,
-    marginTop: 12,
+    marginBottom: 8,
+    marginTop: 8,
     backgroundColor: 'white',
-    paddingVertical: 8,
+    paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#F3F4F6',
   },
@@ -127,7 +127,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   tab: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     paddingHorizontal: 16,
     marginRight: 8,
     borderRadius: 8,

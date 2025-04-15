@@ -1,8 +1,10 @@
-import React, { memo } from 'react';
+import React, { memo, useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { Business } from '../context/BusinessContext';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 
 interface BusinessCardProps {
   business: Business;
@@ -26,17 +28,77 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
   style, // Use the style prop
   showOpenStatus = true  // Enable by default
 }) => {
+  // Estado para almacenar la información más reciente del negocio
+  const [currentBusiness, setCurrentBusiness] = useState<Business>(business);
+  // Referencia para controlar si ya estamos escuchando cambios
+  const isListeningRef = useRef(false);
+  // Almacenar la última vez que actualizamos datos para limitar la frecuencia
+  const lastUpdateRef = useRef(Date.now());
+  
+  // Configurar escucha en tiempo real para los cambios en el negocio
+  useEffect(() => {
+    // Actualizar el estado local cuando cambie la prop business
+    setCurrentBusiness(business);
+    
+    // Solo establecer escucha si tenemos un ID de negocio y no estamos ya escuchando
+    if (!business || !business.id || isListeningRef.current) {
+      return;
+    }
+    
+    // Marcar que estamos escuchando para evitar duplicados
+    isListeningRef.current = true;
+    
+    const businessRef = firebase.firestore().collection('businesses').doc(business.id);
+    
+    // Escuchar cambios en tiempo real - con throttling para evitar excesivas actualizaciones
+    const unsubscribe = businessRef.onSnapshot(
+      (doc) => {
+        if (doc.exists) {
+          // Verificar si han pasado al menos 2 segundos desde la última actualización
+          const now = Date.now();
+          if (now - lastUpdateRef.current < 2000) {
+            return; // Ignorar actualizaciones demasiado frecuentes
+          }
+          
+          lastUpdateRef.current = now;
+          
+          const updatedBusiness = {
+            id: doc.id,
+            ...doc.data()
+          } as Business;
+          
+          // Solo actualizar si hay cambios relevantes
+          if (JSON.stringify(updatedBusiness) !== JSON.stringify(currentBusiness)) {
+            setCurrentBusiness(updatedBusiness);
+          }
+        }
+      },
+      (error) => {
+        console.error('Error al escuchar cambios en el negocio:', error);
+      }
+    );
+    
+    // Limpiar la escucha cuando el componente se desmonte
+    return () => {
+      unsubscribe();
+      isListeningRef.current = false;
+    };
+  }, [business.id]);
+  
+  // Utilizamos currentBusiness en lugar de business en todo el componente para asegurar
+  // que siempre estamos mostrando los datos más actualizados
+  
   // Determinar la imagen a mostrar
   const getBusinessImage = () => {
-    if (business.images && business.images.length > 0) {
+    if (currentBusiness.images && currentBusiness.images.length > 0) {
       // Primero busca la imagen marcada como principal
-      const mainImage = business.images.find(img => img.isMain);
+      const mainImage = currentBusiness.images.find(img => img.isMain);
       if (mainImage && mainImage.url) {
         return mainImage.url;
       }
       // Si no hay imagen principal, usa la primera
-      if (business.images[0].url) {
-        return business.images[0].url;
+      if (currentBusiness.images[0].url) {
+        return currentBusiness.images[0].url;
       }
     }
     return null;
@@ -51,13 +113,13 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
       '#007AFF', '#34C759', '#FF9500', '#FF2D55', '#AF52DE', 
       '#5856D6', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
     ];
-    const sum = business.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const sum = currentBusiness.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return colors[sum % colors.length];
   };
   
   // Obtener la primera letra del nombre del negocio
   const getFirstLetter = () => {
-    return business.name.charAt(0).toUpperCase();
+    return currentBusiness.name.charAt(0).toUpperCase();
   };
 
   // Truncar nombre si es muy largo
@@ -68,7 +130,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
 
   // Función para determinar si el negocio está abierto o cerrado
   const isBusinessOpen = () => {
-    if (!business.businessHours) return false;
+    if (!currentBusiness.businessHours) return false;
 
     const now = new Date();
     const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
@@ -77,7 +139,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
     const currentTime = currentHour * 60 + currentMinutes; // Convertir a minutos
 
     // Acceder de forma segura a las horas del día actual
-    const dayHours = business.businessHours[dayOfWeek];
+    const dayHours = currentBusiness.businessHours[dayOfWeek];
     if (!dayHours || dayHours.closed) return false;
 
     // Analizar horarios de apertura y cierre (formato como "9:00" o "21:30")
@@ -149,10 +211,10 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
       {/* Business information */}
       <View style={styles.infoContainer}>
         <Text style={styles.name} numberOfLines={1}>
-          {truncateName(business.name)}
+          {truncateName(currentBusiness.name)}
         </Text>
         <Text style={styles.category} numberOfLines={1}>
-          {business.category || "Sin categoría"}
+          {currentBusiness.category || "Sin categoría"}
         </Text>
         
         {/* Distance (if available) */}

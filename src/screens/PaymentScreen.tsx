@@ -19,6 +19,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useAuth } from '../context/AuthContext';
 import { useCart, CartItem } from '../context/CartContext';
 import { useOrders, PaymentMethod } from '../context/OrderContext';
+import { usePoints } from '../context/PointsContext';
 
 type PaymentScreenRouteProp = RouteProp<RootStackParamList, 'Payment'>;
 type PaymentScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Payment'>;
@@ -38,6 +39,7 @@ const PaymentScreen: React.FC = () => {
   const { user } = useAuth();
   const { clearCart } = useCart();
   const { createOrder } = useOrders();
+  const { awardPointsForPurchase } = usePoints();
 
   // Obtener parámetros de la ruta con validación
   const params = route.params || {};
@@ -466,6 +468,15 @@ const PaymentScreen: React.FC = () => {
             
             if (isCartPayment) {
               await clearCart();
+            }
+            
+            // Award loyalty points for this purchase
+            try {
+              await awardPointsForPurchase(orderId, amountValue, businessId, businessName);
+              console.log('Loyalty points awarded for purchase');
+            } catch (pointsError) {
+              console.error('Error awarding loyalty points:', pointsError);
+              // Continue even if points can't be awarded
             }
             
             // Navegamos a la pantalla de confirmación de pedido

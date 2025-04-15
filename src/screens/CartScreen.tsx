@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
   ScrollView,
   TextInput,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -30,6 +30,8 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 export const CartScreen: React.FC = () => {
   const navigation = useNavigation<CartNavigationProp>();
+  const route = useRoute();
+  const isFocused = useIsFocused();
   const { cart, removeFromCart, updateQuantity, clearCart, totalPrice, setPaymentMethod, setDeliveryAddress, setDeliveryNotes } = useCart();
   const [loading, setLoading] = useState(false);
   const [selectedItem, setSelectedItem] = useState<CartItem | null>(null);
@@ -39,6 +41,9 @@ export const CartScreen: React.FC = () => {
   // Por defecto, asumimos que los negocios aceptan efectivo
   // Esto podría obtenerse de la API del negocio en una versión futura
   const [acceptsCashOnDelivery, setAcceptsCashOnDelivery] = useState(true);
+  
+  // Reference to track if we've already processed location params
+  const processedLocationParams = useRef(false);
 
   const insets = useSafeAreaInsets();
 
@@ -48,6 +53,28 @@ export const CartScreen: React.FC = () => {
     // Por ahora, asumimos que todos los negocios lo aceptan
     setAcceptsCashOnDelivery(true);
   }, [cart.businessId]);
+
+  // Handle selected location from MapScreen
+  useEffect(() => {
+    if (isFocused && route.params && 'selectedLocation' in route.params && !processedLocationParams.current) {
+      const { selectedLocation, locationAddress } = route.params as any;
+      if (selectedLocation && locationAddress) {
+        setDeliveryAddress(locationAddress);
+        // Mark as processed to prevent infinite loop
+        processedLocationParams.current = true;
+        
+        // Clear params after processing to allow reselecting the same location later
+        setTimeout(() => {
+          navigation.setParams({ selectedLocation: undefined, locationAddress: undefined });
+        }, 100);
+      }
+    }
+    
+    // Reset the flag when screen loses focus
+    if (!isFocused) {
+      processedLocationParams.current = false;
+    }
+  }, [isFocused, route.params, setDeliveryAddress, navigation]);
 
   const handleBack = () => {
     navigation.goBack();
@@ -250,6 +277,14 @@ export const CartScreen: React.FC = () => {
     setModalVisible(true);
   };
 
+  // Function to open map for location selection
+  const openLocationMap = () => {
+    navigation.navigate('Map', { 
+      selectingDeliveryLocation: true,
+      currentAddress: cart.deliveryAddress || ''
+    });
+  };
+
   const renderItem = ({ item }: { item: CartItem }) => {
     return (
       <View style={styles.cartItem}>
@@ -388,13 +423,7 @@ export const CartScreen: React.FC = () => {
                   
                   <TouchableOpacity 
                     style={styles.addressSelector}
-                    onPress={() => {
-                      // En el futuro, esto podría abrir un modal para seleccionar entre múltiples direcciones
-                      Alert.alert(
-                        "Funcionalidad en desarrollo",
-                        "La selección de múltiples direcciones estará disponible pronto."
-                      );
-                    }}
+                    onPress={openLocationMap}
                   >
                     <View style={styles.addressInfo}>
                       <MaterialIcons name="location-on" size={20} color="#007AFF" />
@@ -405,12 +434,11 @@ export const CartScreen: React.FC = () => {
                         numberOfLines={2}
                         value={cart.deliveryAddress || ''}
                         onChangeText={(text) => {
-                          // Necesitarías agregar esta propiedad al contexto del carrito
                           setDeliveryAddress(text);
                         }}
                       />
                     </View>
-                    <MaterialIcons name="chevron-right" size={20} color="#C7C7CC" />
+                    <MaterialIcons name="map" size={20} color="#007AFF" />
                   </TouchableOpacity>
                   
                   {/* Notas de Entrega */}
@@ -1070,4 +1098,5 @@ const styles = StyleSheet.create({
     padding: 12,
   },
 });
+
 

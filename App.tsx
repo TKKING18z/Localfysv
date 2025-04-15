@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { View, Text, ActivityIndicator, LogBox } from 'react-native';
+import { View, Text, ActivityIndicator, LogBox, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AppNavigator from './src/navigation/AppNavigator';
 import { BusinessProvider } from './src/context/BusinessContext';
@@ -10,11 +10,13 @@ import { ThemeProvider } from './src/context/ThemeContext';
 import { StoreProvider } from './src/context/StoreContext';
 import { CartProvider } from './src/context/CartContext';
 import { OrderProvider } from './src/context/OrderContext';
+import { PointsProvider } from './src/context/PointsContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from './firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
+import Constants from 'expo-constants';
 
 // Clave pública de Stripe en modo PRUEBA (sandbox)
 const STRIPE_PUBLISHABLE_KEY = 'pk_test_51RAPGb4eUIEuN4bhAQUTbCD3BaeC8rUOHz4ecJvZzqyiej8P7N8mCFeRpIvpJyWwltjo9L57YDZBjqjeLBvEkkt100FpoNKP3H';
@@ -25,7 +27,7 @@ LogBox.ignoreLogs([
   'AsyncStorage has been extracted',
   'Deprecation warning: value provided is not in a recognized RFC2822',
   'NativeEventEmitter',
-  'ViewPropTypes will be removed'
+  'ViewPropTypes will be removed',
 ]);
 
 // Prevenir que la pantalla de splash se oculte automáticamente
@@ -119,7 +121,9 @@ export default function App() {
                 <BusinessProvider>
                   <CartProvider>
                     <OrderProvider>
-                      <AppNavigator />
+                      <PointsProvider>
+                        <AppNavigator />
+                      </PointsProvider>
                     </OrderProvider>
                   </CartProvider>
                 </BusinessProvider>
