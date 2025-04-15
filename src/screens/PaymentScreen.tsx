@@ -39,7 +39,7 @@ const PaymentScreen: React.FC = () => {
   const { user } = useAuth();
   const { clearCart } = useCart();
   const { createOrder } = useOrders();
-  const { awardPointsForPurchase } = usePoints();
+  const { awardPointsForPurchase, totalPoints, markRedemptionAsUsed } = usePoints();
 
   // Obtener parámetros de la ruta con validación
   const params = route.params || {};
@@ -50,6 +50,12 @@ const PaymentScreen: React.FC = () => {
   const isCartPayment = Boolean(params.isCartPayment);
   const deliveryAddress = params.deliveryAddress || null;
   const deliveryNotes = params.deliveryNotes || null;
+  // Nuevos parámetros para los puntos
+  const shouldAwardPoints = Boolean(params.shouldAwardPoints);
+  const pointsToAward = params.pointsToAward || 0;
+  // Nuevos parámetros para descuentos
+  const appliedDiscountId = params.appliedDiscountId;
+  const discountAmount = params.discountAmount || 0;
 
   // Estados
   const [loading, setLoading] = useState(false);
@@ -470,33 +476,73 @@ const PaymentScreen: React.FC = () => {
               await clearCart();
             }
             
+            // Si hay un descuento aplicado, marcarlo como usado
+            if (appliedDiscountId) {
+              try {
+                await markRedemptionAsUsed(appliedDiscountId);
+                console.log(`Descuento ${appliedDiscountId} marcado como usado`);
+              } catch (discountError) {
+                console.error('Error al marcar descuento como usado:', discountError);
+                // Continuar incluso si no se puede marcar el descuento como usado
+              }
+            }
+            
             // Award loyalty points for this purchase
+            let pointsAwarded = 0;
             try {
-              await awardPointsForPurchase(orderId, amountValue, businessId, businessName);
-              console.log('Loyalty points awarded for purchase');
+              if (user && (shouldAwardPoints || isCartPayment)) {
+                // Usar pointsToAward si está definido, o calcular basado en el monto (2 puntos por dólar)
+                pointsAwarded = pointsToAward || Math.floor(amountValue * 2);
+                await awardPointsForPurchase(orderId, amountValue, businessId, businessName);
+                console.log(`${pointsAwarded} loyalty points awarded for purchase`);
+              }
             } catch (pointsError) {
               console.error('Error awarding loyalty points:', pointsError);
               // Continue even if points can't be awarded
             }
             
-            // Navegamos a la pantalla de confirmación de pedido
-            navigation.reset({
-              index: 0,
-              routes: [
-                { 
-                  name: 'OrderConfirmation',
-                  params: { 
-                    orderId,
-                    orderNumber: orderId // El orderNumber lo generamos en el backend
+            // Preparar mensajes de descuento y puntos
+            let discountMessage = '';
+            if (discountAmount > 0) {
+              discountMessage = `\n\nSe aplicó un descuento de $${discountAmount.toFixed(2)} a tu compra.`;
+            }
+            
+            const pointsMessage = pointsAwarded > 0 
+              ? `\n\n¡Has ganado ${pointsAwarded} puntos! Ahora tienes un total de ${totalPoints + pointsAwarded} puntos.`
+              : '';
+              
+            Alert.alert(
+              '¡Pago exitoso!',
+              `Tu pago de $${amountValue.toFixed(2)} a ${businessName} ha sido procesado correctamente.${discountMessage}${pointsMessage}`,
+              [
+                {
+                  text: 'OK',
+                  onPress: () => {
+                    // Después de mostrar el mensaje, navegamos a la pantalla de confirmación
+                    navigation.reset({
+                      index: 0,
+                      routes: [
+                        { 
+                          name: 'OrderConfirmation',
+                          params: { 
+                            orderId,
+                            orderNumber: orderId.substring(0, 8).toUpperCase()
+                          }
+                        }
+                      ],
+                    });
                   }
                 }
-              ],
-            });
-          } catch (orderError) {
+              ]
+            );
+            
+            setProcessingPayment(false);
+            setLoading(false);
+          } catch (orderError: any) {
             console.error('Error creating order with details:', orderError);
             throw orderError; // Re-throw to be caught by outer catch block
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error('Error al crear orden:', error);
           // Mostrar el error pero aún consideramos el pago exitoso
           Alert.alert(
@@ -617,6 +663,17 @@ const PaymentScreen: React.FC = () => {
                 ))
               ) : (
                 <Text style={styles.emptyCartText}>No hay productos en el carrito</Text>
+              )}
+
+              {/* Mostrar descuento si está aplicado */}
+              {discountAmount > 0 && (
+                <View style={styles.discountItem}>
+                  <View style={styles.discountInfo}>
+                    <MaterialIcons name="local-offer" size={18} color="#4CAF50" />
+                    <Text style={styles.discountText}>Descuento aplicado</Text>
+                  </View>
+                  <Text style={styles.discountPrice}>-${discountAmount.toFixed(2)}</Text>
+                </View>
               )}
 
               {/* Información de entrega */}
@@ -867,6 +924,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#212529',
     marginBottom: 8,
+  },
+  discountItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E9ECEF',
+  },
+  discountInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  discountText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#4CAF50',
+    marginLeft: 8,
+  },
+  discountPrice: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4CAF50',
   },
 });
 

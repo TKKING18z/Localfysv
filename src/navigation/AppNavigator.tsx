@@ -128,6 +128,10 @@ export type RootStackParamList = {
     isCartPayment?: boolean; // Flag para indicar si el pago viene del carrito
     deliveryAddress?: string | null; // Dirección de entrega
     deliveryNotes?: string | null; // Notas para el repartidor
+    shouldAwardPoints?: boolean; // Flag para indicar si se deben otorgar puntos
+    pointsToAward?: number; // Cantidad de puntos a otorgar
+    appliedDiscountId?: string; // ID del descuento aplicado
+    discountAmount?: number; // Monto del descuento aplicado
   };
   // Nueva ruta para carrito
   Cart: {

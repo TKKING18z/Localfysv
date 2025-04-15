@@ -23,6 +23,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useCart, CartItem, PaymentMethodType } from '../context/CartContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAuth } from '../context/AuthContext';
+import { usePoints, ActiveRedemption } from '../context/PointsContext';
 
 type CartNavigationProp = StackNavigationProp<RootStackParamList, 'Cart'>;
 
@@ -46,6 +48,103 @@ export const CartScreen: React.FC = () => {
   const processedLocationParams = useRef(false);
 
   const insets = useSafeAreaInsets();
+  
+  // Add auth and points context
+  const { user } = useAuth();
+  const { 
+    awardPointsForPurchase, 
+    totalPoints, 
+    hasAvailableDiscount, 
+    getAvailableDiscount, 
+    markRedemptionAsUsed,
+    getActiveRedemptions 
+  } = usePoints();
+
+  // Estado para manejar los descuentos
+  const [activeDiscount, setActiveDiscount] = useState<ActiveRedemption | null>(null);
+  const [discountAmount, setDiscountAmount] = useState(0);
+  const [finalTotal, setFinalTotal] = useState(totalPrice);
+  const [discountModalVisible, setDiscountModalVisible] = useState(false);
+
+  // Cargar descuentos disponibles
+  useEffect(() => {
+    if (user && isFocused) {
+      getActiveRedemptions().then(() => {
+        if (hasAvailableDiscount()) {
+          const discount = getAvailableDiscount();
+          setActiveDiscount(discount);
+          
+          // Calcular el descuento
+          if (discount) {
+            calculateDiscount(discount);
+          }
+        } else {
+          setActiveDiscount(null);
+          setDiscountAmount(0);
+        }
+      });
+    }
+  }, [user, isFocused, totalPrice]);
+
+  // Actualizar el precio final cuando cambia el precio total o el descuento
+  useEffect(() => {
+    // Asegurarse de que el descuento no supere el precio total
+    const safeDiscountAmount = Math.min(discountAmount, totalPrice);
+    setFinalTotal(Math.max(0, totalPrice - safeDiscountAmount));
+  }, [totalPrice, discountAmount]);
+
+  // Calcular el monto del descuento basado en el tipo de descuento
+  const calculateDiscount = (discount: ActiveRedemption) => {
+    if (!discount) return;
+
+    if (discount.discountAmount !== undefined) {
+      // Descuento de monto fijo
+      setDiscountAmount(discount.discountAmount);
+    } else if (discount.discountPercent !== undefined) {
+      // Descuento porcentual
+      const amount = (totalPrice * discount.discountPercent) / 100;
+      setDiscountAmount(amount);
+    } else {
+      setDiscountAmount(0);
+    }
+  };
+
+  // Función para remover un descuento activo
+  const removeDiscount = () => {
+    setActiveDiscount(null);
+    setDiscountAmount(0);
+  };
+
+  // Función para mostrar el modal de confirmación de uso de descuento
+  const showDiscountConfirmation = () => {
+    if (!activeDiscount) return;
+    
+    let discountDescription = '';
+    if (activeDiscount.discountAmount) {
+      discountDescription = `$${activeDiscount.discountAmount.toFixed(2)}`;
+    } else if (activeDiscount.discountPercent) {
+      discountDescription = `${activeDiscount.discountPercent}%`;
+    }
+    
+    Alert.alert(
+      'Usar descuento',
+      `¿Quieres aplicar tu descuento de ${discountDescription} a esta compra?`,
+      [
+        { text: 'No usar', style: 'cancel' },
+        { 
+          text: 'Aplicar descuento', 
+          style: 'default',
+          onPress: () => {
+            // El descuento ya está aplicado en el cálculo, solo confirmar
+            Alert.alert(
+              'Descuento aplicado',
+              `Tu descuento de ${discountDescription} ha sido aplicado al total de tu compra.`
+            );
+          }
+        }
+      ]
+    );
+  };
 
   // Comprobar si el negocio acepta efectivo
   useEffect(() => {
@@ -165,7 +264,7 @@ export const CartScreen: React.FC = () => {
     if (method === 'cash') {
       Alert.alert(
         "Confirmar pedido",
-        `¿Confirmas tu pedido de $${totalPrice.toFixed(2)} a ${businessName}? Pagarás en efectivo al recibir tu pedido.`,
+        `¿Confirmas tu pedido de $${finalTotal.toFixed(2)} a ${businessName}? Pagarás en efectivo al recibir tu pedido.`,
         [
           { 
             text: "Cancelar", 
@@ -198,23 +297,76 @@ export const CartScreen: React.FC = () => {
               // Por ahora, solo simulamos un procesamiento exitoso
               
               setTimeout(() => {
-                clearCart();
-                setLoading(false);
-                Alert.alert(
-                  "Pedido confirmado",
-                  "Tu pedido ha sido enviado. Pagarás en efectivo cuando recibas tu orden.",
-                  [
-                    {
-                      text: "OK",
-                      onPress: () => {
-                        navigation.reset({
-                          index: 0,
-                          routes: [{ name: 'MainTabs' }],
-                        });
-                      }
+                // Generar un ID de pedido simulado para los puntos
+                const simulatedOrderId = `order-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                
+                // Marcar el descuento como usado si se aplicó
+                if (activeDiscount && activeDiscount.id) {
+                  markRedemptionAsUsed(activeDiscount.id)
+                    .then(() => console.log('Descuento marcado como usado'))
+                    .catch(err => console.error('Error al marcar descuento como usado:', err));
+                }
+                
+                // Otorgar puntos por la compra si el usuario está autenticado
+                if (user && cart.businessId) {
+                  awardPointsForPurchase(
+                    simulatedOrderId,
+                    finalTotal, // Usamos el precio final después del descuento
+                    cart.businessId,
+                    businessName
+                  ).catch(err => console.error('Error awarding points:', err));
+                  
+                  // Calcular los puntos ganados (2 puntos por cada dólar)
+                  const pointsEarned = Math.floor(finalTotal * 2);
+                  
+                  // Construir mensaje para mostrar descuento aplicado si lo hay
+                  let discountMessage = '';
+                  if (activeDiscount) {
+                    if (activeDiscount.discountAmount) {
+                      discountMessage = `\n\nSe aplicó un descuento de $${activeDiscount.discountAmount.toFixed(2)}.`;
+                    } else if (activeDiscount.discountPercent) {
+                      discountMessage = `\n\nSe aplicó un descuento del ${activeDiscount.discountPercent}%.`;
                     }
-                  ]
-                );
+                  }
+                  
+                  // Limpiar carrito y mostrar confirmación con puntos ganados
+                  clearCart();
+                  setLoading(false);
+                  Alert.alert(
+                    "Pedido confirmado",
+                    `Tu pedido ha sido enviado. Pagarás en efectivo cuando recibas tu orden.${discountMessage}\n\n¡Has ganado ${pointsEarned} puntos! Tienes un total de ${totalPoints + pointsEarned} puntos.`,
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => {
+                          navigation.reset({
+                            index: 0,
+                            routes: [{ name: 'MainTabs' }],
+                          });
+                        }
+                      }
+                    ]
+                  );
+                } else {
+                  // Si el usuario no está autenticado, mostrar mensaje estándar
+                  clearCart();
+                  setLoading(false);
+                  Alert.alert(
+                    "Pedido confirmado",
+                    "Tu pedido ha sido enviado. Pagarás en efectivo cuando recibas tu orden.",
+                    [
+                      {
+                        text: "OK",
+                        onPress: () => {
+                          navigation.reset({
+                            index: 0,
+                            routes: [{ name: 'MainTabs' }],
+                          });
+                        }
+                      }
+                    ]
+                  );
+                }
               }, 1500);
             }
           }
@@ -224,7 +376,7 @@ export const CartScreen: React.FC = () => {
       // Para pago con tarjeta, seguimos el flujo normal a PaymentScreen
       Alert.alert(
         "Confirmar pedido",
-        `¿Estás seguro de que deseas proceder al pago de $${totalPrice.toFixed(2)} a ${businessName}?`,
+        `¿Estás seguro de que deseas proceder al pago de $${finalTotal.toFixed(2)} a ${businessName}?`,
         [
           { 
             text: "Cancelar", 
@@ -254,11 +406,17 @@ export const CartScreen: React.FC = () => {
               navigation.navigate('Payment', {
                 businessId: cart.businessId || '',
                 businessName: businessName,
-                amount: totalPrice,
+                amount: finalTotal, // Pasar el precio final después del descuento
                 cartItems: sanitizedCartItems,
                 isCartPayment: true,
                 deliveryAddress: cart.deliveryAddress,
-                deliveryNotes: cart.deliveryNotes
+                deliveryNotes: cart.deliveryNotes,
+                // Añadir información para los puntos
+                shouldAwardPoints: !!user,
+                pointsToAward: Math.floor(finalTotal * 2),
+                // Información sobre el descuento aplicado
+                appliedDiscountId: activeDiscount?.id,
+                discountAmount: discountAmount
               });
               
               // Usamos setTimeout para asegurarnos de que la navegación se complete antes de quitar el indicador de carga
@@ -410,12 +568,48 @@ export const CartScreen: React.FC = () => {
                   <Text style={styles.summaryValue}>${totalPrice.toFixed(2)}</Text>
                 </View>
                 
+                {/* Mostrar descuento si está disponible */}
+                {activeDiscount && discountAmount > 0 && (
+                  <View style={styles.discountRow}>
+                    <View style={styles.discountLabelContainer}>
+                      <MaterialIcons name="local-offer" size={16} color="#4CAF50" />
+                      <Text style={styles.discountLabel}>Descuento aplicado</Text>
+                    </View>
+                    <Text style={styles.discountValue}>-${discountAmount.toFixed(2)}</Text>
+                  </View>
+                )}
+                
                 <View style={styles.divider} />
                 
                 <View style={styles.summaryRow}>
                   <Text style={styles.totalLabel}>Total</Text>
-                  <Text style={styles.totalValue}>${totalPrice.toFixed(2)}</Text>
+                  <Text style={styles.totalValue}>${finalTotal.toFixed(2)}</Text>
                 </View>
+                
+                {/* Botón para aplicar/ver descuentos disponibles */}
+                {user && (
+                  <TouchableOpacity 
+                    style={styles.discountButton}
+                    onPress={showDiscountConfirmation}
+                    disabled={!activeDiscount}
+                  >
+                    <MaterialIcons 
+                      name={activeDiscount ? "confirmation-number" : "confirmation-number"} 
+                      size={18} 
+                      color={activeDiscount ? "#4CAF50" : "#BBBBBB"} 
+                    />
+                    <Text 
+                      style={[
+                        styles.discountButtonText,
+                        {color: activeDiscount ? "#4CAF50" : "#BBBBBB"}
+                      ]}
+                    >
+                      {activeDiscount 
+                        ? `Descuento aplicado: ${activeDiscount.name}` 
+                        : "No tienes descuentos disponibles"}
+                    </Text>
+                  </TouchableOpacity>
+                )}
                 
                 {/* Sección de Dirección de Entrega */}
                 <View style={styles.deliverySection}>
@@ -450,7 +644,6 @@ export const CartScreen: React.FC = () => {
                     numberOfLines={3}
                     value={cart.deliveryNotes || ''}
                     onChangeText={(text) => {
-                      // Necesitarías agregar esta propiedad al contexto del carrito
                       setDeliveryNotes(text);
                     }}
                   />
@@ -1096,6 +1289,40 @@ const styles = StyleSheet.create({
   },
   notesInput: {
     padding: 12,
+  },
+  discountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginVertical: 4,
+    alignItems: 'center',
+  },
+  discountLabelContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  discountLabel: {
+    fontSize: 16,
+    color: '#4CAF50',
+    marginLeft: 6,
+  },
+  discountValue: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#4CAF50',
+  },
+  discountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#F8F9FA',
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+  },
+  discountButtonText: {
+    marginLeft: 8,
+    fontSize: 14,
   },
 });
 

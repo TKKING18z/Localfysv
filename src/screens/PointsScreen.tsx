@@ -44,7 +44,7 @@ const PointsScreen: React.FC = () => {
   
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'rewards'>('history');
-  const [selectedReward, setSelectedReward] = useState<PointsReward | null>(null);
+  const [selectedItem, setSelectedItem] = useState<PointsReward | null>(null);
   
   // Cargar datos cuando la pantalla obtiene el foco
   useFocusEffect(
@@ -84,7 +84,7 @@ const PointsScreen: React.FC = () => {
   
   // Handle redemption
   const handleRedeem = (reward: PointsReward) => {
-    setSelectedReward(reward);
+    setSelectedItem(reward);
     
     // Check if user has enough points
     if (totalPoints < reward.pointsCost) {
@@ -96,36 +96,88 @@ const PointsScreen: React.FC = () => {
       return;
     }
     
+    // Determine reward type and discount values
+    const rewardType = reward.rewardType || 'other';
+    
+    // Customize confirmation message based on reward type
+    let confirmMessage = `¿Estás seguro de que deseas canjear ${reward.pointsCost} puntos por ${reward.name}?`;
+    
+    if (rewardType === 'discount' && reward.discountAmount) {
+      confirmMessage = `¿Estás seguro de que deseas canjear ${reward.pointsCost} puntos por un descuento de $${reward.discountAmount.toFixed(2)}?`;
+    } else if (rewardType === 'discount' && reward.discountPercent) {
+      confirmMessage = `¿Estás seguro de que deseas canjear ${reward.pointsCost} puntos por un descuento del ${reward.discountPercent}%?`;
+    }
+    
     // Confirm redemption
     Alert.alert(
       'Confirmar canje',
-      `¿Estás seguro de que deseas canjear ${reward.pointsCost} puntos por ${reward.name}?`,
+      confirmMessage,
       [
         {
           text: 'Cancelar',
           style: 'cancel',
-          onPress: () => setSelectedReward(null)
+          onPress: () => setSelectedItem(null)
         },
         {
           text: 'Canjear',
           onPress: async () => {
             setRefreshing(true);
             try {
-              const success = await redeemPoints(reward.id, reward.pointsCost, reward.name);
+              // Si discountAmount o discountPercent son undefined, Firebase arrojará un error.
+              // Usamos el operador ternario para garantizar que se envíen valores válidos.
+              const discountAmount = reward.discountAmount !== undefined ? reward.discountAmount : 0;
+              const discountPercent = reward.discountPercent !== undefined ? reward.discountPercent : 0;
+              
+              const success = await redeemPoints(
+                reward.id, 
+                reward.pointsCost, 
+                reward.name,
+                rewardType,
+                discountAmount,
+                discountPercent
+              );
+              
               if (success) {
+                // Customize success message based on reward type
+                let successMessage = `¡Felicidades! Has canjeado exitosamente ${reward.pointsCost} puntos por "${reward.name}".`;
+                
+                if (rewardType === 'discount' && discountAmount) {
+                  successMessage = `¡Felicidades! Has canjeado exitosamente ${reward.pointsCost} puntos por un descuento de $${discountAmount.toFixed(2)}.`;
+                } else if (rewardType === 'discount' && discountPercent) {
+                  successMessage = `¡Felicidades! Has canjeado exitosamente ${reward.pointsCost} puntos por un descuento del ${discountPercent}%.`;
+                }
+                
+                // Additional instructions for discount rewards
+                let additionalInfo = '';
+                if (rewardType === 'discount') {
+                  additionalInfo = `\n\nTu descuento ha sido aplicado a tu cuenta y estará disponible en tu próxima compra. Para utilizarlo, simplemente procede a realizar un pedido en el carrito de compras.`;
+                }
+                
+                // Show success alert with clearer messaging about the instant reward delivery
                 Alert.alert(
-                  '¡Canje exitoso!',
-                  `Has canjeado ${reward.pointsCost} puntos por ${reward.name}. Te contactaremos pronto para entregarte tu premio.`,
-                  [{ text: 'OK' }]
+                  '¡Premio Canjeado!',
+                  successMessage + 
+                  (reward.description ? `\n\nDetalles: ${reward.description}` : '') + 
+                  additionalInfo,
+                  [
+                    { 
+                      text: 'OK',
+                      onPress: () => {
+                        // After clicking OK, refresh the points to update the UI
+                        refreshPoints();
+                        // Switch to history tab to show the redemption
+                        setActiveTab('history');
+                      }
+                    }
+                  ]
                 );
-                refreshPoints();
               }
             } catch (error) {
               console.error('Error redeeming points:', error);
               Alert.alert('Error', 'No se pudo completar el canje. Inténtalo nuevamente.');
             } finally {
               setRefreshing(false);
-              setSelectedReward(null);
+              setSelectedItem(null);
             }
           }
         }
@@ -133,7 +185,7 @@ const PointsScreen: React.FC = () => {
     );
   };
   
-  // Get correct icon for transaction type
+  // Get transaction icon for transaction type
   const getTransactionIcon = (transaction: PointsTransaction) => {
     switch (transaction.type) {
       case 'purchase':
@@ -148,6 +200,20 @@ const PointsScreen: React.FC = () => {
         return <MaterialIcons name="redeem" size={24} color="#FF3B30" />;
       default:
         return <MaterialIcons name="loyalty" size={24} color="#8E8E93" />;
+    }
+  };
+  
+  // Obtener el icono adecuado para el tipo de recompensa
+  const getRewardIcon = (rewardType: string = 'other') => {
+    switch (rewardType) {
+      case 'discount':
+        return <MaterialIcons name="local-offer" size={20} color="#FF9500" />;
+      case 'free_product':
+        return <MaterialIcons name="card-giftcard" size={20} color="#34C759" />;
+      case 'gift_card':
+        return <MaterialIcons name="attach-money" size={20} color="#FF2D55" />;
+      default:
+        return <MaterialIcons name="stars" size={20} color="#5856D6" />;
     }
   };
   
@@ -184,28 +250,35 @@ const PointsScreen: React.FC = () => {
       name: 'Descuento de $5',
       description: 'Obtén un descuento de $5 en tu próxima compra',
       pointsCost: 50,
-      isActive: true
+      isActive: true,
+      rewardType: 'discount',
+      discountAmount: 5 // Descuento de $5
     },
     {
       id: 'sample-reward-2',
-      name: 'Envío gratis',
-      description: 'Envío gratis en tu próximo pedido',
+      name: 'Descuento del 10%',
+      description: 'Obtén un 10% de descuento en tu próxima compra',
       pointsCost: 100,
-      isActive: true
+      isActive: true,
+      rewardType: 'discount',
+      discountPercent: 10 // Descuento del 10%
     },
     {
       id: 'sample-reward-3',
       name: 'Producto gratis',
       description: 'Recibe un producto gratis en tu próxima visita (hasta $10)',
       pointsCost: 200,
-      isActive: true
+      isActive: true,
+      rewardType: 'free_product'
     },
     {
       id: 'sample-reward-4',
       name: 'Descuento VIP del 20%',
       description: 'Obtén un descuento del 20% en tu próxima compra',
       pointsCost: 300,
-      isActive: true
+      isActive: true,
+      rewardType: 'discount',
+      discountPercent: 20 // Descuento del 20%
     },
     {
       id: 'sample-reward-5',
@@ -213,7 +286,7 @@ const PointsScreen: React.FC = () => {
       description: 'Recibe una tarjeta de regalo de $50 para usar en cualquier establecimiento',
       pointsCost: 500,
       isActive: true,
-      imageUrl: 'https://via.placeholder.com/100'
+      rewardType: 'gift_card'
     }
   ];
   
@@ -378,11 +451,37 @@ const PointsScreen: React.FC = () => {
                       <Image source={{ uri: item.imageUrl }} style={styles.rewardImage} />
                     ) : (
                       <View style={styles.rewardImagePlaceholder}>
-                        <MaterialIcons name="card-giftcard" size={40} color="#C7C7CC" />
+                        <MaterialIcons 
+                          name={
+                            item.rewardType === 'discount' ? "local-offer" :
+                            item.rewardType === 'free_product' ? "card-giftcard" :
+                            item.rewardType === 'gift_card' ? "attach-money" : "stars"
+                          } 
+                          size={40} 
+                          color={
+                            item.rewardType === 'discount' ? "#FF9500" :
+                            item.rewardType === 'free_product' ? "#34C759" :
+                            item.rewardType === 'gift_card' ? "#FF2D55" : "#5856D6"
+                          } 
+                        />
                       </View>
                     )}
                     <View style={styles.rewardDetails}>
-                      <Text style={styles.rewardName}>{item.name}</Text>
+                      <View style={styles.rewardNameContainer}>
+                        <View style={[
+                          styles.rewardTypeIconContainer,
+                          {
+                            backgroundColor: 
+                              item.rewardType === 'discount' ? 'rgba(255, 149, 0, 0.1)' :
+                              item.rewardType === 'free_product' ? 'rgba(52, 199, 89, 0.1)' :
+                              item.rewardType === 'gift_card' ? 'rgba(255, 45, 85, 0.1)' : 
+                              'rgba(88, 86, 214, 0.1)'
+                          }
+                        ]}>
+                          {getRewardIcon(item.rewardType)}
+                        </View>
+                        <Text style={styles.rewardName}>{item.name}</Text>
+                      </View>
                       <Text style={styles.rewardDescription}>{item.description}</Text>
                       <View style={styles.rewardPointsContainer}>
                         <MaterialIcons name="stars" size={16} color="#FF9500" />
@@ -672,6 +771,19 @@ const styles = StyleSheet.create({
   rewardDetails: {
     flex: 1,
     marginLeft: 16,
+  },
+  rewardNameContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  rewardTypeIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   rewardName: {
     fontSize: 16,
