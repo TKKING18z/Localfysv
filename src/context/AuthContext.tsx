@@ -135,13 +135,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         
         if (userDoc.exists) {
           const userData = userDoc.data();
-          setUser({
-            uid: userCredential.user.uid,
-            email: userCredential.user.email || '',
-            displayName: userData?.displayName || '',
-            photoURL: userData?.photoURL || '',
-            // otros campos
-          });
+          // Create a user object that matches firebase.User interface better
+          const userToSet = userCredential.user;
+          setUser(userToSet);
           
           // Guardar en AsyncStorage
           await AsyncStorage.setItem('user_uid', userCredential.user.uid);

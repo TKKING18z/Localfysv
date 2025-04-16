@@ -59,6 +59,26 @@ export interface BusinessFormState extends BusinessFormData {
   hasUnsavedChanges: boolean;
   validationErrors: Record<string, string>;
   allowsPromotions: boolean;
+  
+  // New fields for onboarding
+  email?: string;
+  shortDescription?: string;
+  keywords?: string[];
+  galleryImages?: string[];
+  services?: {
+    delivery: boolean;
+    pickup: boolean;
+    onlineOrders: boolean;
+    reservations: boolean;
+    wifi: boolean;
+    parking: boolean;
+  };
+  notificationPreferences?: {
+    email: boolean;
+    sms: boolean;
+    push: boolean;
+    whatsapp: boolean;
+  };
 }
 
 // Validation and submission functions

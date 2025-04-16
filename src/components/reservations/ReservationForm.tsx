@@ -234,7 +234,9 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
             userName: name,
             date: firebase.firestore.Timestamp.fromDate(date),
             time,
-            partySize: parseInt(partySize, 10) || 1
+            partySize: parseInt(partySize, 10) || 1,
+            status: 'pending' as const,
+            createdAt: firebase.firestore.Timestamp.now()
           };
           
           console.log("Reintentando con datos mínimos");

@@ -258,7 +258,7 @@ const FavoritesScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItem} 
-          onPress={() => navigation.navigate('Map')}
+          onPress={() => navigation.navigate('Map', {})}
         >
           <MaterialIcons name="explore" size={24} color="#8E8E93" />
           <Text style={styles.navItemText}>Explorar</Text>

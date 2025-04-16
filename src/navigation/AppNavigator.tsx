@@ -71,6 +71,11 @@ import BusinessOrdersScreen from '../screens/orders/BusinessOrdersScreen';
 // @ts-ignore
 import BusinessSelectorScreen from '../screens/orders/BusinessSelectorScreen';
 
+// New business onboarding screens
+import BusinessOnboardingWelcomeScreen from '../screens/onboarding/BusinessOnboardingWelcomeScreen';
+import BusinessOnboardingModeSelectionScreen from '../screens/onboarding/BusinessOnboardingModeSelectionScreen';
+import BusinessOnboardingStepsScreen from '../screens/onboarding/BusinessOnboardingStepsScreen';
+
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
   Splash: undefined;
@@ -84,7 +89,7 @@ export type RootStackParamList = {
   Register: undefined;
   ForgotPassword: undefined;
   MainTabs: { screen?: keyof MainTabParamList };  // Allow specifying which tab to navigate to
-  BusinessDetail: { businessId: string };
+  BusinessDetail: { businessId: string; fromOnboarding?: boolean };
   // Business enhancement screens
   BusinessHours: { initialHours?: any; callbackId?: string };
   PaymentMethods: { initialMethods?: string[]; callbackId?: string };
@@ -167,6 +172,10 @@ export type RootStackParamList = {
   };
   // Nueva ruta para seleccionar negocio
   BusinessSelector: undefined;
+  // New business onboarding routes
+  BusinessOnboardingWelcome: undefined;
+  BusinessOnboardingModeSelection: undefined;
+  BusinessOnboardingSteps: undefined;
 };
 
 // Define tab navigator parameter list
@@ -528,6 +537,12 @@ const AppNavigator: React.FC = () => {
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="Auth" component={AuthStack} />
           <Stack.Screen name="MainTabs" component={MainTabs} />
+          
+          {/* New Business Onboarding Screens */}
+          <Stack.Screen name="BusinessOnboardingWelcome" component={BusinessOnboardingWelcomeScreen} />
+          <Stack.Screen name="BusinessOnboardingModeSelection" component={BusinessOnboardingModeSelectionScreen} />
+          <Stack.Screen name="BusinessOnboardingSteps" component={BusinessOnboardingStepsScreen} />
+          
           {/* These screens are available regardless of auth state */}
           <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
           <Stack.Screen 

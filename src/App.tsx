@@ -2,18 +2,19 @@ import React, { useEffect, useState } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import { View, Text, ActivityIndicator, LogBox, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import AppNavigator from './src/navigation/AppNavigator';
-import { BusinessProvider } from './src/context/BusinessContext';
-import { LocationProvider } from './src/context/LocationContext';
-import { AuthProvider } from './src/context/AuthContext'; 
-import { ThemeProvider } from './src/context/ThemeContext';
-import { StoreProvider } from './src/context/StoreContext';
-import { CartProvider } from './src/context/CartContext';
-import { OrderProvider } from './src/context/OrderContext';
-import { PointsProvider } from './src/context/PointsContext';
-import { OnboardingProvider } from './src/context/OnboardingContext';
+import AppNavigator from './navigation/AppNavigator';
+import { BusinessProvider } from './context/BusinessContext';
+import { LocationProvider } from './context/LocationContext';
+import { AuthProvider } from './context/AuthContext'; 
+import { ThemeProvider } from './context/ThemeContext';
+import { StoreProvider } from './context/StoreContext';
+import { CartProvider } from './context/CartContext';
+import { OrderProvider } from './context/OrderContext';
+import { PointsProvider } from './context/PointsContext';
+import { OnboardingProvider } from './context/OnboardingContext';
+import { BusinessOnboardingProvider } from './context/BusinessOnboardingContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import firebase from './firebase.config';
+import firebase from '../firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
@@ -45,6 +46,10 @@ export default function App() {
     try {
       // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
       await AsyncStorage.getItem('favorites');
+      
+      // Always enable the new business onboarding flow
+      // This will ensure all users get the new experience
+      await AsyncStorage.setItem('use_new_onboarding_flow', 'true');
       
       // Verificar si hay información de sesión de usuario
       const userUid = await AsyncStorage.getItem('user_uid');
@@ -116,27 +121,29 @@ export default function App() {
       <StoreProvider>
         <AuthProvider>
           <OnboardingProvider>
-            <StripeProvider
-              publishableKey={STRIPE_PUBLISHABLE_KEY}
-              merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
-            >
-              <ThemeProvider>
-                <LocationProvider>
-                  <BusinessProvider>
-                    <CartProvider>
-                      <OrderProvider>
-                        <PointsProvider>
-                          <AppNavigator />
-                        </PointsProvider>
-                      </OrderProvider>
-                    </CartProvider>
-                  </BusinessProvider>
-                </LocationProvider>
-              </ThemeProvider>
-            </StripeProvider>
+            <BusinessOnboardingProvider>
+              <StripeProvider
+                publishableKey={STRIPE_PUBLISHABLE_KEY}
+                merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
+              >
+                <ThemeProvider>
+                  <LocationProvider>
+                    <BusinessProvider>
+                      <CartProvider>
+                        <OrderProvider>
+                          <PointsProvider>
+                            <AppNavigator />
+                          </PointsProvider>
+                        </OrderProvider>
+                      </CartProvider>
+                    </BusinessProvider>
+                  </LocationProvider>
+                </ThemeProvider>
+              </StripeProvider>
+            </BusinessOnboardingProvider>
           </OnboardingProvider>
         </AuthProvider>
       </StoreProvider>
     </SafeAreaProvider>
   );
-}
+} 

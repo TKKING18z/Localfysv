@@ -54,7 +54,7 @@ const handleFirebaseError = (error: any, context: string): any => {
 
 // Función de utilidad para limpiar datos antes de enviarlos a Firestore
 const cleanDataForFirestore = (data: any): any => {
-  // Si el dato es undefined, devuelve null
+  // Si el dato es undefined, devuelve null (Firestore no acepta undefined)
   if (data === undefined) return null;
   
   // Si el dato es un array, limpia cada elemento
@@ -70,11 +70,13 @@ const cleanDataForFirestore = (data: any): any => {
     Object.keys(data).forEach(key => {
       const value = data[key];
       
-      // Si la propiedad no es undefined, límpiala recursivamente
-      if (value !== undefined) {
+      // Si la propiedad es undefined, guárdala como null explícitamente
+      if (value === undefined) {
+        cleanedData[key] = null;
+      } else {
+        // Si no es undefined, límpiala recursivamente
         cleanedData[key] = cleanDataForFirestore(value);
       }
-      // Si es undefined, omítela (no la incluyas en cleanedData)
     });
     
     return cleanedData;
@@ -313,7 +315,66 @@ export const firebaseService = {
       } catch (error) {
         return { success: false, error: handleFirebaseError(error, 'businesses/getFavorites') };
       }
-    }
+    },
+    
+    // Upload business image
+    uploadBusinessImage: async (businessId: string, imageUri: string, isMain: boolean = false): Promise<FirebaseResponse<{ url: string }>> => {
+      try {
+        const timestamp = Date.now();
+        const path = `businesses/${businessId}/images/${timestamp}.jpg`;
+        
+        // Upload to storage
+        const uploadResult = await firebaseService.storage.uploadImage(imageUri, path);
+        
+        if (!uploadResult.success || !uploadResult.data) {
+          return { success: false, error: { message: 'Error uploading image' } };
+        }
+        
+        return { success: true, data: { url: uploadResult.data } };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'businesses/uploadBusinessImage') };
+      }
+    },
+    
+    // Update business images
+    updateImages: async (businessId: string, images: Array<{url: string, isMain?: boolean}>): Promise<FirebaseResponse<null>> => {
+      try {
+        const businessRef = firebase.firestore().collection('businesses').doc(businessId);
+        
+        // Get current images
+        const businessDoc = await businessRef.get();
+        if (!businessDoc.exists) {
+          return { success: false, error: { message: 'Business not found' } };
+        }
+        
+        const businessData = businessDoc.data();
+        const currentImages = businessData?.images || [];
+        
+        // Combine current images with new ones
+        const updatedImages = [...currentImages];
+        
+        images.forEach(image => {
+          // If image is marked as main, move it to the first position
+          if (image.isMain) {
+            // Set isMain: false for all other images
+            updatedImages.forEach(img => img.isMain = false);
+            updatedImages.unshift(image);
+          } else {
+            updatedImages.push(image);
+          }
+        });
+        
+        // Update business document
+        await businessRef.update({
+          images: updatedImages,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'businesses/updateImages') };
+      }
+    },
   },
   
   // User methods
@@ -396,7 +457,63 @@ export const firebaseService = {
       } catch (error) {
         return { success: false, error: handleFirebaseError(error, 'users/isFavorite') };
       }
-    }
+    },
+    
+    // Business Onboarding Draft Methods
+    saveBusinessDraft: async (userId: string, draftData: any): Promise<FirebaseResponse<null>> => {
+      try {
+        // Clean data thoroughly to prevent Firestore errors with undefined values
+        const cleanedData = cleanDataForFirestore(draftData);
+        
+        // Make an extra safety check for undefined/null values in nested objects
+        if (cleanedData.formState) {
+          // Ensure these specific fields are not undefined
+          if (cleanedData.formState.businessHours === undefined) {
+            cleanedData.formState.businessHours = null;
+          }
+          if (cleanedData.formState.socialLinks === undefined) {
+            cleanedData.formState.socialLinks = null;
+          }
+        }
+        
+        await firebase.firestore().collection('users').doc(userId)
+          .collection('business_drafts').doc('onboarding_draft')
+          .set({
+            ...cleanedData,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          });
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'users/saveBusinessDraft') };
+      }
+    },
+    
+    getBusinessDraft: async (userId: string): Promise<FirebaseResponse<any>> => {
+      try {
+        const doc = await firebase.firestore().collection('users').doc(userId)
+          .collection('business_drafts').doc('onboarding_draft').get();
+        
+        if (!doc.exists) {
+          return { success: true, data: null };
+        }
+        
+        return { success: true, data: doc.data() };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'users/getBusinessDraft') };
+      }
+    },
+    
+    removeBusinessDraft: async (userId: string): Promise<FirebaseResponse<null>> => {
+      try {
+        await firebase.firestore().collection('users').doc(userId)
+          .collection('business_drafts').doc('onboarding_draft').delete();
+        
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'users/removeBusinessDraft') };
+      }
+    },
   },
   
   // Storage methods

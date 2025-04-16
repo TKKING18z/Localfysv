@@ -16,7 +16,7 @@ import {
   ScrollView,
   RefreshControl
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
@@ -64,7 +64,7 @@ const BusinessDetailScreen: React.FC = () => {
   const dimensions = useWindowDimensions();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<BusinessDetailRouteProp>();
-  const { businessId } = route.params;
+  const { businessId, fromOnboarding } = route.params;
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
   const { user } = useAuth();
@@ -200,6 +200,25 @@ const BusinessDetailScreen: React.FC = () => {
     await Promise.all([fetchBusiness(), loadPromotions()]);
     setRefreshing(false);
   }, [fetchBusiness, loadPromotions]);
+
+  // Manejar navegación de vuelta
+  const handleGoBack = useCallback(() => {
+    // Si venimos del onboarding, navegar a Home en lugar de volver
+    if (fromOnboarding) {
+      // Reiniciar la pila de navegación y navegar a Home
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            { name: 'MainTabs', params: { screen: 'Home' } },
+          ],
+        })
+      );
+    } else {
+      // Comportamiento normal de volver atrás
+      navigation.goBack();
+    }
+  }, [navigation, fromOnboarding]);
 
   // Manejadores de eventos optimizados con useCallback
   const handleFavoriteToggle = useCallback(() => {
@@ -611,7 +630,7 @@ const BusinessDetailScreen: React.FC = () => {
         <Text style={styles.errorText}>{loadingError || 'No se pudo cargar el negocio'}</Text>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleGoBack}
           accessibilityRole="button"
           accessibilityLabel="Volver atrás"
         >
@@ -636,7 +655,7 @@ const BusinessDetailScreen: React.FC = () => {
         headerAnimations={headerAnimations}
         favoriteScale={favoriteScale}
         handleFavoriteToggle={handleFavoriteToggle}
-        goBack={() => navigation.goBack()}
+        goBack={handleGoBack}
         shareBusiness={shareBusiness}
         distance={distance}
       />
