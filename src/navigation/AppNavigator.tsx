@@ -3,10 +3,11 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
-import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet, AppState, Platform, Animated } from 'react-native';
+import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet, AppState, Platform, Animated, StatusBar } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { useChat, ChatProvider } from '../context/ChatContext';
 import * as Notifications from 'expo-notifications';
+import { useOnboarding } from '../context/OnboardingContext';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -337,21 +338,23 @@ const AuthStack = () => (
 );
 
 // Main App Navigator
-interface AppNavigatorProps {
-  showOnboarding?: boolean;
-  onboardingContext?: {
-    completeOnboarding: () => Promise<boolean>;
-  }
-}
-
-const AppNavigator: React.FC<AppNavigatorProps> = ({ showOnboarding = false, onboardingContext }) => {
-  // Usar el hook de autenticación
+const AppNavigator: React.FC = () => {
+  const { hasCompletedOnboarding } = useOnboarding();
   const { user, isLoading } = useAuth();
   const responseListener = useRef<any>();
   const notificationListener = useRef<any>();
   const appState = useRef(AppState.currentState);
   // Estados para manejar funciones del contexto
   const [updateNotificationToken, setUpdateNotificationToken] = React.useState<((token: string) => Promise<void>) | undefined>(undefined);
+
+  // IMPORTANTE: Determinar la ruta inicial basada en onboarding y autenticación
+  const getInitialRouteName = (): keyof RootStackParamList => {
+    if (!hasCompletedOnboarding) {
+      return 'Onboarding';
+    }
+    // Si ya completó el onboarding, verificar si hay un usuario autenticado
+    return user ? 'MainTabs' : 'Auth';
+  };
 
   // Configurar manejadores de notificaciones
   useEffect(() => {
@@ -449,7 +452,7 @@ const AppNavigator: React.FC<AppNavigatorProps> = ({ showOnboarding = false, onb
     }
   };
   
-  // Componente interno para manejar el token de notificaciones
+  // Componente interno para la app con chat
   const AppWithChat = () => {
     // Usar el hook de chat dentro del contexto
     const chatContext = useChat();
@@ -507,6 +510,7 @@ const AppNavigator: React.FC<AppNavigatorProps> = ({ showOnboarding = false, onb
     // Wrap the stack navigator in an animated view for smooth transition
     return (
       <Animated.View style={{ flex: 1, opacity: fadeAnim }}>
+        <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
         <Stack.Navigator 
           screenOptions={{ 
             headerShown: false,
@@ -517,22 +521,13 @@ const AppNavigator: React.FC<AppNavigatorProps> = ({ showOnboarding = false, onb
               },
             }),
           }}
+          initialRouteName={getInitialRouteName()}
         >
-          {/* We conditionally render either the auth flow or main app based on authentication */}
-          {!user ? (
-            <>
-              <Stack.Screen 
-                name="Onboarding" 
-                component={OnboardingScreen} 
-                initialParams={{ onboardingContext }}
-              />
-              <Stack.Screen name="Auth" component={AuthStack} />
-            </>
-          ) : (
-            <>
-              <Stack.Screen name="MainTabs" component={MainTabs} />
-            </>
-          )}
+          {/* Now we determine what to show based on onboarding and authentication */}
+          <Stack.Screen name="Splash" component={SplashScreen} />
+          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+          <Stack.Screen name="Auth" component={AuthStack} />
+          <Stack.Screen name="MainTabs" component={MainTabs} />
           {/* These screens are available regardless of auth state */}
           <Stack.Screen name="BusinessDetail" component={BusinessDetailScreen} />
           <Stack.Screen 
@@ -694,8 +689,7 @@ const AppNavigator: React.FC<AppNavigatorProps> = ({ showOnboarding = false, onb
     );
   }
 
-  // ChatProvider ya está importado
-
+  // Devolvemos el componente con chat y navegación
   return (
     <NavigationContainer>
       <ChatProvider>

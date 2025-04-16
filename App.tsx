@@ -11,6 +11,7 @@ import { StoreProvider } from './src/context/StoreContext';
 import { CartProvider } from './src/context/CartContext';
 import { OrderProvider } from './src/context/OrderContext';
 import { PointsProvider } from './src/context/PointsContext';
+import { OnboardingProvider } from './src/context/OnboardingContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from './firebase.config';
 import 'react-native-gesture-handler';
@@ -35,34 +36,15 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* revert to default behavior if something goes wrong */
 });
 
-// Define custom props interface for the AppNavigator
-interface AppNavigatorProps {
-  showOnboarding?: boolean;
-  onboardingContext?: {
-    completeOnboarding: () => Promise<boolean>;
-  }
-}
-
-// Type assertion for AppNavigator
-const TypedAppNavigator = AppNavigator as React.ComponentType<AppNavigatorProps>;
-
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
-  // Force onboarding to always show during testing
-  const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
 
   // Restaurar estado desde almacenamiento local
   const hydrateState = async () => {
     try {
       // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
       await AsyncStorage.getItem('favorites');
-      
-      // Check if onboarding has been completed
-      const onboardingCompleted = await AsyncStorage.getItem('onboarding_completed');
-      if (onboardingCompleted === 'true') {
-        setHasCompletedOnboarding(true);
-      }
       
       // Verificar si hay información de sesión de usuario
       const userUid = await AsyncStorage.getItem('user_uid');
@@ -106,28 +88,6 @@ export default function App() {
     prepareApp();
   }, []);
 
-  // Función para completar el onboarding
-  const completeOnboarding = async () => {
-    try {
-      // For testing purposes, we don't actually save the onboarding completion status
-      // This will make the onboarding appear every time
-      console.log('Onboarding completado (modo test - no guardado)');
-      
-      // Store in AsyncStorage that onboarding is completed
-      await AsyncStorage.setItem('onboarding_completed', 'true');
-      
-      setHasCompletedOnboarding(true);
-      return true;
-    } catch (error) {
-      console.error('Error al completar onboarding:', error);
-      return false;
-    }
-  };
-
-  const onboardingContext = {
-    completeOnboarding
-  };
-
   // Show loading indicator while app is preparing
   if (isLoading || !hasHydrated) {
     return (
@@ -155,27 +115,26 @@ export default function App() {
       <StatusBar style="dark" />
       <StoreProvider>
         <AuthProvider>
-          <StripeProvider
-            publishableKey={STRIPE_PUBLISHABLE_KEY}
-            merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
-          >
-            <ThemeProvider>
-              <LocationProvider>
-                <BusinessProvider>
-                  <CartProvider>
-                    <OrderProvider>
-                      <PointsProvider>
-                        <TypedAppNavigator 
-                          showOnboarding={!hasCompletedOnboarding} 
-                          onboardingContext={onboardingContext} 
-                        />
-                      </PointsProvider>
-                    </OrderProvider>
-                  </CartProvider>
-                </BusinessProvider>
-              </LocationProvider>
-            </ThemeProvider>
-          </StripeProvider>
+          <OnboardingProvider>
+            <StripeProvider
+              publishableKey={STRIPE_PUBLISHABLE_KEY}
+              merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
+            >
+              <ThemeProvider>
+                <LocationProvider>
+                  <BusinessProvider>
+                    <CartProvider>
+                      <OrderProvider>
+                        <PointsProvider>
+                          <AppNavigator />
+                        </PointsProvider>
+                      </OrderProvider>
+                    </CartProvider>
+                  </BusinessProvider>
+                </LocationProvider>
+              </ThemeProvider>
+            </StripeProvider>
+          </OnboardingProvider>
         </AuthProvider>
       </StoreProvider>
     </SafeAreaProvider>

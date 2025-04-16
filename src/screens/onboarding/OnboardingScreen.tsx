@@ -11,16 +11,15 @@ import {
   SafeAreaView,
   Alert 
 } from 'react-native';
-import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
+import { useNavigation, CommonActions } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../types';
 import OnboardingItem from './OnboardingItem';
 import Paginator from './Paginator';
 import NextButton from './NextButton';
+import { useOnboarding } from '../../context/OnboardingContext';
 
 type OnboardingNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Onboarding'>;
-
-type OnboardingScreenRouteProp = RouteProp<RootStackParamList, 'Onboarding'>;
 
 const slides = [
   {
@@ -51,7 +50,7 @@ const slides = [
 
 const OnboardingScreen: React.FC = () => {
   const navigation = useNavigation<OnboardingNavigationProp>();
-  const route = useRoute<OnboardingScreenRouteProp>();
+  const { completeOnboarding } = useOnboarding();
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollX = useRef(new Animated.Value(0)).current;
   const slidesRef = useRef<FlatList>(null);
@@ -87,10 +86,8 @@ const OnboardingScreen: React.FC = () => {
     setIsNavigating(true);
     
     try {
-      // Completar onboarding si está disponible el método
-      if (route.params?.onboardingContext?.completeOnboarding) {
-        await route.params.onboardingContext.completeOnboarding();
-      }
+      // Usar la función del contexto para completar el onboarding
+      await completeOnboarding();
       
       // Primero hacer un fade-out suave
       Animated.timing(fadeAnim, {
