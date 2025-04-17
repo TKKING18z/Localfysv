@@ -97,7 +97,7 @@ const config = {
     IOS_OAUTH_CLIENT_ID: "281205862532-3o2ot4ulh7nbu3vu0q80qd4gbt6q3fi3.apps.googleusercontent.com", 
     WEB_OAUTH_CLIENT_ID: "281205862532-imt64nhl458nbm9jnf9gff2cb939ngr3.apps.googleusercontent.com"
   },
-  newArchEnabled: true,
+  newArchEnabled: false,
   scheme: "localfy"
 };
 

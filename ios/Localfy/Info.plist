@@ -27,12 +27,17 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>localfy</string>
           <string>com.zalabsdigital.localfy</string>
         </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
+    <key>GADApplicationIdentifier</key>
+    <string>ca-app-pub-7380343766459097~4423545874</string>
+    <key>GADIsAdManagerApp</key>
+    <true/>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
@@ -57,7 +62,7 @@
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Allow $(PRODUCT_NAME) to access your photos</string>
     <key>NSUserTrackingUsageDescription</key>
-    <string>This identifier will be used to deliver personalized ads to you.</string>
+    <string>This allows us to provide personalized ads tailored to your interests.</string>
     <key>SKAdNetworkItems</key>
     <array>
       <dict>
