@@ -25,6 +25,9 @@ import { TextInput } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import 'firebase/compat/storage';
 import { userService } from '../services/authService';
+import { CommonActions } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -42,6 +45,7 @@ interface UserProfile {
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
   const { getFavoriteBusinesses } = useBusinesses();
+  const { logout } = useAuth();
   
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -191,12 +195,28 @@ const ProfileScreen: React.FC = () => {
     setLogoutModalVisible(false);
     setLoading(true);
     try {
-      await firebase.auth().signOut();
-      navigation.navigate('Login');
+      // 1. Asegurarse de limpiar cualquier almacenamiento persistente
+      await AsyncStorage.clear();
+      
+      // 2. Usar el método logout del contexto de autenticación
+      await logout();
+      
+      // 3. Esperar un poco para asegurar que el estado se actualice completamente
+      setTimeout(() => {
+        // 4. Usar resetación completa de la navegación para ir a Auth/Login
+        navigation.dispatch(
+          CommonActions.reset({
+            index: 0,
+            routes: [
+              { name: 'Auth' }
+            ],
+          })
+        );
+        setLoading(false);
+      }, 500);
     } catch (error) {
       console.error('Error logging out:', error);
       Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
-    } finally {
       setLoading(false);
     }
   };
@@ -469,7 +489,7 @@ const ProfileScreen: React.FC = () => {
                             [
                               { 
                                 text: 'Registrar mi primer negocio', 
-                                onPress: () => navigation.navigate('BusinessOnboardingWelcome', { isNewBusinessOwner: true })
+                                onPress: () => navigation.navigate('BusinessSelector' as any, { isNewBusinessOwner: true })
                               },
                               { 
                                 text: 'Más tarde', 
@@ -519,7 +539,7 @@ const ProfileScreen: React.FC = () => {
               {/* Botón para registrar primer negocio */}
               <TouchableOpacity 
                 style={[styles.menuItem, styles.upgradeMenuItem]}
-                onPress={() => navigation.navigate('BusinessOnboardingWelcome', { isNewBusinessOwner: true })}
+                onPress={() => navigation.navigate('BusinessSelector' as any, { isNewBusinessOwner: true })}
               >
                 <MaterialIcons name="add-business" size={24} color="#007AFF" />
                 <Text style={styles.menuItemText}>Registrar Nuevo Negocio</Text>

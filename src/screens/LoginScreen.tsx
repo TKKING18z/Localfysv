@@ -27,6 +27,7 @@ import googleLogo from '../../assets/google_logo.png'; // Import the Google PNG 
 import { useGoogleAuth, googleAuthService } from '../services/googleAuthService';
 import * as Google from 'expo-auth-session/providers/google';
 import { CommonActions } from '@react-navigation/native';
+import firebase from 'firebase/compat/app';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -35,7 +36,7 @@ const { width } = Dimensions.get('window');
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
     // Usar el hook de autenticación actualizado
-    const { login, isGoogleLoading, loading: authLoading } = useAuth();
+    const { login, isGoogleLoading, loading: authLoading, saveSessionData } = useAuth();
     
     // Usar el hook de autenticación de Google
     const { request, response, promptAsync } = useGoogleAuth();
@@ -52,6 +53,41 @@ const LoginScreen: React.FC = () => {
     const slideAnim = useRef(new Animated.Value(30)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const buttonAnim = useRef(new Animated.Value(1)).current;
+    
+    // Verificar si hay una sesión guardada al iniciar
+    useEffect(() => {
+        const checkSavedSession = async () => {
+            try {
+                const savedGoogleSession = await googleAuthService.restoreGoogleSession();
+                if (savedGoogleSession.success && savedGoogleSession.data) {
+                    const credential = firebase.auth.GoogleAuthProvider.credential(
+                        savedGoogleSession.data.id_token
+                    );
+                    
+                    try {
+                        const userCredential = await firebase.auth().signInWithCredential(credential);
+                        if (userCredential.user) {
+                            await saveSessionData(userCredential.user, 'google');
+                            navigation.dispatch(
+                                CommonActions.reset({
+                                    index: 0,
+                                    routes: [
+                                        { name: 'MainTabs' }
+                                    ],
+                                })
+                            );
+                        }
+                    } catch (error) {
+                        await googleAuthService.clearGoogleSession();
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking saved session:', error);
+            }
+        };
+        
+        checkSavedSession();
+    }, []);
     
     // Procesar la respuesta de Google cuando cambie
     useEffect(() => {
@@ -121,18 +157,15 @@ const LoginScreen: React.FC = () => {
         console.log("Iniciando sesión para:", email);
         
         try {
-            // Usar la función de login del contexto
             const success = await login(email, password);
             
             if (success) {
                 console.log("Login exitoso");
-                
-                // Reset navigation stack to prevent going back to login or splash screens
                 navigation.dispatch(
                     CommonActions.reset({
                         index: 0,
                         routes: [
-                            { name: 'Auth' }
+                            { name: 'MainTabs' }
                         ],
                     })
                 );
@@ -154,8 +187,6 @@ const LoginScreen: React.FC = () => {
                 return;
             }
             
-            // Convertir la respuesta a GoogleAuthResponse
-            // Para Google.useIdTokenAuthRequest, la respuesta success incluye params con id_token
             const googleResponse = {
                 type: response.type,
                 params: {
@@ -165,7 +196,17 @@ const LoginScreen: React.FC = () => {
             
             const result = await googleAuthService.handleSignInWithGoogle(googleResponse);
             
-            if (!result.success && result.error) {
+            if (result.success && result.user) {
+                await saveSessionData(result.user, 'google');
+                navigation.dispatch(
+                    CommonActions.reset({
+                        index: 0,
+                        routes: [
+                            { name: 'MainTabs' }
+                        ],
+                    })
+                );
+            } else if (!result.success && result.error) {
                 if (result.error !== "Inicio de sesión con Google cancelado") {
                     Alert.alert("Error", result.error);
                 }

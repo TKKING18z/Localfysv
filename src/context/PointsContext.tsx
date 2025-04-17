@@ -25,31 +25,12 @@ export interface PointsReward {
   isActive: boolean;
   imageUrl?: string;
   businessId?: string; // Optional: For business-specific rewards
-  rewardType?: 'discount' | 'free_product' | 'gift_card' | 'other';
-  discountAmount?: number; // For discount rewards (dollar amount)
-  discountPercent?: number; // For percentage discount rewards
-}
-
-// New interface for active redemptions
-export interface ActiveRedemption {
-  id: string;
-  rewardId: string;
-  name: string;
-  description: string;
-  createdAt: firebase.firestore.Timestamp;
-  expiresAt: firebase.firestore.Timestamp;
-  used: boolean;
-  usedAt?: firebase.firestore.Timestamp;
-  discountAmount?: number;
-  discountPercent?: number;
-  rewardType: 'discount' | 'free_product' | 'gift_card' | 'other';
 }
 
 interface PointsContextType {
   totalPoints: number;
   transactions: PointsTransaction[];
   rewards: PointsReward[];
-  activeRedemptions: ActiveRedemption[];
   loading: boolean;
   error: string | null;
   refreshPoints: () => Promise<void>;
@@ -57,14 +38,9 @@ interface PointsContextType {
   awardPointsForReview: (reviewId: string, businessId: string, businessName: string) => Promise<void>;
   awardPointsForShare: (businessId: string, businessName: string, platform: string) => Promise<void>;
   awardPointsForVisit: (businessId: string, businessName: string) => Promise<void>;
-  redeemPoints: (rewardId: string, pointsCost: number, rewardName: string, rewardType?: string, discountAmount?: number, discountPercent?: number) => Promise<boolean>;
+  redeemPoints: (rewardId: string, pointsCost: number, rewardName: string) => Promise<boolean>;
   getAvailableRewards: () => Promise<void>;
   getUserTransactions: (limit?: number) => Promise<PointsTransaction[]>;
-  getActiveRedemptions: () => Promise<void>;
-  markRedemptionAsUsed: (redemptionId: string) => Promise<boolean>;
-  applyActiveRedemption: (redemptionId: string) => Promise<ActiveRedemption | null>;
-  hasAvailableDiscount: () => boolean;
-  getAvailableDiscount: () => ActiveRedemption | null;
 }
 
 const PointsContext = createContext<PointsContextType | undefined>(undefined);
@@ -74,7 +50,6 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
   const [totalPoints, setTotalPoints] = useState<number>(0);
   const [transactions, setTransactions] = useState<PointsTransaction[]>([]);
   const [rewards, setRewards] = useState<PointsReward[]>([]);
-  const [activeRedemptions, setActiveRedemptions] = useState<ActiveRedemption[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   
@@ -84,12 +59,10 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
   useEffect(() => {
     if (user) {
       refreshPoints();
-      getActiveRedemptions();
     } else {
       // Reset state when user logs out
       setTotalPoints(0);
       setTransactions([]);
-      setActiveRedemptions([]);
     }
   }, [user]);
   
@@ -139,100 +112,6 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     } finally {
       setLoading(false);
     }
-  };
-  
-  /**
-   * Get active redemptions for the current user
-   */
-  const getActiveRedemptions = async (): Promise<void> => {
-    if (!user) return;
-    
-    setLoading(true);
-    
-    try {
-      // Get current timestamp for comparison with expiration
-      const now = firebase.firestore.Timestamp.now();
-      
-      // Get user's active redemptions that haven't been used and haven't expired
-      const redemptionsRef = db.collection('redemptions')
-        .where('userId', '==', user.uid)
-        .where('used', '==', false)
-        .where('expiresAt', '>', now);
-      
-      const redemptionsSnapshot = await redemptionsRef.get();
-      const redemptionsData = redemptionsSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as ActiveRedemption[];
-      
-      setActiveRedemptions(redemptionsData);
-      console.log(`Found ${redemptionsData.length} active redemptions`);
-    } catch (err: any) {
-      console.error('Error getting active redemptions:', err);
-      setError(err.message || 'Failed to get active redemptions');
-    } finally {
-      setLoading(false);
-    }
-  };
-  
-  /**
-   * Mark a redemption as used
-   */
-  const markRedemptionAsUsed = async (redemptionId: string): Promise<boolean> => {
-    if (!user) return false;
-    
-    try {
-      // Update the redemption document
-      await db.collection('redemptions').doc(redemptionId).update({
-        used: true,
-        usedAt: firebase.firestore.Timestamp.now()
-      });
-      
-      // Update local state
-      setActiveRedemptions(prev => prev.filter(r => r.id !== redemptionId));
-      
-      return true;
-    } catch (err: any) {
-      console.error('Error marking redemption as used:', err);
-      setError(err.message || 'Failed to mark redemption as used');
-      return false;
-    }
-  };
-  
-  /**
-   * Apply an active redemption (preparing it for use)
-   */
-  const applyActiveRedemption = async (redemptionId: string): Promise<ActiveRedemption | null> => {
-    const redemption = activeRedemptions.find(r => r.id === redemptionId);
-    if (!redemption) return null;
-    
-    return redemption;
-  };
-  
-  /**
-   * Check if user has available discounts
-   */
-  const hasAvailableDiscount = (): boolean => {
-    return activeRedemptions.some(r => 
-      r.rewardType === 'discount' && 
-      (r.discountAmount !== undefined || r.discountPercent !== undefined)
-    );
-  };
-  
-  /**
-   * Get the best available discount
-   */
-  const getAvailableDiscount = (): ActiveRedemption | null => {
-    // Find all discount redemptions
-    const discountRedemptions = activeRedemptions.filter(r => 
-      r.rewardType === 'discount' && 
-      (r.discountAmount !== undefined || r.discountPercent !== undefined)
-    );
-    
-    if (discountRedemptions.length === 0) return null;
-    
-    // Return the first one for now - in the future, could implement logic to pick the best one
-    return discountRedemptions[0];
   };
   
   /**
@@ -567,10 +446,7 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
   const redeemPoints = async (
     rewardId: string, 
     pointsCost: number, 
-    rewardName: string,
-    rewardType: string = 'other',
-    discountAmount?: number,
-    discountPercent?: number
+    rewardName: string
   ): Promise<boolean> => {
     if (!user) return false;
     
@@ -606,50 +482,17 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
       
-      // Get user info for the reward delivery
-      const userDoc = await db.collection('users').doc(user.uid).get();
-      const userData = userDoc.data();
-      const userEmail = user.email || userData?.email || '';
-      const userName = user.displayName || userData?.displayName || '';
-      
-      // Calculate expiration (7 days from now)
-      const now = firebase.firestore.Timestamp.now();
-      const expirationDate = new Date();
-      expirationDate.setDate(expirationDate.getDate() + 7);
-      const expiresAt = firebase.firestore.Timestamp.fromDate(expirationDate);
-      
-      // Create redemption record - changed status from 'pending' to 'completed'
+      // Create redemption record
       const redemptionRef = db.collection('redemptions').doc();
-      const redemptionId = redemptionRef.id;
-      
-      // Crear un objeto base con los campos obligatorios
-      const redemptionData = {
-        id: redemptionId,
+      batch.set(redemptionRef, {
         userId: user.uid,
-        userEmail,
-        userName,
         rewardId,
         rewardName,
         pointsCost,
         transactionId: transactionRef.id,
-        status: 'completed', // Changed from 'pending' to 'completed'
-        completedAt: now,
-        createdAt: now,
-        expiresAt: expiresAt,
-        used: false,
-        rewardType: rewardType || 'other'
-      };
-      
-      // Añadir los campos opcionales solo si tienen valores definidos
-      if (discountAmount !== undefined) {
-        (redemptionData as any).discountAmount = discountAmount;
-      }
-      
-      if (discountPercent !== undefined) {
-        (redemptionData as any).discountPercent = discountPercent;
-      }
-      
-      batch.set(redemptionRef, redemptionData);
+        status: 'pending', // pending, completed, canceled
+        createdAt: firebase.firestore.Timestamp.now()
+      });
       
       // Commit the batch
       await batch.commit();
@@ -662,32 +505,7 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
       };
       setTransactions(prev => [newTransaction, ...prev]);
       
-      // Add to active redemptions
-      const newRedemption: ActiveRedemption = {
-        id: redemptionId,
-        rewardId,
-        name: rewardName,
-        description: `Canjeado por ${pointsCost} puntos`,
-        createdAt: now,
-        expiresAt: expiresAt,
-        used: false,
-        rewardType: rewardType as any
-      };
-      
-      // Añadir los campos opcionales solo si tienen valores definidos
-      if (discountAmount !== undefined) {
-        newRedemption.discountAmount = discountAmount;
-      }
-      
-      if (discountPercent !== undefined) {
-        newRedemption.discountPercent = discountPercent;
-      }
-      
-      setActiveRedemptions(prev => [...prev, newRedemption]);
-      
-      // Return the redemption ID for reference
-      console.log(`Redeemed ${pointsCost} points for ${rewardName} - Redemption ID: ${redemptionId}`);
-      
+      console.log(`Redeemed ${pointsCost} points for ${rewardName}`);
       return true;
     } catch (err: any) {
       console.error('Error redeeming points:', err);
@@ -758,7 +576,6 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     totalPoints,
     transactions,
     rewards,
-    activeRedemptions,
     loading,
     error,
     refreshPoints,
@@ -768,12 +585,7 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     awardPointsForVisit,
     redeemPoints,
     getAvailableRewards,
-    getUserTransactions,
-    getActiveRedemptions,
-    markRedemptionAsUsed,
-    applyActiveRedemption,
-    hasAvailableDiscount,
-    getAvailableDiscount
+    getUserTransactions
   };
   
   return (

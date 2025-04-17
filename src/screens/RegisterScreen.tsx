@@ -18,9 +18,11 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useAuth } from '../context/AuthContext'; // Usa el contexto de autenticación real
+import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../types';
 import { LinearGradient } from 'expo-linear-gradient';
+import { CommonActions } from '@react-navigation/native';
+import firebase from 'firebase/compat/app';
 
 // Define UserRole type if not already in types.ts
 type UserRole = 'customer' | 'business_owner';
@@ -33,7 +35,7 @@ const RegisterScreen: React.FC = () => {
   const navigation = useNavigation<RegisterScreenNavigationProp>();
   
   // Change to use signUp instead of register
-  const { signUp, isLoading } = useAuth();
+  const { signUp, isLoading, saveSessionData } = useAuth();
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -123,13 +125,30 @@ const RegisterScreen: React.FC = () => {
     }
     
     try {
-      // Use signUp instead of register to allow passing the role parameter
-      await signUp(email, password, name, role);
-      Alert.alert('Éxito', 'Cuenta creada correctamente', [
-        { text: 'OK', onPress: () => navigation.navigate('Login') }
-      ]);
+      const result = await signUp(email, password, name, role);
+      
+      if (result.success && result.user) {
+        await saveSessionData(result.user, 'email');
+        
+        Alert.alert('Éxito', 'Cuenta creada correctamente', [
+          { 
+            text: 'OK', 
+            onPress: () => {
+              navigation.dispatch(
+                CommonActions.reset({
+                  index: 0,
+                  routes: [
+                    { name: 'MainTabs' }
+                  ],
+                })
+              );
+            }
+          }
+        ]);
+      } else {
+        Alert.alert('Error', result.error || 'Error al crear la cuenta');
+      }
     } catch (error: any) {
-      // Manejar errores específicos
       let errorMessage = 'Error al crear la cuenta';
       if (error.code === 'auth/email-already-in-use') {
         errorMessage = 'Este correo electrónico ya está en uso';
@@ -314,7 +333,7 @@ const RegisterScreen: React.FC = () => {
             <TouchableOpacity
               activeOpacity={0.8}
               onPress={handleRegister}
-              disabled={isLoading} // Change loading to isLoading
+              disabled={isLoading}
             >
               <LinearGradient
                 colors={['#007AFF', '#47A9FF']}
@@ -323,7 +342,7 @@ const RegisterScreen: React.FC = () => {
                 style={styles.registerButton}
               >
                 <Text style={styles.registerButtonText}>
-                  {isLoading ? 'Creando cuenta...' : 'Crear Cuenta'} {/* Change loading to isLoading */}
+                  {isLoading ? 'Creando cuenta...' : 'Crear Cuenta'}
                 </Text>
               </LinearGradient>
             </TouchableOpacity>

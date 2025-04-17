@@ -14,6 +14,30 @@ interface NotificationService {
   removeTokenFromFirestore: (userId: string, token: string) => Promise<any>;
 }
 
+// Definir las claves para AsyncStorage
+const STORAGE_KEYS = {
+  USER_DATA: 'user_data',
+  AUTH_PERSISTENCE: 'auth_persistence',
+  SESSION_DATA: 'session_data'
+};
+
+// Interfaz para los datos de sesión
+interface SessionData {
+  uid: string;
+  email: string | null;
+  displayName: string | null;
+  photoURL: string | null;
+  lastLogin: string;
+  authMethod: 'email' | 'google';
+}
+
+// Interfaz para el resultado del registro
+interface SignUpResult {
+  success: boolean;
+  user?: firebase.User;
+  error?: string;
+}
+
 // Define los tipos para nuestro contexto
 interface AuthContextType {
   user: firebase.User | null;
@@ -21,20 +45,21 @@ interface AuthContextType {
   loading: boolean;
   isGoogleLoading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
-  register: (email: string, password: string, name: string) => Promise<boolean>;
-  signUp: (email: string, password: string, name: string, role?: string) => Promise<boolean>;
+  signUp: (email: string, password: string, name: string, role: string) => Promise<SignUpResult>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
+  saveSessionData: (firebaseUser: firebase.User, authMethod: 'email' | 'google') => Promise<void>;
+  restoreSession: () => Promise<SessionData | null>;
 }
 
 // Crear el contexto
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const AuthContext = createContext<AuthContextType | null>(null);
 
 // Hook para usar el contexto de autenticación
-export const useAuth = (): AuthContextType => {
+export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useAuth debe ser usado dentro de un AuthProvider');
   }
   return context;
@@ -46,16 +71,48 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   
+  // Función para guardar los datos de sesión
+  const saveSessionData = async (firebaseUser: firebase.User, authMethod: 'email' | 'google') => {
+    const sessionData: SessionData = {
+      uid: firebaseUser.uid,
+      email: firebaseUser.email,
+      displayName: firebaseUser.displayName,
+      photoURL: firebaseUser.photoURL,
+      lastLogin: new Date().toISOString(),
+      authMethod
+    };
+
+    try {
+      await AsyncStorage.setItem(STORAGE_KEYS.SESSION_DATA, JSON.stringify(sessionData));
+      console.log('Session data saved successfully');
+    } catch (error) {
+      console.error('Error saving session data:', error);
+    }
+  };
+
+  // Función para restaurar la sesión
+  const restoreSession = async () => {
+    try {
+      const sessionData = await AsyncStorage.getItem(STORAGE_KEYS.SESSION_DATA);
+      if (sessionData) {
+        const parsedData: SessionData = JSON.parse(sessionData);
+        console.log('Restored session data:', parsedData);
+        return parsedData;
+      }
+    } catch (error) {
+      console.error('Error restoring session:', error);
+    }
+    return null;
+  };
+
   // Verificar si hay una sesión al iniciar
   useEffect(() => {
     console.log('AuthProvider initialized, checking for existing session...');
     
-    // Cargar dinámicamente el servicio de notificaciones para evitar dependencias circulares
     let notificationService: NotificationService | undefined;
     try {
       notificationService = require('../../services/NotificationService').notificationService;
       
-      // Inicializar notificaciones si el servicio está disponible
       if (notificationService) {
         notificationService.configureNotifications().catch((err: Error) => {
           console.error('Error configuring notifications:', err);
@@ -65,57 +122,48 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       console.error('Error loading notification service:', err);
     }
     
-    // Guardamos la referencia al suscriptor para limpiarla después
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
       console.log('Auth state changed:', firebaseUser?.uid);
       
       if (firebaseUser) {
-        // Usuario autenticado
         setUser(firebaseUser);
-        // Guardar info básica de sesión en AsyncStorage como respaldo
-        try {
-          await AsyncStorage.setItem('user_uid', firebaseUser.uid);
-          await AsyncStorage.setItem('user_email', firebaseUser.email || '');
-          await AsyncStorage.setItem('user_display_name', firebaseUser.displayName || '');
-          console.log('Session info saved to AsyncStorage');
-          
-          // Registrar para notificaciones push después de iniciar sesión
-          if (notificationService) {
-            try {
-              const permissionResult = await notificationService.requestNotificationPermissions();
-              if (permissionResult.success && permissionResult.data?.granted) {
-                const tokenResult = await notificationService.registerForPushNotifications();
-                if (tokenResult.success && tokenResult.data?.token) {
-                  // Guardar token en Firestore
-                  await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
-                }
+        
+        // Restaurar o guardar datos de sesión
+        const existingSession = await restoreSession();
+        const authMethod = existingSession?.authMethod || 'email';
+        await saveSessionData(firebaseUser, authMethod);
+        
+        if (notificationService) {
+          try {
+            const permissionResult = await notificationService.requestNotificationPermissions();
+            if (permissionResult.success && permissionResult.data?.granted) {
+              const tokenResult = await notificationService.registerForPushNotifications();
+              if (tokenResult.success && tokenResult.data?.token) {
+                await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
               }
-            } catch (notificationError: unknown) {
-              console.error('Error setting up notifications:', notificationError);
-              // No fallar el login por problemas con notificaciones
             }
+          } catch (notificationError: unknown) {
+            console.error('Error setting up notifications:', notificationError);
           }
-        } catch (error: unknown) {
-          console.error('Error saving session info to AsyncStorage:', error);
         }
       } else {
-        // No hay usuario autenticado
         setUser(null);
-        // Limpiar info de sesión en AsyncStorage
+        // Limpiar datos de sesión
         try {
-          await AsyncStorage.removeItem('user_uid');
-          await AsyncStorage.removeItem('user_email');
-          await AsyncStorage.removeItem('user_display_name');
-          console.log('Session info removed from AsyncStorage');
-        } catch (error: unknown) {
-          console.error('Error removing session info from AsyncStorage:', error);
+          await AsyncStorage.multiRemove([
+            STORAGE_KEYS.USER_DATA,
+            STORAGE_KEYS.AUTH_PERSISTENCE,
+            STORAGE_KEYS.SESSION_DATA
+          ]);
+          console.log('Session data cleared');
+        } catch (error) {
+          console.error('Error clearing session data:', error);
         }
       }
       
       setIsLoading(false);
     });
     
-    // Limpieza al desmontar
     return () => unsubscribe();
   }, []);
 
@@ -134,13 +182,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
           .get();
         
         if (userDoc.exists) {
-          const userData = userDoc.data();
-          // Create a user object that matches firebase.User interface better
           const userToSet = userCredential.user;
           setUser(userToSet);
           
-          // Guardar en AsyncStorage
-          await AsyncStorage.setItem('user_uid', userCredential.user.uid);
+          // Guardar datos de sesión
+          await saveSessionData(userToSet, 'email');
           
           console.log("Login exitoso, datos de usuario guardados");
           return true;
@@ -148,84 +194,87 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       }
       return false;
     } catch (error: any) {
-      console.error("Error en login:", error);
-      let errorMessage = "Error al iniciar sesión. Intenta de nuevo.";
-      
-      if (error.code === 'auth/user-not-found') {
-        errorMessage = "El usuario no existe.";
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = "Contraseña incorrecta.";
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = "Correo electrónico inválido.";
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = "Demasiados intentos fallidos. Intenta más tarde.";
-      }
-      
-      throw new Error(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // Función para registrar un nuevo usuario
-  const register = async (email: string, password: string, name: string): Promise<boolean> => {
-    try {
-      setIsLoading(true);
-      
-      // Crear usuario en Firebase
-      const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
-      
-      // Actualizar perfil con el nombre
-      if (userCredential.user) {
-        await userCredential.user.updateProfile({
-          displayName: name
-        });
-        
-        // Refrescar el usuario para que tenga el displayName actualizado
-        await userCredential.user.reload();
-        console.log('Registration successful:', userCredential.user.uid);
-      }
-      
-      return true;
-    } catch (error: any) {
-      console.error('Registration error:', error.message);
-      Alert.alert('Error de registro', error.message);
+      console.error('Login error:', error.message);
+      Alert.alert('Error de inicio de sesión', error.message);
       return false;
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Add signUp as an alias for register
-  const signUp = async (email: string, password: string, name: string, role?: string): Promise<boolean> => {
-    return register(email, password, name);
+  // Función para registrar un nuevo usuario
+  const signUp = async (email: string, password: string, name: string, role: string): Promise<SignUpResult> => {
+    try {
+      setIsLoading(true);
+      
+      // Crear usuario en Firebase Auth
+      const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
+      
+      if (userCredential.user) {
+        // Actualizar el perfil con el nombre
+        await userCredential.user.updateProfile({
+          displayName: name
+        });
+        
+        // Crear documento en Firestore
+        await firebase.firestore()
+          .collection('users')
+          .doc(userCredential.user.uid)
+          .set({
+            displayName: name,
+            email: email,
+            role: role,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+            authProvider: 'email'
+          });
+        
+        return { 
+          success: true, 
+          user: userCredential.user 
+        };
+      }
+      
+      return {
+        success: false,
+        error: 'No se pudo crear el usuario'
+      };
+    } catch (error: any) {
+      console.error('Error en el registro:', error);
+      return {
+        success: false,
+        error: error.message
+      };
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Función para cerrar sesión
   const logout = async (): Promise<void> => {
     try {
-      // Eliminar token de notificación antes de cerrar sesión
       if (user) {
         try {
-          // Cargar dinámicamente el servicio de notificaciones
           const notificationService: NotificationService | undefined = require('../../services/NotificationService').notificationService;
           if (notificationService) {
-            // Obtener token actual
             const tokenResult = await notificationService.registerForPushNotifications();
             if (tokenResult.success && tokenResult.data?.token) {
-              // Eliminar token de Firestore
               await notificationService.removeTokenFromFirestore(user.uid, tokenResult.data.token);
             }
           }
         } catch (notificationError: unknown) {
           console.error('Error removing notification token:', notificationError);
-          // Continuar con el cierre de sesión aunque falle la eliminación del token
         }
       }
       
+      // Limpiar datos de sesión antes de cerrar sesión
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.USER_DATA,
+        STORAGE_KEYS.AUTH_PERSISTENCE,
+        STORAGE_KEYS.SESSION_DATA
+      ]);
+      
       await firebase.auth().signOut();
       console.log('Logout successful');
-      // No necesitamos setUser aquí, ya que el onAuthStateChanged lo hará
     } catch (error: any) {
       console.error('Logout error:', error.message);
       Alert.alert('Error al cerrar sesión', error.message);
@@ -289,11 +338,12 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     loading: isLoading,
     isGoogleLoading,
     login,
-    register,
     signUp,
     logout,
     resetPassword,
     updateProfile,
+    saveSessionData,
+    restoreSession
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
