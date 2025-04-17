@@ -12,6 +12,7 @@ interface CompletedSteps {
   basicInfo: boolean;
   visualProfile: boolean;
   valueProposition: boolean;
+  menuManagement: boolean;
   businessOperations: boolean;
   digitalPresence: boolean;
 }
@@ -72,15 +73,17 @@ const BusinessOnboardingContext = createContext<BusinessOnboardingContextType>({
     isLoading: false,
     uploadProgress: 0,
     hasUnsavedChanges: false,
-    validationErrors: {}
+    validationErrors: {},
+    galleryImages: []
   },
   currentStep: 1,
-  totalSteps: 5,
+  totalSteps: 6,
   onboardingMode: 'detailed',
   stepsCompleted: {
     basicInfo: false,
     visualProfile: false,
     valueProposition: false,
+    menuManagement: false,
     businessOperations: false,
     digitalPresence: false
   },
@@ -131,17 +134,19 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
     isLoading: false,
     uploadProgress: 0,
     hasUnsavedChanges: false,
-    validationErrors: {}
+    validationErrors: {},
+    galleryImages: []
   });
   
   // Onboarding state
   const [currentStep, setCurrentStep] = useState(1);
-  const [totalSteps, setTotalSteps] = useState(5);
+  const [totalSteps, setTotalSteps] = useState(6);
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode>('detailed');
   const [stepsCompleted, setStepsCompleted] = useState<CompletedSteps>({
     basicInfo: false,
     visualProfile: false,
     valueProposition: false,
+    menuManagement: false,
     businessOperations: false,
     digitalPresence: false
   });
@@ -153,7 +158,7 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
   // Update progress whenever form state or steps change
   useEffect(() => {
     // Calculate progress based on completed steps and form data
-    const stepProgression = Object.values(stepsCompleted).filter(Boolean).length / 5;
+    const stepProgression = Object.values(stepsCompleted).filter(Boolean).length / 6;
     const formProgression = calculateFormProgress();
     
     const calculatedProgress = (stepProgression + formProgression) / 2;
@@ -199,6 +204,22 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
       else if (field === 'socialLinks' && formState.socialLinks && Object.keys(formState.socialLinks).length > 0) fieldsCompleted++;
       else if (field === 'menu' && formState.menu && formState.menu.length > 0) fieldsCompleted++;
     });
+    
+    // Update step completion
+    if (fieldsCompleted > 0) {
+      // Basic info is complete when mandatory fields are filled
+      if (!stepsCompleted.basicInfo && 
+          formState.name && formState.category && formState.phone && formState.location) {
+        markStepComplete('basicInfo');
+      }
+      
+      // Menu management is complete when menu or menuUrl exists
+      if (!stepsCompleted.menuManagement && 
+          ((formState.menu && formState.menu.length > 0) || 
+           (formState.menuUrl && formState.menuUrl.trim() !== ''))) {
+        markStepComplete('menuManagement');
+      }
+    }
     
     return fieldsCompleted / totalFields;
   };
@@ -311,6 +332,7 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
             { socialLinks: formState.socialLinks } : {}),
         ...(formState.menu && formState.menu.length > 0 ? { menu: formState.menu } : {}),
         ...(formState.menuUrl ? { menuUrl: formState.menuUrl } : {}),
+        ...(formState.services ? { services: formState.services } : {}),
         acceptsReservations: formState.acceptsReservations,
         createdBy: user.uid,
         images: []  // Will be populated after upload
@@ -325,7 +347,10 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
       
       const businessId = result.data.id;
       
-      // Upload image if available
+      // Array to collect all images that will be added to the business
+      const businessImages: Array<{url: string, isMain?: boolean}> = [];
+      
+      // Upload main image if available
       if (formState.image) {
         const imageResult = await firebaseService.businesses.uploadBusinessImage(
           businessId,
@@ -334,12 +359,37 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
         );
         
         if (imageResult.success && imageResult.data) {
-          // Add the uploaded image to the business
-          await firebaseService.businesses.updateImages(businessId, [{
+          // Add the uploaded main image to our collection
+          businessImages.push({
             url: imageResult.data.url,
             isMain: true
-          }]);
+          });
         }
+      }
+      
+      // Upload gallery images if available
+      if (formState.galleryImages && formState.galleryImages.length > 0) {
+        // Process each gallery image
+        for (const galleryImage of formState.galleryImages) {
+          const galleryImageResult = await firebaseService.businesses.uploadBusinessImage(
+            businessId,
+            galleryImage,
+            false // not main image
+          );
+          
+          if (galleryImageResult.success && galleryImageResult.data) {
+            // Add the uploaded gallery image to our collection
+            businessImages.push({
+              url: galleryImageResult.data.url,
+              isMain: false
+            });
+          }
+        }
+      }
+      
+      // Update business with all images if we have any
+      if (businessImages.length > 0) {
+        await firebaseService.businesses.updateImages(businessId, businessImages);
       }
       
       // Clear draft
@@ -382,6 +432,18 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
       case 2:
         if (stepsCompleted.visualProfile) {
           console.log("Visual profile step marked as complete, skipping validation");
+          return { isValid: true, errors: {} };
+        }
+        break;
+      case 3:
+        if (stepsCompleted.valueProposition) {
+          console.log("Value proposition step marked as complete, skipping validation");
+          return { isValid: true, errors: {} };
+        }
+        break;
+      case 4:
+        if (stepsCompleted.menuManagement) {
+          console.log("Menu management step marked as complete, skipping validation");
           return { isValid: true, errors: {} };
         }
         break;
@@ -464,6 +526,15 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
         }
         break;
         
+      case 4: // Menu Management
+        // No required fields, all are optional
+        // But mark step as valid if there's at least some menu data
+        if ((formState.menu && formState.menu.length > 0) || 
+            (formState.menuUrl && formState.menuUrl.trim() !== '')) {
+          markStepComplete('menuManagement');
+        }
+        break;
+        
       // For other steps, all fields are optional
     }
     
@@ -540,7 +611,8 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
         isLoading: false,
         uploadProgress: 0,
         hasUnsavedChanges: false,
-        validationErrors: {}
+        validationErrors: {},
+        galleryImages: []
       });
       
       setCurrentStep(1);
@@ -548,6 +620,7 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
         basicInfo: false,
         visualProfile: false,
         valueProposition: false,
+        menuManagement: false,
         businessOperations: false,
         digitalPresence: false
       });
@@ -583,6 +656,7 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
             basicInfo: false,
             visualProfile: false,
             valueProposition: false,
+            menuManagement: false,
             businessOperations: false,
             digitalPresence: false
           });
@@ -608,6 +682,7 @@ export const BusinessOnboardingProvider: React.FC<{children: React.ReactNode}> =
             basicInfo: false,
             visualProfile: false,
             valueProposition: false,
+            menuManagement: false,
             businessOperations: false,
             digitalPresence: false
           });

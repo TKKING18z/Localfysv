@@ -493,9 +493,11 @@ const BusinessDetailScreen: React.FC = () => {
     const tabs = ['info', 'gallery'];
     
     if (business) {
-      if (isRestaurant && (business.menu || business.menuUrl)) {
+      // Mostrar pestaña de menú/planes si hay contenido, sin importar el tipo de negocio
+      if ((business.menu && business.menu.length > 0) || business.menuUrl) {
         tabs.push('menu');
-      }  
+      }
+      
       tabs.push('promociones');
       tabs.push('reseñas');
       
@@ -506,7 +508,7 @@ const BusinessDetailScreen: React.FC = () => {
     }
     
     return tabs;
-  }, [business, isRestaurant]);
+  }, [business]);
 
   // Para manejar el scroll animado
   const handleScroll = Animated.event(

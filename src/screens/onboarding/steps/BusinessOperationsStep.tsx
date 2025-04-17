@@ -71,7 +71,17 @@ const BusinessOperationsStep: React.FC = () => {
     
     // Inicializar servicios
     if (formState.services) {
-      setServices(formState.services);
+      setServices({
+        delivery: !!formState.services.delivery,
+        pickup: !!formState.services.pickup,
+        onlineOrders: !!formState.services.onlineOrders,
+        reservations: !!formState.services.reservations,
+        wifi: !!formState.services.wifi,
+        parking: !!formState.services.parking
+      });
+    } else {
+      // Ensure services are initialized in form state
+      setField('services', services);
     }
     
     // Inicializar horarios de negocio
@@ -158,19 +168,23 @@ const BusinessOperationsStep: React.FC = () => {
   // Handle toggling services
   const toggleService = useCallback((service: keyof typeof services) => {
     setServices(prevServices => {
-      const updatedServices = { ...prevServices, [service]: !prevServices[service] };
-      
-      // Update form state with the new services
-      setField('services', updatedServices);
-      
-      // If turning on reservations, also update acceptsReservations
-      if (service === 'reservations') {
-        setField('acceptsReservations', !prevServices.reservations);
-      }
-      
-      return updatedServices;
+      return { ...prevServices, [service]: !prevServices[service] };
     });
-  }, [setField]);
+  }, []);
+  
+  // Use effect to update form state when services change
+  useEffect(() => {
+    // Only update after initialization
+    if (initialized.current) {
+      // Update form state with the services
+      setField('services', services);
+      
+      // Handle special case for reservations
+      if ('reservations' in services) {
+        setField('acceptsReservations', services.reservations);
+      }
+    }
+  }, [services, setField]);
   
   // Navigate to business hours screen
   const navigateToBusinessHours = useCallback(() => {

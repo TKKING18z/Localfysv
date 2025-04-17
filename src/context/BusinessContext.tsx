@@ -61,6 +61,15 @@ export interface Business {
   videos?: Array<{id?: string, url: string, thumbnail?: string}>;
   menu?: MenuItem[];
   menuUrl?: string;  // Enlace a un menú PDF o imagen
+  services?: {
+    delivery?: boolean;
+    pickup?: boolean;
+    onlineOrders?: boolean;
+    reservations?: boolean;
+    wifi?: boolean;
+    parking?: boolean;
+    [key: string]: boolean | undefined;
+  };
 }
 
 // Define Business Context interface
@@ -192,7 +201,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       videos: normalizedVideos,
       menu: normalizedMenu,
       menuUrl: data.menuUrl || undefined,
-      acceptsReservations: data.acceptsReservations === undefined ? false : data.acceptsReservations
+      acceptsReservations: data.acceptsReservations === undefined ? false : data.acceptsReservations,
+      services: data.services || undefined
     };
   };
   

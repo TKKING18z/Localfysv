@@ -21,6 +21,7 @@ import { useBusinessOnboarding } from '../../context/BusinessOnboardingContext';
 import BasicInfoStep from './steps/BasicInfoStep';
 import VisualProfileStep from './steps/VisualProfileStep';
 import ValuePropositionStep from './steps/ValuePropositionStep';
+import MenuManagementStep from './steps/MenuManagementStep';
 import BusinessOperationsStep from './steps/BusinessOperationsStep';
 import DigitalPresenceStep from './steps/DigitalPresenceStep';
 
@@ -176,12 +177,28 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
       return;
     }
     
+    // Handle step 4 (Menu Management) manually
+    if (currentStep === 4) {
+      await saveProgress(); // Save current progress
+      
+      // El menú es opcional, así que siempre podemos continuar
+      // Pero si hay menú, marcamos el paso como completado
+      if ((formState.menu && formState.menu.length > 0) || 
+          (formState.menuUrl && formState.menuUrl.trim() !== '')) {
+        markStepComplete('menuManagement');
+      }
+      
+      // Continuar al siguiente paso
+      nextStep();
+      return;
+    }
+    
     // For other steps, use normal validation or allow skipping in express mode
-    if (onboardingMode === 'express' && currentStep > 2) {
+    if (onboardingMode === 'express' && currentStep > 3) {
       // In express mode, mark step as complete and proceed for optional steps
-      if (currentStep === 4) {
+      if (currentStep === 5) {
         markStepComplete('businessOperations');
-      } else if (currentStep === 5) {
+      } else if (currentStep === 6) {
         markStepComplete('digitalPresence');
       }
       
@@ -234,9 +251,9 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
       // Validation successful - proceed directly
       
       // Mark current step as complete
-      if (currentStep === 4) {
+      if (currentStep === 5) {
         markStepComplete('businessOperations');
-      } else if (currentStep === 5) {
+      } else if (currentStep === 6) {
         markStepComplete('digitalPresence');
       }
       
@@ -327,8 +344,10 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
       case 3:
         return <ValuePropositionStep />;
       case 4:
-        return <BusinessOperationsStep />;
+        return <MenuManagementStep />;
       case 5:
+        return <BusinessOperationsStep />;
+      case 6:
         return <DigitalPresenceStep />;
       default:
         return <BasicInfoStep />;
@@ -341,8 +360,20 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
       case 1: return "Información Básica";
       case 2: return "Perfil Visual";
       case 3: return "Propuesta de Valor";
-      case 4: return "Operaciones";
-      case 5: return "Presencia Digital";
+      case 4: {
+        // Detectar si es una atracción turística
+        const category = formState.category?.toLowerCase() || '';
+        const isTourism = category.includes('turismo') || 
+                          category.includes('atracción') || 
+                          category.includes('turisticos') ||
+                          category.includes('turística') ||
+                          category.includes('tour') ||
+                          category.includes('aventura') ||
+                          category.includes('lugares');
+        return isTourism ? "Planes y Actividades" : "Menú y Productos";
+      }
+      case 5: return "Operaciones";
+      case 6: return "Presencia Digital";
       default: return "Información Básica";
     }
   };
@@ -353,8 +384,22 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
       case 1: return "Lo básico primero. Información esencial para tu negocio.";
       case 2: return "Dale identidad a tu negocio con imágenes de calidad.";
       case 3: return "¿Qué hace especial a tu negocio? Cuéntaselo a tus clientes.";
-      case 4: return "Configura cómo opera tu negocio día a día.";
-      case 5: return "Conecta tu ecosistema digital para mayor visibilidad.";
+      case 4: {
+        // Detectar si es una atracción turística
+        const category = formState.category?.toLowerCase() || '';
+        const isTourism = category.includes('turismo') || 
+                          category.includes('atracción') || 
+                          category.includes('turisticos') ||
+                          category.includes('turística') ||
+                          category.includes('tour') ||
+                          category.includes('aventura') ||
+                          category.includes('lugares');
+        return isTourism 
+          ? "Crea tus planes o actividades para atraer visitantes."
+          : "Crea tu menú de productos o servicios para los clientes.";
+      }
+      case 5: return "Configura cómo opera tu negocio día a día.";
+      case 6: return "Conecta tu ecosistema digital para mayor visibilidad.";
       default: return "";
     }
   };

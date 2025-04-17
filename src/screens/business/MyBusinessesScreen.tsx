@@ -259,7 +259,7 @@ const MyBusinessesScreen: React.FC = () => {
 
   // Ir a la pantalla de añadir negocio
   const handleAddBusiness = () => {
-    navigation.navigate('AddBusiness');
+    navigation.navigate('BusinessOnboardingModeSelection');
   };
   
   // Editar un negocio existente
@@ -426,7 +426,7 @@ const MyBusinessesScreen: React.FC = () => {
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={() => navigation.navigate('MainTabs', { screen: 'Profile' })}
         >
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>

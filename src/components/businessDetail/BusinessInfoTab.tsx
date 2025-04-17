@@ -42,6 +42,35 @@ const BusinessInfoTab: React.FC<BusinessInfoTabProps> = ({
         Alert.alert('Error', 'No se pudo abrir Google Maps');
       });
   };
+
+  // Check if business has any services enabled
+  const hasServices = business.services && Object.values(business.services).some(value => value === true);
+  
+  // Helper to get service label from key
+  const getServiceLabel = (key: string): string => {
+    const labels: Record<string, string> = {
+      delivery: 'Entrega a domicilio',
+      pickup: 'Retiro en tienda',
+      onlineOrders: 'Pedidos en línea',
+      reservations: 'Reservaciones',
+      wifi: 'Wi-Fi gratuito',
+      parking: 'Estacionamiento'
+    };
+    return labels[key] || key;
+  };
+
+  // Helper to get service icon name from key
+  const getServiceIcon = (key: string): any => {
+    const icons: Record<string, any> = {
+      delivery: 'delivery-dining',
+      pickup: 'shopping-bag',
+      onlineOrders: 'laptop',
+      reservations: 'event-available',
+      wifi: 'wifi',
+      parking: 'local-parking'
+    };
+    return icons[key] || 'check-circle';
+  };
   
   return (
     <View style={styles.container}>
@@ -90,6 +119,30 @@ const BusinessInfoTab: React.FC<BusinessInfoTabProps> = ({
           </View>
         )}
       </View>
+
+      {/* Services section */}
+      {hasServices && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="room-service" size={22} color="#007aff" />
+            <Text style={styles.sectionTitle}>Servicios</Text>
+          </View>
+          
+          <View style={styles.servicesContainer}>
+            {business.services && Object.entries(business.services).map(([key, value]) => {
+              if (!value) return null;
+              return (
+                <View key={key} style={styles.serviceItem}>
+                  <View style={styles.serviceIconContainer}>
+                    <MaterialIcons name={getServiceIcon(key)} size={20} color="#FFFFFF" />
+                  </View>
+                  <Text style={styles.serviceText}>{getServiceLabel(key)}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+      )}
       
       {/* Contact section */}
       <View style={styles.section}>
@@ -326,6 +379,36 @@ const styles = StyleSheet.create({
     color: '#007aff',
     marginRight: 5,
   },
+  // New styles for services section
+  servicesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 6,
+  },
+  serviceItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,122,255,0.05)',
+    borderRadius: 8,
+    padding: 10,
+    marginRight: 10,
+    marginBottom: 10,
+    minWidth: '45%',
+  },
+  serviceIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#007aff',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 10,
+  },
+  serviceText: {
+    fontSize: 14,
+    color: '#333',
+    fontWeight: '500',
+  }
 });
 
 export default BusinessInfoTab; 

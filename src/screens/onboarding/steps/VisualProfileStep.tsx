@@ -72,7 +72,7 @@ const VisualProfileStep: React.FC = () => {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        aspect: [1, 1],
+        aspect: [16, 9],
         quality: 0.8,
       });
       
@@ -139,14 +139,14 @@ const VisualProfileStep: React.FC = () => {
       
       setIsPickingGallery(true);
       
-      // Launch image library
+      // Launch image library with explicit multi-selection enabled
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
+        allowsEditing: false, // Disable editing to allow multiple selection
         aspect: [4, 3],
         quality: 0.8,
         allowsMultipleSelection: true,
-        selectionLimit: 5,
+        selectionLimit: 10 - galleryImages.length, // Dynamically limit based on current count
       });
       
       setIsPickingGallery(false);
@@ -155,7 +155,7 @@ const VisualProfileStep: React.FC = () => {
         const newImages = result.assets.map(asset => asset.uri);
         const updatedGallery = [...galleryImages, ...newImages];
         
-        // Limit to 10 images maximum
+        // Check if we're at or over the limit
         if (updatedGallery.length > 10) {
           Alert.alert('Máximo alcanzado', 'Solo puedes tener hasta 10 imágenes en la galería.');
           setGalleryImages(updatedGallery.slice(0, 10));
@@ -198,16 +198,16 @@ const VisualProfileStep: React.FC = () => {
             Las empresas con imágenes de calidad reciben 2.5 veces más interacciones.
           </Text>
           
-          {/* Logo/Main Image */}
+          {/* Imagen Principal/Portada */}
           <View style={styles.imageSection}>
-            <Text style={styles.sectionLabel}>Logo del negocio *</Text>
+            <Text style={styles.sectionLabel}>Imagen principal *</Text>
             <Text style={styles.imageHint}>
-              Puedes subir un logo de 500 x 500 píxeles para mejores resultados
+              Elige cuál será tu principal foto, la que verán primero los usuarios
             </Text>
             
             <TouchableOpacity 
               style={[
-                styles.mainImageContainer,
+                styles.coverImageContainer,
                 formState.validationErrors.image ? styles.errorBorder : {}
               ]}
               onPress={pickMainImage}
@@ -218,13 +218,13 @@ const VisualProfileStep: React.FC = () => {
               ) : formState.image ? (
                 <Image 
                   source={{ uri: formState.image }} 
-                  style={styles.mainImage}
+                  style={styles.coverImage}
                   resizeMode="cover"
                 />
               ) : (
-                <View style={styles.imagePlaceholder}>
-                  <MaterialIcons name="add-a-photo" size={36} color="#007AFF" />
-                  <Text style={styles.imagePlaceholderText}>Toca para agregar</Text>
+                <View style={styles.coverPlaceholder}>
+                  <MaterialIcons name="panorama" size={36} color="#007AFF" />
+                  <Text style={styles.imagePlaceholderText}>Toca para agregar tu imagen principal</Text>
                 </View>
               )}
             </TouchableOpacity>
@@ -232,33 +232,6 @@ const VisualProfileStep: React.FC = () => {
             {formState.validationErrors.image && (
               <Text style={styles.errorText}>{formState.validationErrors.image}</Text>
             )}
-          </View>
-          
-          {/* Cover Image */}
-          <View style={styles.imageSection}>
-            <Text style={styles.sectionLabel}>Imagen de portada</Text>
-            <Text style={styles.imageHint}>
-              Recomendamos imágenes horizontales de 1200 x 630 píxeles
-            </Text>
-            
-            <TouchableOpacity 
-              style={styles.coverImageContainer}
-              onPress={pickGalleryImage}
-              disabled={isPickingGallery}
-            >
-              {galleryImages.length > 0 ? (
-                <Image 
-                  source={{ uri: galleryImages[0] }} 
-                  style={styles.coverImage}
-                  resizeMode="cover"
-                />
-              ) : (
-                <View style={styles.coverPlaceholder}>
-                  <MaterialIcons name="panorama" size={36} color="#007AFF" />
-                  <Text style={styles.imagePlaceholderText}>Toca para agregar imagen de portada</Text>
-                </View>
-              )}
-            </TouchableOpacity>
           </View>
           
           {/* Gallery */}
@@ -285,7 +258,7 @@ const VisualProfileStep: React.FC = () => {
                 ) : (
                   <>
                     <MaterialIcons name="add" size={24} color="#007AFF" />
-                    <Text style={styles.galleryAddText}>Agregar fotos</Text>
+                    <Text style={styles.galleryAddText}>Seleccionar varias fotos</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -363,25 +336,9 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 12,
   },
-  mainImageContainer: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: '#F5F7FA',
-    justifyContent: 'center',
-    alignItems: 'center',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E1E8F0',
-    alignSelf: 'center',
-  },
   errorBorder: {
     borderColor: '#FF3B30',
     borderWidth: 2,
-  },
-  mainImage: {
-    width: '100%',
-    height: '100%',
   },
   imagePlaceholder: {
     justifyContent: 'center',

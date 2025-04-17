@@ -187,10 +187,22 @@ export const authService = {
           .update({ role: 'customer' });
       }
       
+      // Verificar que createdAt existe
+      if (!userData?.createdAt) {
+        // Si no existe, añadirlo
+        await firebase.firestore()
+          .collection('users')
+          .doc(userId)
+          .update({ 
+            createdAt: firebase.firestore.FieldValue.serverTimestamp() 
+          });
+      }
+      
       // Obtener y retornar los datos actualizados
       const updatedUser = await getUserData(userId);
       return { success: true, user: updatedUser };
     } catch (error) {
+      console.error('Error al verificar integridad de datos:', error);
       return { success: false, error: 'Error al verificar la integridad de los datos' };
     }
   }
@@ -207,18 +219,45 @@ async function getUserData(userId: string): Promise<UserData | null> {
     if (!doc.exists) return null;
     
     const data = doc.data();
+    if (!data) return null;
+    
     // Asegurarse de que el rol es uno de los valores permitidos
-    const role: UserRole = data?.role === 'business_owner' ? 'business_owner' : 'customer';
+    const role: UserRole = data.role === 'business_owner' ? 'business_owner' : 'customer';
+    
+    // Manejar de forma segura la fecha de creación
+    let createdAt: Date = new Date();
+    if (data.createdAt) {
+      // Verificar si createdAt es un timestamp de Firestore
+      if (typeof data.createdAt.toDate === 'function') {
+        try {
+          createdAt = data.createdAt.toDate();
+        } catch (error) {
+          console.warn('Error al convertir timestamp:', error);
+          // Mantener el valor por defecto (new Date())
+        }
+      } else if (data.createdAt instanceof Date) {
+        // Si ya es un objeto Date
+        createdAt = data.createdAt;
+      } else if (typeof data.createdAt === 'string') {
+        // Si es una cadena, intentar convertirla
+        try {
+          createdAt = new Date(data.createdAt);
+        } catch (error) {
+          console.warn('Error al parsear fecha:', error);
+          // Mantener el valor por defecto (new Date())
+        }
+      }
+    }
     
     return {
       uid: userId,
-      displayName: data?.displayName || null,
-      email: data?.email || null,
+      displayName: data.displayName || null,
+      email: data.email || null,
       role: role,
-      phoneNumber: data?.phoneNumber || null,
-      address: data?.address || null,
-      photoURL: data?.photoURL || null,
-      createdAt: data?.createdAt?.toDate() || new Date()
+      phoneNumber: data.phoneNumber || null,
+      address: data.address || null,
+      photoURL: data.photoURL || null,
+      createdAt: createdAt
     };
   } catch (error) {
     console.error('Error al obtener datos del usuario:', error);
@@ -234,6 +273,14 @@ export const userService = {
     profileData: Partial<UserData>
   ): Promise<AuthResponse> => {
     try {
+      // Asegurarse de que no se pierda createdAt si no está definido
+      if (!profileData.createdAt) {
+        const userData = await getUserData(userId);
+        if (userData?.createdAt) {
+          profileData.createdAt = userData.createdAt;
+        }
+      }
+      
       // Actualizar en Firestore
       await firebase.firestore()
         .collection('users')
@@ -257,6 +304,7 @@ export const userService = {
       const updatedUser = await getUserData(userId);
       return { success: true, user: updatedUser };
     } catch (error) {
+      console.error('Error al actualizar perfil:', error);
       return { success: false, error: 'Error al actualizar el perfil' };
     }
   },
@@ -269,5 +317,26 @@ export const userService = {
   // Verificar integridad de datos del usuario (duplicado de authService para compatibilidad)
   verifyUserDataIntegrity: async (userId: string): Promise<AuthResponse> => {
     return await authService.verifyUserDataIntegrity(userId);
+  },
+  
+  // Convertir usuario a propietario de negocio
+  convertToBusinessOwner: async (userId: string): Promise<AuthResponse> => {
+    try {
+      // Actualizar rol en Firestore
+      await firebase.firestore()
+        .collection('users')
+        .doc(userId)
+        .update({
+          role: 'business_owner',
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      
+      // Obtener datos actualizados
+      const updatedUser = await getUserData(userId);
+      return { success: true, user: updatedUser };
+    } catch (error) {
+      console.error('Error al convertir usuario:', error);
+      return { success: false, error: 'No se pudo convertir la cuenta a propietario de negocio' };
+    }
   }
 };

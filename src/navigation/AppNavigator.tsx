@@ -173,7 +173,9 @@ export type RootStackParamList = {
   // Nueva ruta para seleccionar negocio
   BusinessSelector: undefined;
   // New business onboarding routes
-  BusinessOnboardingWelcome: undefined;
+  BusinessOnboardingWelcome: {
+    isNewBusinessOwner?: boolean;
+  };
   BusinessOnboardingModeSelection: undefined;
   BusinessOnboardingSteps: undefined;
 };

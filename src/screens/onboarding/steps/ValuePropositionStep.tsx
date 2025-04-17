@@ -30,7 +30,6 @@ const ValuePropositionStep: React.FC = () => {
   const { formState, setField, markStepComplete } = useBusinessOnboarding();
   
   // Local state
-  const [shortDescriptionChars, setShortDescriptionChars] = useState(0);
   const [keywords, setKeywords] = useState<string[]>([]);
   const [keywordInput, setKeywordInput] = useState('');
   const [suggestedKeywords, setSuggestedKeywords] = useState<string[]>([]);
@@ -69,21 +68,6 @@ const ValuePropositionStep: React.FC = () => {
       markStepComplete('valueProposition');
     }
   }, [formState.description]);
-  
-  // Effect to update character count
-  useEffect(() => {
-    if (formState.shortDescription) {
-      setShortDescriptionChars(formState.shortDescription.length);
-    }
-  }, [formState.shortDescription]);
-  
-  // Handle short description change
-  const handleShortDescriptionChange = (text: string) => {
-    if (text.length <= 120) {
-      setField('shortDescription', text);
-      setShortDescriptionChars(text.length);
-    }
-  };
   
   // Handle full description change
   const handleDescriptionChange = (text: string) => {
@@ -173,30 +157,9 @@ const ValuePropositionStep: React.FC = () => {
             Cuenta a tus clientes qué te diferencia de la competencia.
           </Text>
           
-          {/* Short Description */}
-          <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Descripción corta *</Text>
-            <Text style={styles.inputHint}>Máximo 120 caracteres</Text>
-            <TextInput
-              style={[
-                styles.textInput,
-                formState.validationErrors.shortDescription ? styles.inputError : {}
-              ]}
-              value={formState.shortDescription || ''}
-              onChangeText={handleShortDescriptionChange}
-              placeholder="Ej: Cafetería artesanal con productos orgánicos y ambiente acogedor"
-              placeholderTextColor="#AEAEB2"
-              maxLength={120}
-            />
-            <Text style={styles.charCount}>{shortDescriptionChars}/120</Text>
-            {formState.validationErrors.shortDescription && (
-              <Text style={styles.errorText}>{formState.validationErrors.shortDescription}</Text>
-            )}
-          </View>
-          
           {/* Full Description */}
           <View style={styles.inputContainer}>
-            <Text style={styles.inputLabel}>Descripción completa *</Text>
+            <Text style={styles.inputLabel}>Descripción *</Text>
             <View style={styles.descriptionHeader}>
               <Text style={styles.inputHint}>Cuenta más sobre tu negocio</Text>
               <TouchableOpacity
@@ -336,28 +299,12 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginBottom: 8,
   },
-  textInput: {
-    backgroundColor: 'white',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    fontSize: 16,
-    color: '#2C3E50',
-    borderWidth: 1,
-    borderColor: '#E1E8F0',
-  },
   inputError: {
     borderColor: '#FF3B30',
   },
   errorText: {
     color: '#FF3B30',
     fontSize: 14,
-    marginTop: 4,
-  },
-  charCount: {
-    fontSize: 12,
-    color: '#8E8E93',
-    textAlign: 'right',
     marginTop: 4,
   },
   descriptionHeader: {

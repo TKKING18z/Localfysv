@@ -24,6 +24,7 @@ import { useBusinesses } from '../context/BusinessContext';
 import { TextInput } from 'react-native-gesture-handler';
 import * as ImagePicker from 'expo-image-picker';
 import 'firebase/compat/storage';
+import { userService } from '../services/authService';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -431,6 +432,68 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.sectionContainer}>
           <Text style={styles.sectionTitle}>Configuración</Text>
           
+          {/* Only show upgrade option for regular users */}
+          {profile?.userType === 'Cliente' && (
+            <TouchableOpacity 
+              style={[styles.menuItem, styles.upgradeMenuItem]}
+              onPress={() => {
+                Alert.alert(
+                  'Convertirse en Propietario',
+                  '¿Estás seguro que deseas convertir tu cuenta a propietario de negocio? Esto te permitirá registrar y gestionar tus propios negocios en Localfy.',
+                  [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { 
+                      text: 'Confirmar', 
+                      onPress: async () => {
+                        try {
+                          setLoading(true);
+                          
+                          // Use the userService to convert user to business owner
+                          const result = await userService.convertToBusinessOwner(profile.uid);
+                          
+                          if (!result.success) {
+                            throw new Error(result.error || 'Error al actualizar el tipo de cuenta');
+                          }
+                          
+                          // Update local state
+                          setProfile(prev => prev ? {
+                            ...prev,
+                            userType: 'Propietario'
+                          } : null);
+                          
+                          setLoading(false);
+                          
+                          Alert.alert(
+                            '¡Felicidades!', 
+                            'Ahora eres propietario de negocio. Puedes comenzar a registrar tus negocios en Localfy.',
+                            [
+                              { 
+                                text: 'Registrar mi primer negocio', 
+                                onPress: () => navigation.navigate('BusinessOnboardingWelcome', { isNewBusinessOwner: true })
+                              },
+                              { 
+                                text: 'Más tarde', 
+                                style: 'cancel' 
+                              }
+                            ]
+                          );
+                        } catch (error) {
+                          console.error('Error upgrading account:', error);
+                          setLoading(false);
+                          Alert.alert('Error', 'No se pudo actualizar el tipo de cuenta. Intenta de nuevo más tarde.');
+                        }
+                      }
+                    }
+                  ]
+                );
+              }}
+            >
+              <MaterialIcons name="business" size={24} color="#007AFF" />
+              <Text style={styles.menuItemText}>Convertirme en Propietario de Negocio</Text>
+              <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+            </TouchableOpacity>
+          )}
+          
           {/* Add Loyalty Points menu item */}
           <TouchableOpacity 
             style={styles.menuItem}
@@ -450,6 +513,16 @@ const ProfileScreen: React.FC = () => {
               >
                 <MaterialIcons name="store" size={24} color="#007AFF" />
                 <Text style={styles.menuItemText}>Mis Negocios</Text>
+                <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+              </TouchableOpacity>
+              
+              {/* Botón para registrar primer negocio */}
+              <TouchableOpacity 
+                style={[styles.menuItem, styles.upgradeMenuItem]}
+                onPress={() => navigation.navigate('BusinessOnboardingWelcome', { isNewBusinessOwner: true })}
+              >
+                <MaterialIcons name="add-business" size={24} color="#007AFF" />
+                <Text style={styles.menuItemText}>Registrar Nuevo Negocio</Text>
                 <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
               </TouchableOpacity>
               
@@ -1002,6 +1075,13 @@ const styles = StyleSheet.create({
     color: '#333333',
     marginLeft: 12,
     fontWeight: '500',
+  },
+  upgradeMenuItem: {
+    borderWidth: 1,
+    borderColor: 'rgba(0, 122, 255, 0.2)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 122, 255, 0.05)',
+    marginBottom: 8,
   },
 });
 

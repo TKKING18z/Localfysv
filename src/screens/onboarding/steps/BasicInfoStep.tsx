@@ -530,24 +530,8 @@ const BasicInfoStep: React.FC = () => {
           )}
         </View>
         
-        {/* ÚNICO BOTÓN CONTINUAR - colocado al final del formulario */}
-        <TouchableOpacity 
-          style={styles.continueButton}
-          onPress={saveAndContinue}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <Text style={styles.continueButtonText}>Continuar</Text>
-              <MaterialIcons name="arrow-forward" size={24} color="#FFFFFF" />
-            </>
-          )}
-        </TouchableOpacity>
-        
         {/* Extra padding at the bottom for better scrolling */}
-        <View style={{ height: 50 }} />
+        <View style={{ height: 80 }} />
       </ScrollView>
       
       {/* Location Map Modal */}
@@ -686,27 +670,6 @@ const styles = StyleSheet.create({
   locationButtonTextError: {
     color: '#FF3B30',
   },
-  continueButton: {
-    backgroundColor: '#007AFF',
-    borderRadius: 10,
-    padding: 18,
-    marginTop: 20,
-    marginBottom: 40,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 5,
-    elevation: 3,
-  },
-  continueButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '600',
-    marginRight: 10,
-  }
 });
 
 export default BasicInfoStep;

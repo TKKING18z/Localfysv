@@ -260,7 +260,9 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
       ) : menuUrl ? (
         <View style={styles.onlyUrlContainer}>
           <Text style={styles.onlyUrlText}>
-            Este negocio tiene un menú externo disponible. Haga clic en el botón de arriba para verlo.
+            {viewType === 'tourism' 
+              ? 'Este negocio tiene planes disponibles en línea. Haga clic en el botón de arriba para verlos.'
+              : 'Este negocio tiene un menú externo disponible. Haga clic en el botón de arriba para verlo.'}
           </Text>
         </View>
       ) : null}
