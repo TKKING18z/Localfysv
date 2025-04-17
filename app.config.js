@@ -21,15 +21,7 @@ const config = {
     bundleIdentifier: "com.zalabsdigital.localfy",
     infoPlist: {
       NSLocationWhenInUseUsageDescription: "Localfy uses your location to find nearby businesses.",
-      NSUserTrackingUsageDescription: "This allows us to provide personalized ads tailored to your interests.",
-      SKAdNetworkItems: [
-        {
-          SKAdNetworkIdentifier: "cstr6suwn9.skadnetwork"
-        }
-      ]
-    },
-    config: {
-      googleMobileAdsAppId: "ca-app-pub-7380343766459097~4423545874"
+      NSUserTrackingUsageDescription: "This allows us to provide personalized ads tailored to your interests."
     }
   },
   android: {
@@ -50,10 +42,7 @@ const config = {
         ],
         category: ["BROWSABLE", "DEFAULT"]
       }
-    ],
-    config: {
-      googleMobileAdsAppId: "ca-app-pub-7380343766459097~4423545874"
-    }
+    ]
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -79,8 +68,7 @@ const config = {
           "useFrameworks": "static"
         }
       }
-    ],
-    "expo-ads-admob"
+    ]
   ],
   extra: {
     eas: {
