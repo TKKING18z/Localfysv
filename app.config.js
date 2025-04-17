@@ -20,7 +20,16 @@ const config = {
     supportsTablet: true,
     bundleIdentifier: "com.zalabsdigital.localfy",
     infoPlist: {
-      NSLocationWhenInUseUsageDescription: "Localfy uses your location to find nearby businesses."
+      NSLocationWhenInUseUsageDescription: "Localfy uses your location to find nearby businesses.",
+      NSUserTrackingUsageDescription: "This allows us to provide personalized ads tailored to your interests.",
+      SKAdNetworkItems: [
+        {
+          SKAdNetworkIdentifier: "cstr6suwn9.skadnetwork"
+        }
+      ]
+    },
+    config: {
+      googleMobileAdsAppId: "ca-app-pub-7380343766459097~4423545874"
     }
   },
   android: {
@@ -41,7 +50,10 @@ const config = {
         ],
         category: ["BROWSABLE", "DEFAULT"]
       }
-    ]
+    ],
+    config: {
+      googleMobileAdsAppId: "ca-app-pub-7380343766459097~4423545874"
+    }
   },
   web: {
     favicon: "./assets/favicon.png"
@@ -59,7 +71,16 @@ const config = {
         icon: "./assets/adaptive-icon.png",
         color: "#ffffff",
       }
-    ]
+    ],
+    [
+      "expo-build-properties",
+      {
+        "ios": {
+          "useFrameworks": "static"
+        }
+      }
+    ],
+    "expo-ads-admob"
   ],
   extra: {
     eas: {
@@ -77,6 +98,7 @@ const config = {
     WEB_OAUTH_CLIENT_ID: "281205862532-imt64nhl458nbm9jnf9gff2cb939ngr3.apps.googleusercontent.com"
   },
   newArchEnabled: true,
+  scheme: "localfy"
 };
 
 export default config;
