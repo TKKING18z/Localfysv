@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo, Suspense, lazy } from 'react';
 import {
   View,
   Text,
@@ -13,13 +13,13 @@ import {
   Animated,
   Share,
   useWindowDimensions,
+  Image,
   ScrollView,
   RefreshControl
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp, CommonActions } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useBusinesses, Business } from '../context/BusinessContext';
@@ -30,6 +30,74 @@ import { Promotion } from '../types/businessTypes';
 import { useChat } from '../context/ChatContext';
 import { useCart } from '../context/CartContext';
 import firebase from 'firebase/compat/app';
+import { useNetwork } from '../context/NetworkContext';
+import OfflineBanner from '../components/common/OfflineBanner';
+import { throttle, debounce } from '../utils/performanceUtils';
+
+// Creamos un componente de imagen seguro que podemos usar en lugar de FastImageView
+// Este componente es compatible con la API de FastImageView pero usa Image de React Native
+interface SafeImageViewProps {
+  source: any;
+  style?: any;
+  resizeMode?: 'cover' | 'contain' | 'stretch' | 'center';
+  showLoadingIndicator?: boolean;
+  placeholderColor?: string;
+  [key: string]: any;
+}
+
+// Añadir export a la definición del componente
+export const SafeImageView: any = (props: SafeImageViewProps) => {
+  const {
+    source,
+    style,
+    resizeMode = 'cover',
+    showLoadingIndicator = false,
+    placeholderColor = '#E1E1E1',
+    ...rest
+  } = props;
+  
+  const [isLoading, setIsLoading] = useState(true);
+  
+  return (
+    <View style={[{ backgroundColor: placeholderColor }, style]}>
+      {isLoading && showLoadingIndicator && (
+        <ActivityIndicator
+          style={StyleSheet.absoluteFill}
+          size="small"
+          color="#007AFF"
+        />
+      )}
+      <Image
+        source={source}
+        style={[{ width: '100%', height: '100%' }, style]}
+        resizeMode={resizeMode}
+        onLoadStart={() => setIsLoading(true)}
+        onLoadEnd={() => setIsLoading(false)}
+        {...rest}
+      />
+    </View>
+  );
+};
+
+// Añadir propiedades estáticas necesarias para compatibilidad con FastImage
+SafeImageView.resizeMode = {
+  contain: 'contain',
+  cover: 'cover',
+  stretch: 'stretch',
+  center: 'center'
+};
+
+SafeImageView.priority = {
+  low: 'low',
+  normal: 'normal',
+  high: 'high'
+};
+
+SafeImageView.cacheControl = {
+  immutable: 'immutable',
+  web: 'web',
+  cacheOnly: 'cacheOnly'
+};
 
 // Importar componentes modularizados
 import {
@@ -59,17 +127,44 @@ const GRADIENT_COLORS = {
 type BusinessDetailRouteProp = RouteProp<RootStackParamList, 'BusinessDetail'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
+// Error Boundary simplificado para manejo de errores a nivel de componente
+const ErrorBoundaryFallback = React.memo(({ error, retry }: { error: Error, retry: () => void }) => (
+  <View style={styles.errorContainer}>
+    <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
+    <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
+    <Text style={styles.errorText}>{error.message || 'Error desconocido'}</Text>
+    <TouchableOpacity 
+      style={styles.backButton}
+      onPress={retry}
+      accessibilityRole="button"
+      accessibilityLabel="Reintentar"
+    >
+      <Text style={styles.backButtonText}>Reintentar</Text>
+    </TouchableOpacity>
+  </View>
+));
+
+// Componente de carga optimizado y reusable
+const LoadingScreen = React.memo(() => (
+  <SafeAreaView style={styles.loadingContainer}>
+    <ActivityIndicator size="large" color="#007AFF" />
+    <Text style={styles.loadingText}>Cargando negocio...</Text>
+  </SafeAreaView>
+));
+
 // Componente principal optimizado
 const BusinessDetailScreen: React.FC = () => {
   const dimensions = useWindowDimensions();
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<BusinessDetailRouteProp>();
-  const { businessId, fromOnboarding } = route.params;
+  const { businessId } = route.params;
+  const fromOnboarding = route.params.fromOnboarding || false;
   const { getBusinessById, toggleFavorite, isFavorite } = useBusinesses();
   const { getFormattedDistance } = useLocation();
   const { user } = useAuth();
   const { createConversation, refreshConversations } = useChat();
   const { cart } = useCart();
+  const { isConnected, isSlowConnection } = useNetwork();
   
   // Estados principales
   const [business, setBusiness] = useState<Business | null>(null);
@@ -83,6 +178,7 @@ const BusinessDetailScreen: React.FC = () => {
   const [loadingPromotions, setLoadingPromotions] = useState(false);
   const [isBusinessOwner, setIsBusinessOwner] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
   
   // Valores animados
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -146,8 +242,14 @@ const BusinessDetailScreen: React.FC = () => {
     }, 100);
   }, [actionButtonsY, tabBarOpacity]);
 
-  // Carga de datos del negocio - optimizado con useCallback
-  const fetchBusiness = useCallback(async () => {
+  // Carga de datos del negocio - optimizado con useCallback y debounce para evitar múltiples llamadas
+  const fetchBusiness = useCallback(debounce(async () => {
+    if (!isConnected && !business) {
+      setLoadingError('Sin conexión a Internet. Comprueba tu conexión y vuelve a intentarlo.');
+      setLoading(false);
+      return;
+    }
+
     try {
       setLoading(true);
       setLoadingError(null);
@@ -159,16 +261,21 @@ const BusinessDetailScreen: React.FC = () => {
       } else {
         setLoadingError('No se pudo encontrar el negocio');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error fetching business details:', error);
-      setLoadingError('Error al cargar los detalles del negocio');
+      setLoadingError(error.message || 'Error al cargar los detalles del negocio');
     } finally {
       setLoading(false);
     }
-  }, [businessId, getBusinessById, isFavorite]);
+  }, 300), [businessId, getBusinessById, isFavorite, isConnected, business]);
 
-  // Cargar promociones
+  // Cargar promociones - optimizado para conexiones lentas
   const loadPromotions = useCallback(async () => {
+    if (!isConnected && promotions.length === 0) {
+      // No cargar si no hay conexión y no tenemos datos
+      return;
+    }
+    
     try {
       setLoadingPromotions(true);
       const result = await firebaseService.promotions.getByBusinessId(businessId);
@@ -177,16 +284,25 @@ const BusinessDetailScreen: React.FC = () => {
       }
     } catch (error) {
       console.error('Error loading promotions:', error);
+      // No mostrar error si ya tenemos algunos datos
+      if (promotions.length === 0) {
+        // Alert.alert('Error', 'No se pudieron cargar las promociones');
+      }
     } finally {
       setLoadingPromotions(false);
     }
-  }, [businessId]);
+  }, [businessId, isConnected, promotions.length]);
 
   // Inicializar datos y animaciones
   useEffect(() => {
     fetchBusiness();
-    loadPromotions();
-  }, [fetchBusiness, loadPromotions]);
+  }, [fetchBusiness, retryAttempt]);
+
+  useEffect(() => {
+    if (business) {
+      loadPromotions();
+    }
+  }, [business, loadPromotions]);
 
   useEffect(() => {
     if (!loading && business) {
@@ -196,10 +312,15 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Función para refrescar datos
   const handleRefresh = useCallback(async () => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'No es posible actualizar los datos sin conexión a Internet.');
+      return;
+    }
+    
     setRefreshing(true);
     await Promise.all([fetchBusiness(), loadPromotions()]);
     setRefreshing(false);
-  }, [fetchBusiness, loadPromotions]);
+  }, [fetchBusiness, loadPromotions, isConnected]);
 
   // Manejar navegación de vuelta
   const handleGoBack = useCallback(() => {
@@ -220,8 +341,20 @@ const BusinessDetailScreen: React.FC = () => {
     }
   }, [navigation, fromOnboarding]);
 
+  // Función optimizada para reintentar en caso de error
+  const handleRetry = useCallback(() => {
+    setRetryAttempt(prev => prev + 1);
+    setLoadingError(null);
+    setLoading(true);
+  }, []);
+
   // Manejadores de eventos optimizados con useCallback
-  const handleFavoriteToggle = useCallback(() => {
+  const handleFavoriteToggle = useCallback(throttle(() => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'Esta acción requiere conexión a Internet.');
+      return;
+    }
+    
     Animated.sequence([
       Animated.spring(favoriteScale, {
         toValue: 1.4,
@@ -239,7 +372,7 @@ const BusinessDetailScreen: React.FC = () => {
     
     toggleFavorite(businessId);
     setIsFav(prev => !prev);
-  }, [favoriteScale, toggleFavorite, businessId]);
+  }, 500), [favoriteScale, toggleFavorite, businessId, isConnected]);
 
   const handleCallBusiness = useCallback(() => {
     if (!business?.phone) return;
@@ -293,20 +426,30 @@ const BusinessDetailScreen: React.FC = () => {
   const navigateToReservations = useCallback(() => {
     if (!business) return;
     
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'Necesitas conexión a Internet para acceder a las reservas.');
+      return;
+    }
+    
     navigation.navigate('Reservations', {
       businessId,
       businessName: business.name,
     });
-  }, [navigation, businessId, business]);
+  }, [navigation, businessId, business, isConnected]);
 
   const navigateToPromotions = useCallback(() => {
     if (!business) return;
+    
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'Necesitas conexión a Internet para acceder a las promociones.');
+      return;
+    }
     
     navigation.navigate('Promotions', {
       businessId,
       businessName: business.name,
     });
-  }, [navigation, businessId, business]);
+  }, [navigation, businessId, business, isConnected]);
 
   // Funciones de utilidad - memoizadas para evitar recálculos
   const getBusinessImage = useMemo(() => {
@@ -321,6 +464,11 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Mejorar la función handleStartChat para mayor robustez y manejo de errores
   const handleStartChat = useCallback(async () => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'Necesitas conexión a Internet para iniciar un chat.');
+      return;
+    }
+    
     if (!user || !business || !business.createdBy) {
       Alert.alert('Error', 'No se puede iniciar chat en este momento');
       return;
@@ -335,6 +483,15 @@ const BusinessDetailScreen: React.FC = () => {
         Alert.alert('Información', 'No puedes iniciar un chat contigo mismo como propietario');
         setIsLoading(false);
         return;
+      }
+      
+      // Mostrar mensaje de advertencia en conexiones lentas
+      if (isSlowConnection) {
+        Alert.alert(
+          'Conexión lenta',
+          'Tu conexión a Internet es lenta. El chat podría tardar más tiempo en iniciar.',
+          [{ text: 'Continuar de todos modos' }]
+        );
       }
       
       console.log('[BusinessDetail] Iniciando chat con propietario:', business.createdBy);
@@ -435,11 +592,14 @@ const BusinessDetailScreen: React.FC = () => {
       
     } catch (error) {
       console.error('[BusinessDetail] Error detallado:', error);
-      
+      Alert.alert(
+        'Error',
+        'No se pudo iniciar la conversación. Inténtalo de nuevo más tarde.'
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [user, business, navigation, createConversation, refreshConversations]);
+  }, [user, business, navigation, createConversation, refreshConversations, isConnected, isSlowConnection]);
 
   const getPlaceholderColor = useMemo(() => {
     if (!business) return '#E1E1E1';
@@ -510,11 +670,13 @@ const BusinessDetailScreen: React.FC = () => {
     return tabs;
   }, [business]);
 
-  // Para manejar el scroll animado
-  const handleScroll = Animated.event(
-    [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-    { useNativeDriver: false }
-  );
+  // Para manejar el scroll animado - optimizado para rendimiento
+  const handleScroll = useMemo(() => {
+    return Animated.event(
+      [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+      { useNativeDriver: false }
+    );
+  }, [scrollY]);
 
   // Distancia formateada - asegurando que siempre sea string | null
   const distance: string | null = business 
@@ -523,10 +685,10 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Load reviews when tab changes to 'reseñas'
   useEffect(() => {
-    if (activeTab === 'reseñas') {
+    if (activeTab === 'reseñas' && isConnected) {
       loadBusinessReviews();
     }
-  }, [activeTab, businessId]);
+  }, [activeTab, businessId, isConnected]);
 
   // Function to load reviews
   const loadBusinessReviews = useCallback(async () => {
@@ -547,12 +709,12 @@ const BusinessDetailScreen: React.FC = () => {
   }, [businessId]);
 
   // Review action handlers
-  const handleReplyReview = (reviewId: string) => {
+  const handleReplyReview = useCallback((reviewId: string) => {
     // Implement reply logic (could open a form, navigate, etc.)
     console.log('Reply to review:', reviewId);
-  };
+  }, []);
 
-  const handleReportReview = (reviewId: string) => {
+  const handleReportReview = useCallback((reviewId: string) => {
     // Implement report logic
     Alert.alert(
       'Reportar Reseña',
@@ -562,15 +724,20 @@ const BusinessDetailScreen: React.FC = () => {
         { text: 'Reportar', style: 'destructive', onPress: () => console.log('Report review:', reviewId) }
       ]
     );
-  };
+  }, []);
 
-  const handleEditReview = (review: any) => {
+  const handleEditReview = useCallback((review: any) => {
     // Implement edit logic
     console.log('Edit review:', review);
     // Could open the review form with prefilled data
-  };
+  }, []);
 
-  const handleDeleteReview = (reviewId: string) => {
+  const handleDeleteReview = useCallback((reviewId: string) => {
+    if (!isConnected) {
+      Alert.alert('Sin conexión', 'Necesitas conexión a Internet para eliminar una reseña.');
+      return;
+    }
+    
     // Implement delete logic
     Alert.alert(
       'Eliminar Reseña',
@@ -596,7 +763,7 @@ const BusinessDetailScreen: React.FC = () => {
         }
       ]
     );
-  };
+  }, [loadBusinessReviews, isConnected]);
 
   // Handler para navegar al carrito
   const handleGoToCart = useCallback(() => {
@@ -616,35 +783,30 @@ const BusinessDetailScreen: React.FC = () => {
 
   // Estados renderizados
   if (loading) {
-    return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Cargando negocio...</Text>
-      </SafeAreaView>
-    );
+    return <LoadingScreen />;
   }
 
   if (loadingError || !business) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
-        <MaterialIcons name="error-outline" size={64} color="#FF3B30" />
-        <Text style={styles.errorTitle}>¡Ups! Algo salió mal</Text>
-        <Text style={styles.errorText}>{loadingError || 'No se pudo cargar el negocio'}</Text>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={handleGoBack}
-          accessibilityRole="button"
-          accessibilityLabel="Volver atrás"
-        >
-          <Text style={styles.backButtonText}>Volver</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
+      <ErrorBoundaryFallback
+        error={new Error(loadingError || 'No se pudo cargar el negocio')}
+        retry={handleRetry}
+      />
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      
+      {/* Offline Banner - aparece cuando no hay conexión o es lenta */}
+      {!isConnected && <OfflineBanner />}
+      {isConnected && isSlowConnection && (
+        <OfflineBanner 
+          offlineText="Conexión lenta detectada" 
+          slowConnectionText="Conexión lenta detectada"
+        />
+      )}
       
       {/* Header */}
       <BusinessHeader
@@ -670,7 +832,14 @@ const BusinessDetailScreen: React.FC = () => {
         overScrollMode="never"
         bounces={true}
         alwaysBounceVertical={true}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#007AFF" colors={["#007AFF"]} />}
+        refreshControl={
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={handleRefresh} 
+            tintColor="#007AFF" 
+            colors={["#007AFF"]} 
+          />
+        }
       >
         {/* Business Details */}
         <View style={styles.detailsContainer}>
@@ -850,4 +1019,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default BusinessDetailScreen;
+export default React.memo(BusinessDetailScreen);

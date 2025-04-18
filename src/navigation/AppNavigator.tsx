@@ -7,6 +7,7 @@ import { View, TouchableOpacity, ActivityIndicator, Text, StyleSheet, AppState, 
 import { useAuth } from '../context/AuthContext';
 import { useChat, ChatProvider } from '../context/ChatContext';
 import * as Notifications from 'expo-notifications';
+import OfflineBanner from '../components/common/OfflineBanner';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -73,7 +74,7 @@ export type RootStackParamList = {
   Register: undefined;
   ForgotPassword: undefined;
   MainTabs: { screen?: keyof MainTabParamList };  // Allow specifying which tab to navigate to
-  BusinessDetail: { businessId: string };
+  BusinessDetail: { businessId: string; fromOnboarding?: boolean };
   // Business enhancement screens
   BusinessHours: { initialHours?: any; callbackId?: string };
   PaymentMethods: { initialMethods?: string[]; callbackId?: string };
@@ -613,6 +614,7 @@ const AppNavigator = () => {
 
   return (
     <NavigationContainer>
+      <OfflineBanner />
       <ChatProvider>
         <AppWithChat />
       </ChatProvider>

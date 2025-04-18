@@ -5,12 +5,17 @@ import {
   TouchableOpacity,
   StyleSheet,
   Platform,
+  Image,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Animated } from 'react-native';
 import { Business } from '../../context/BusinessContext';
+// Importamos el nuevo componente seguro
+import { SafeImageView } from '../../screens/BusinessDetailScreen';
+
+// Variable para controlar si usamos FastImageView o Image fallback
+// const USE_FAST_IMAGE = !!FastImageView;
 
 interface BusinessHeaderProps {
   business: Business;
@@ -33,7 +38,8 @@ interface BusinessHeaderProps {
 
 const HEADER_HEIGHT = 350;
 
-const BusinessHeader: React.FC<BusinessHeaderProps> = ({
+// Optimizado con React.memo para evitar re-renders innecesarios
+const BusinessHeader: React.FC<BusinessHeaderProps> = React.memo(({
   business,
   scrollY,
   getBusinessImage,
@@ -48,31 +54,42 @@ const BusinessHeader: React.FC<BusinessHeaderProps> = ({
   distance,
 }) => {
   // Calcular la opacidad del botón de retroceso flotante basado en el scroll
-  const backButtonOpacity = scrollY.interpolate({
-    inputRange: [0, 50, 100],
-    outputRange: [1, 1, 0],  // Desaparece cuando el header flotante aparece
-    extrapolate: 'clamp'
-  });
+  const backButtonOpacity = useMemo(() => {
+    return scrollY.interpolate({
+      inputRange: [0, 50, 100],
+      outputRange: [1, 1, 0],  // Desaparece cuando el header flotante aparece
+      extrapolate: 'clamp'
+    });
+  }, [scrollY]);
   
   // Animación mejorada para el nombre en la imagen
-  const titleOpacity = scrollY.interpolate({
-    inputRange: [0, 60, 90],
-    outputRange: [1, 0.3, 0],
-    extrapolate: 'clamp'
-  });
+  const titleOpacity = useMemo(() => {
+    return scrollY.interpolate({
+      inputRange: [0, 60, 90],
+      outputRange: [1, 0.3, 0],
+      extrapolate: 'clamp'
+    });
+  }, [scrollY]);
+
+  // Animación para el header flotante - optimizada con useMemo
+  const floatingHeaderStyle = useMemo(() => {
+    return {
+      opacity: headerAnimations.opacity,
+      transform: [{ 
+        translateY: headerAnimations.opacity.interpolate({
+          inputRange: [0, 1],
+          outputRange: [-50, 0]
+        })
+      }]
+    };
+  }, [headerAnimations.opacity]);
 
   return (
     <>
       {/* Header flotante - aparece al hacer scroll */}
       <Animated.View style={[
         styles.floatingHeader,
-        { 
-          opacity: headerAnimations.opacity,
-          transform: [{ translateY: headerAnimations.opacity.interpolate({
-            inputRange: [0, 1],
-            outputRange: [-50, 0]
-          })}]
-        }
+        floatingHeaderStyle
       ]}>
         <TouchableOpacity 
           style={styles.floatingBackButton}
@@ -110,15 +127,12 @@ const BusinessHeader: React.FC<BusinessHeaderProps> = ({
       {/* Business Image Header con animación */}
       <Animated.View style={[styles.imageContainer, { height: headerAnimations.height }]}>
         {getBusinessImage ? (
-          <Image 
+          <SafeImageView 
             source={{ uri: getBusinessImage }} 
             style={styles.businessImage}
-            contentFit="cover"
-            transition={500}
-            cachePolicy="memory-disk"
-            contentPosition="center"
-            placeholder={Platform.OS === 'ios' ? null : "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="}
-            accessibilityLabel={`Imagen principal de ${business.name}`}
+            resizeMode="cover"
+            showLoadingIndicator={true}
+            placeholderColor={getPlaceholderColor}
           />
         ) : (
           <View style={[styles.placeholderImage, { backgroundColor: getPlaceholderColor }]}>
@@ -237,7 +251,16 @@ const BusinessHeader: React.FC<BusinessHeaderProps> = ({
       </Animated.View>
     </>
   );
-};
+}, (prevProps, nextProps) => {
+  // Función de comparación personalizada para React.memo - evita renders innecesarios
+  return (
+    prevProps.business.id === nextProps.business.id &&
+    prevProps.isFav === nextProps.isFav &&
+    prevProps.isOpenNow === nextProps.isOpenNow &&
+    prevProps.getBusinessImage === nextProps.getBusinessImage &&
+    prevProps.distance === nextProps.distance
+  );
+});
 
 const styles = StyleSheet.create({
   floatingHeader: {

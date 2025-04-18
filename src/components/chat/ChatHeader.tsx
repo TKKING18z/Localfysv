@@ -1,4 +1,4 @@
-import React, { memo, useEffect, useState } from 'react';
+import React, { memo, useEffect, useState, useMemo, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -14,6 +14,7 @@ import { Conversation } from '../../../models/chatTypes';
 import { useNavigation } from '@react-navigation/native';
 import { getNameInitial, getAvatarColor } from '../../../src/utils/chatUtils';
 import * as Haptics from 'expo-haptics';
+import FastImageView from '../common/FastImageView';
 
 interface ChatHeaderProps {
   conversation: Conversation | null;
@@ -59,28 +60,28 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
     }
   }, [conversation, fadeAnim, slideAnim]);
   
-  const handleBack = () => {
+  const handleBackPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onBackPress) {
       onBackPress();
     } else {
       navigation.goBack();
     }
-  };
+  }, [onBackPress, navigation]);
   
-  const handleInfoPress = () => {
+  const handleInfoPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (onInfoPress) {
       onInfoPress();
     }
-  };
+  }, [onInfoPress]);
   
-  const handleAvatarPress = () => {
+  const handleAvatarPress = useCallback(() => {
     if (onAvatarPress) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       onAvatarPress();
     }
-  };
+  }, [onAvatarPress]);
   
   if (!conversation) {
     return (
@@ -88,7 +89,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
         <View style={styles.loadingBackground}>
           <TouchableOpacity 
             style={styles.backButton} 
-            onPress={handleBack}
+            onPress={handleBackPress}
           >
             <MaterialIcons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
@@ -103,9 +104,11 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
   const otherParticipantPhoto = conversation.participantPhotos?.[participantId];
   
   // For showing the business name if present
-  const headerTitle = businessMode && conversation.businessName 
-    ? conversation.businessName
-    : otherParticipantName;
+  const headerTitle = useMemo(() => {
+    return businessMode && conversation.businessName 
+      ? conversation.businessName
+      : otherParticipantName || 'Usuario';
+  }, [businessMode, conversation.businessName, otherParticipantName]);
   
   // For showing additional info under the main title
   const headerSubtitle = businessMode && conversation.businessName 
@@ -126,7 +129,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
         <View style={styles.container}>
           <TouchableOpacity 
             style={styles.backButton} 
-            onPress={handleBack}
+            onPress={handleBackPress}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
             activeOpacity={0.7}
           >
@@ -140,7 +143,7 @@ const ChatHeader: React.FC<ChatHeaderProps> = memo(({
             disabled={!onAvatarPress}
           >
             {otherParticipantPhoto ? (
-              <Image 
+              <FastImageView 
                 source={{ uri: otherParticipantPhoto }} 
                 style={styles.avatar}
                 defaultSource={require('../../../assets/Iconprofile.png')}

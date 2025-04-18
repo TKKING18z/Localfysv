@@ -28,6 +28,7 @@ import { RootStackParamList } from '../../navigation/AppNavigator';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import FastImageView from '../../components/common/FastImageView';
 
 // Context and utilities
 import { useAuth } from '../../context/AuthContext';
@@ -658,13 +659,11 @@ const ChatScreen: React.FC = () => {
           activeOpacity={1}
         >
           {selectedImage && (
-            <Image
+            <FastImageView
               source={{ uri: selectedImage }}
               style={styles.fullScreenImage}
               resizeMode="contain"
-              onLoadStart={() => {}}
-              onLoadEnd={() => {}}
-              fadeDuration={300}
+              showLoadingIndicator={true}
             />
           )}
           <TouchableOpacity 

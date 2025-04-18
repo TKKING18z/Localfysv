@@ -13,12 +13,14 @@ import { OrderProvider } from './context/OrderContext';
 import { PointsProvider } from './context/PointsContext';
 import { OnboardingProvider } from './context/OnboardingContext';
 import { BusinessOnboardingProvider } from './context/BusinessOnboardingContext';
+import { NetworkProvider } from './context/NetworkContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from '../firebase.config';
 import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import Constants from 'expo-constants';
+import { initializeApp, finishInitialization } from './services/AppInitService';
 
 // Clave pública de Stripe en modo PRUEBA (sandbox)
 const STRIPE_PUBLISHABLE_KEY = 'pk_test_51RAPGb4eUIEuN4bhAQUTbCD3BaeC8rUOHz4ecJvZzqyiej8P7N8mCFeRpIvpJyWwltjo9L57YDZBjqjeLBvEkkt100FpoNKP3H';
@@ -37,60 +39,47 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* revert to default behavior if something goes wrong */
 });
 
+// Custom hydration logic for app state
+async function hydrateStore() {
+  // You can add state rehydration logic here
+  return true;
+}
+
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
 
-  // Restaurar estado desde almacenamiento local
-  const hydrateState = async () => {
-    try {
-      // Aquí puedes restaurar cualquier estado necesario desde AsyncStorage
-      await AsyncStorage.getItem('favorites');
-      
-      // Always enable the new business onboarding flow
-      // This will ensure all users get the new experience
-      await AsyncStorage.setItem('use_new_onboarding_flow', 'true');
-      
-      // Verificar si hay información de sesión de usuario
-      const userUid = await AsyncStorage.getItem('user_uid');
-      if (userUid) {
-        console.log('Found existing user session in AsyncStorage:', userUid);
-        
-        // Solo verificar Firestore si hay un usuario autenticado
-        try {
-          await firebase.firestore().collection('businesses').limit(1).get();
-          console.log('Firestore connection successful');
-        } catch (firestoreError) {
-          console.warn('Firestore connection check failed:', firestoreError);
-        }
-      } else {
-        console.log('No session found, skipping Firestore check');
-      }
-    } catch (error) {
-      console.error('Error durante la hidratación del estado:', error);
-    } finally {
-      setHasHydrated(true);
-    }
-  };
-
+  // Initialize app
   useEffect(() => {
-    // Simular carga y restauración de estado
-    const prepareApp = async () => {
-      await hydrateState();
-      
-      // Maintain loading screen for at least 1.5 seconds for better UX
-      const timer = setTimeout(() => {
-        setIsLoading(false);
-        // Hide the native splash screen after our loading is done
-        SplashScreen.hideAsync().catch(() => {
-          /* ignore if something goes wrong */
+    async function prepare() {
+      try {
+        // Initialize the app
+        await initializeApp({
+          prefetchImages: true,
+          processPendingUploads: true,
+          clearCache: true,
+          cacheExpirationDays: 7
         });
-      }, 1500);
-      
-      return () => clearTimeout(timer);
-    };
+        
+        // Hydrate store in parallel
+        const storeHydrated = await hydrateStore();
+        setHasHydrated(storeHydrated);
+        
+        // When everything is ready, mark loading as complete
+        setIsLoading(false);
+        
+        // Short delay to hide splash screen for smooth transition
+        setTimeout(async () => {
+          await finishInitialization();
+        }, 200);
+      } catch (e) {
+        console.warn('Error initializing app:', e);
+        setIsLoading(false);
+        await finishInitialization();
+      }
+    }
 
-    prepareApp();
+    prepare();
   }, []);
 
   // Show loading indicator while app is preparing
@@ -118,32 +107,34 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <StatusBar style="dark" />
-      <StoreProvider>
-        <AuthProvider>
-          <OnboardingProvider>
-            <BusinessOnboardingProvider>
-              <StripeProvider
-                publishableKey={STRIPE_PUBLISHABLE_KEY}
-                merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
-              >
-                <ThemeProvider>
-                  <LocationProvider>
-                    <BusinessProvider>
-                      <CartProvider>
-                        <OrderProvider>
-                          <PointsProvider>
-                            <AppNavigator />
-                          </PointsProvider>
-                        </OrderProvider>
-                      </CartProvider>
-                    </BusinessProvider>
-                  </LocationProvider>
-                </ThemeProvider>
-              </StripeProvider>
-            </BusinessOnboardingProvider>
-          </OnboardingProvider>
-        </AuthProvider>
-      </StoreProvider>
+      <NetworkProvider>
+        <StoreProvider>
+          <AuthProvider>
+            <OnboardingProvider>
+              <BusinessOnboardingProvider>
+                <StripeProvider
+                  publishableKey={STRIPE_PUBLISHABLE_KEY}
+                  merchantIdentifier="merchant.com.tu.app" // Solo necesario para Apple Pay
+                >
+                  <ThemeProvider>
+                    <LocationProvider>
+                      <BusinessProvider>
+                        <CartProvider>
+                          <OrderProvider>
+                            <PointsProvider>
+                              <AppNavigator />
+                            </PointsProvider>
+                          </OrderProvider>
+                        </CartProvider>
+                      </BusinessProvider>
+                    </LocationProvider>
+                  </ThemeProvider>
+                </StripeProvider>
+              </BusinessOnboardingProvider>
+            </OnboardingProvider>
+          </AuthProvider>
+        </StoreProvider>
+      </NetworkProvider>
     </SafeAreaProvider>
   );
 } 

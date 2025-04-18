@@ -1,4 +1,4 @@
-import React, { memo, useCallback, useState, useRef } from 'react';
+import React, { memo, useCallback, useState, useRef, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -14,6 +14,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 import { Message, MessageStatus, MessageType } from '../../../models/chatTypes';
 import { formatMessageTime, getNameInitial, getAvatarColor } from '../../../src/utils/chatUtils';
 import * as Haptics from 'expo-haptics';
+import FastImageView from '../common/FastImageView';
 
 interface ChatMessageProps {
   message: Message;
@@ -27,48 +28,6 @@ interface ChatMessageProps {
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const MAX_BUBBLE_WIDTH = SCREEN_WIDTH * 0.85;
 
-// Helper to determine if we need to show the avatar/name again
-const shouldShowSenderInfo = (current: Message, previous: Message | null | undefined): boolean => {
-  if (!previous) return true;
-  
-  // Show if different sender
-  if (previous.senderId !== current.senderId) return true;
-  
-  // Show if messages are more than 5 minutes apart
-  const currentTime = 
-    current.timestamp instanceof Date ? current.timestamp.getTime() :
-    typeof current.timestamp === 'string' ? new Date(current.timestamp).getTime() :
-    current.timestamp?.toDate ? current.timestamp.toDate().getTime() : 0;
-  
-  const previousTime = 
-    previous.timestamp instanceof Date ? previous.timestamp.getTime() :
-    typeof previous.timestamp === 'string' ? new Date(previous.timestamp).getTime() :
-    previous.timestamp?.toDate ? previous.timestamp.toDate().getTime() : 0;
-  
-  return Math.abs(currentTime - previousTime) > 5 * 60 * 1000; // 5 minutes
-};
-
-// Render left actions (reply button)
-const renderLeftActions = (message: Message, onReply?: (message: Message) => void) => {
-  return (
-    <TouchableOpacity
-      style={styles.replyAction}
-      onPress={() => {
-        if (onReply) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onReply(message);
-        }
-      }}
-    >
-      <View style={styles.replyActionContent}>
-        <MaterialIcons name="reply" size={24} color="#0A84FF" />
-        <Text style={styles.replyActionText}>Responder</Text>
-      </View>
-    </TouchableOpacity>
-  );
-};
-
-// Memoized message component for better performance
 const ChatMessage: React.FC<ChatMessageProps> = memo(({ 
   message, 
   isMine, 
@@ -79,28 +38,76 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(true);
-  const showSenderInfo = !isMine && shouldShowSenderInfo(message, previousMessage);
   const swipeableRef = useRef<Swipeable | null>(null);
   
   // Format the time from timestamp
-  const getFormattedTime = useCallback(() => {
+  const formattedTime = useMemo(() => {
     return formatMessageTime(message.timestamp);
   }, [message.timestamp]);
   
+  // Determine if we should show sender info
+  const showSenderInfo = useMemo(() => {
+    if (!previousMessage) return true;
+    if (previousMessage.senderId !== message.senderId) return true;
+    
+    // Parse timestamps safely
+    const prevTime = previousMessage.timestamp instanceof Date 
+      ? previousMessage.timestamp.getTime()
+      : previousMessage.timestamp && typeof previousMessage.timestamp.toDate === 'function'
+        ? previousMessage.timestamp.toDate().getTime()
+        : new Date(previousMessage.timestamp || 0).getTime();
+    
+    const currTime = message.timestamp instanceof Date 
+      ? message.timestamp.getTime()
+      : message.timestamp && typeof message.timestamp.toDate === 'function'
+        ? message.timestamp.toDate().getTime()
+        : new Date(message.timestamp || 0).getTime();
+    
+    // Show sender info if messages are more than 5 minutes apart
+    return currTime - prevTime > 5 * 60 * 1000;
+  }, [previousMessage, message.senderId, message.timestamp]);
+  
+  // Apply showSenderInfo only for other people's messages
+  const shouldDisplaySenderInfo = !isMine && showSenderInfo;
+
   // Handle retry for failed messages
   const handleRetry = useCallback(() => {
-    if (onRetry && message.status === MessageStatus.ERROR) {
+    if (onRetry) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setIsLoading(true);
       onRetry(message.id);
     }
-  }, [message, onRetry]);
+  }, [message.id, onRetry]);
   
-  // Handle long press (could implement message actions here)
+  // Handle long press for message options
   const handleLongPress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    // Could implement message actions here (copy, delete, etc.)
-  }, []);
+    
+    // Only allow reply for messages that aren't failed
+    if (message.status !== 'error' && onReply) {
+      onReply(message);
+    }
+  }, [message, onReply]);
+  
+  // Render left actions (reply button)
+  const renderLeftActions = useCallback(() => {
+    if (!onReply) return null;
+    
+    return (
+      <TouchableOpacity
+        style={styles.replyAction}
+        onPress={() => {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          onReply(message);
+        }}
+      >
+        <View style={styles.replyActionContent}>
+          <MaterialIcons name="reply" size={24} color="#0A84FF" />
+          <Text style={styles.replyActionText}>Responder</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  }, [message, onReply]);
   
   // If it's a system message
   if (message.type === MessageType.SYSTEM) {
@@ -115,15 +122,15 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
   const isReply = !!message.replyTo;
   
   // Render the message content bubble
-  const renderMessageContent = () => (
+  const renderMessageContent = useCallback(() => (
     <View style={[
       styles.container,
       isMine ? styles.myMessageContainer : styles.otherMessageContainer
     ]}>
       {/* Avatar only for other people's messages when needed */}
-      {!isMine && showSenderInfo ? (
+      {!isMine && shouldDisplaySenderInfo ? (
         message.senderPhoto ? (
-          <Image 
+          <FastImageView 
             source={{ uri: message.senderPhoto }} 
             style={styles.avatar}
             defaultSource={require('../../../assets/Iconprofile.png')}
@@ -198,7 +205,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
         )}
         
         {/* Sender name for others' messages when needed */}
-        {!isMine && showSenderInfo && message.senderName && (
+        {!isMine && shouldDisplaySenderInfo && message.senderName && (
           <Text style={styles.senderName}>{message.senderName}</Text>
         )}
         
@@ -221,13 +228,13 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
                     />
                   </View>
                 )}
-                <Image 
+                <FastImageView 
                   source={{ uri: message.imageUrl }} 
                   style={[styles.messageImage, { backgroundColor: 'transparent' }]}
                   resizeMode="cover"
                   onLoadStart={() => setImageLoading(true)}
-                  onLoad={() => setImageLoading(false)}
-                  onError={() => setImageLoading(false)}
+                  onLoadEnd={() => setImageLoading(false)}
+                  showLoadingIndicator={true}
                 />
               </View>
             </TouchableOpacity>
@@ -248,9 +255,9 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
           <Text style={[
             styles.timeText,
             isMine ? styles.myTimeText : styles.otherTimeText
-          ]}>{getFormattedTime()}</Text>
+          ]}>{formattedTime}</Text>
           
-          {isMine && message.status !== MessageStatus.ERROR && (
+          {isMine && message.status !== 'error' && (
             <MaterialIcons 
               name={message.read ? "done-all" : "done"} 
               size={14} 
@@ -259,7 +266,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
             />
           )}
           
-          {isMine && message.status === MessageStatus.SENDING && (
+          {isMine && message.status === 'sending' && (
             <ActivityIndicator 
               size="small" 
               color="#8E8E93" 
@@ -270,7 +277,7 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
       </Pressable>
       
       {/* Error and retry option */}
-      {isMine && message.status === MessageStatus.ERROR && (
+      {isMine && message.status === 'error' && (
         <TouchableOpacity 
           style={styles.retryButton}
           onPress={handleRetry}
@@ -284,13 +291,13 @@ const ChatMessage: React.FC<ChatMessageProps> = memo(({
         </TouchableOpacity>
       )}
     </View>
-  );
+  ), [message, isMine, shouldDisplaySenderInfo, handleLongPress, handleRetry, isLoading, imageLoading, isReply, formattedTime, onImagePress]);
 
   // Use Swipeable to enable reply functionality
   return (
     <Swipeable
       ref={swipeableRef}
-      renderLeftActions={() => onReply ? renderLeftActions(message, onReply) : null}
+      renderLeftActions={renderLeftActions}
       friction={2}
       leftThreshold={40}
       onSwipeableOpen={() => {

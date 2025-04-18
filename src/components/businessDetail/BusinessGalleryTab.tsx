@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, Dimensions } from 'react-native';
+import { View, Text, StyleSheet, FlatList, Dimensions } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import EnhancedGallery from '../EnhancedGallery';
+import { SafeImageView } from '../../screens/BusinessDetailScreen';
 import { BusinessImage } from '../../types/businessTypes';
 
 const { height } = Dimensions.get('window');
@@ -11,12 +11,43 @@ interface BusinessGalleryTabProps {
 }
 
 const BusinessGalleryTab: React.FC<BusinessGalleryTabProps> = ({ images }) => {
+  const renderGalleryItem = ({ item, index }: { item: any; index: number }) => {
+    return (
+      <View style={styles.galleryItem}>
+        <SafeImageView
+          source={{ uri: item.url }}
+          style={styles.galleryImage}
+          resizeMode="cover"
+          showLoadingIndicator={true}
+          placeholderColor="#E1E1E1"
+        />
+        {item.isMain && (
+          <View style={styles.mainImageTag}>
+            <MaterialIcons name="star" size={14} color="white" />
+            <Text style={styles.mainImageTagText}>Principal</Text>
+          </View>
+        )}
+      </View>
+    );
+  };
+
+  // Función segura para generar keys únicas
+  const keyExtractor = (item: any, index: number) => {
+    return item.id ? item.id.toString() : `image-${index}`;
+  };
+
   return (
     <View style={styles.container}>
       {images && images.length > 0 ? (
         <View style={styles.galleryCard}>
           <Text style={styles.cardSectionTitle}>Galería de imágenes</Text>
-          <EnhancedGallery images={images} />
+          <FlatList
+            data={images}
+            renderItem={renderGalleryItem}
+            keyExtractor={keyExtractor}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+          />
         </View>
       ) : (
         <View style={styles.emptyCard}>
@@ -70,6 +101,29 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginTop: 12,
     textAlign: 'center',
+  },
+  galleryItem: {
+    width: 100,
+    height: 100,
+    marginRight: 8,
+  },
+  galleryImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  mainImageTag: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.8)',
+    padding: 4,
+    borderRadius: 4,
+  },
+  mainImageTagText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
   },
 });
 

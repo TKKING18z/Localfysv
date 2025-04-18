@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -28,6 +28,7 @@ import { userService } from '../services/authService';
 import { CommonActions } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import FastImageView from '../components/common/FastImageView';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -46,6 +47,7 @@ const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
   const { getFavoriteBusinesses } = useBusinesses();
   const { logout } = useAuth();
+  const isMountedRef = useRef(true);
   
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -201,23 +203,23 @@ const ProfileScreen: React.FC = () => {
       // 2. Usar el método logout del contexto de autenticación
       await logout();
       
-      // 3. Esperar un poco para asegurar que el estado se actualice completamente
-      setTimeout(() => {
-        // 4. Usar resetación completa de la navegación para ir a Auth/Login
-        navigation.dispatch(
-          CommonActions.reset({
-            index: 0,
-            routes: [
-              { name: 'Auth' }
-            ],
-          })
-        );
-        setLoading(false);
-      }, 500);
+      // 3. Navigate immediately without setTimeout to avoid state updates after unmount
+      navigation.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [
+            { name: 'Auth' }
+          ],
+        })
+      );
+      // No need to call setLoading(false) as component will unmount
     } catch (error) {
       console.error('Error logging out:', error);
       Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
-      setLoading(false);
+      // Only update state if component is still mounted
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
 
@@ -312,6 +314,13 @@ const ProfileScreen: React.FC = () => {
     }
   }, []);
 
+  // Add useEffect for cleanup when component unmounts
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -350,10 +359,19 @@ const ProfileScreen: React.FC = () => {
         <View style={styles.profileHeader}>
           <View style={styles.avatarContainer}>
             {profile?.photoURL ? (
-              <Image 
-                source={{ uri: profile.photoURL }}
-                style={styles.avatar} 
-              />
+              <React.Suspense fallback={
+                <View style={[styles.avatar, styles.defaultAvatar]}>
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                </View>
+              }>
+                <FastImageView 
+                  source={{ uri: profile.photoURL }}
+                  style={styles.avatar} 
+                  showLoadingIndicator={true}
+                  defaultSource={require('../../assets/images/default-profile.png')}
+                  onError={() => console.log('Error loading profile image')}
+                />
+              </React.Suspense>
             ) : (
               <View style={[styles.avatar, styles.defaultAvatar]}>
                 <MaterialIcons name="person" size={50} color="#FFFFFF" />

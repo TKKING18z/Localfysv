@@ -1019,6 +1019,99 @@ export const firebaseService = {
       }
     },
     
+    create: async (reviewData: any): Promise<FirebaseResponse<{ id: string }>> => {
+      try {
+        console.log('FirebaseService: Creating review', reviewData);
+        
+        // Remove any undefined values from the reviewData
+        const sanitizedData = Object.entries(reviewData).reduce((acc, [key, value]) => {
+          if (value !== undefined) {
+            acc[key] = value;
+          }
+          return acc;
+        }, {} as Record<string, any>);
+        
+        // Now add the sanitized data to Firestore
+        const reviewRef = await firebase.firestore().collection('reviews').add({
+          ...sanitizedData,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+          moderationStatus: 'approved', // Default status
+        });
+        
+        console.log('FirebaseService: Review created with ID:', reviewRef.id);
+        return { success: true, data: { id: reviewRef.id } };
+      } catch (error) {
+        console.error('Error creating review:', error);
+        return { success: false, error: { message: 'Failed to create review' } };
+      }
+    },
+    
+    // Add method to upload review images
+    uploadReviewImages: async (reviewId: string, imageUris: string[]): Promise<FirebaseResponse<string[]>> => {
+      try {
+        console.log('Uploading review images for review ID:', reviewId);
+        
+        if (!imageUris || imageUris.length === 0) {
+          return { success: true, data: [] };
+        }
+        
+        const uploadedImageUrls: string[] = [];
+        const imageUpdates: { url: string; thumbnailUrl: string }[] = [];
+        
+        // Upload each image
+        for (let i = 0; i < imageUris.length; i++) {
+          try {
+            const uri = imageUris[i];
+            console.log(`Uploading image ${i+1}/${imageUris.length}`, uri.substring(0, 50) + '...');
+            
+            // Create unique path for the image
+            const timestamp = Date.now();
+            const random = Math.floor(Math.random() * 10000);
+            const path = `reviews/${reviewId}/images/${timestamp}_${random}.jpg`;
+            
+            // Upload the image to Firebase Storage
+            const uploadResult = await firebaseService.storage.uploadImage(uri, path);
+            
+            if (uploadResult.success && uploadResult.data) {
+              const imageUrl = uploadResult.data;
+              uploadedImageUrls.push(imageUrl);
+              
+              // Create image metadata
+              imageUpdates.push({
+                url: imageUrl,
+                thumbnailUrl: imageUrl, // Use the same URL for thumbnail
+              });
+              
+              console.log(`Image ${i+1} uploaded successfully`);
+            } else {
+              console.error(`Failed to upload image ${i+1}:`, uploadResult.error);
+            }
+          } catch (imageError) {
+            console.error(`Error processing image ${i+1}:`, imageError);
+          }
+        }
+        
+        // Update the review document with the uploaded images
+        if (imageUpdates.length > 0) {
+          try {
+            await firebase.firestore().collection('reviews').doc(reviewId).update({
+              images: imageUpdates,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            });
+            console.log('Review document updated with image URLs');
+          } catch (updateError) {
+            console.error('Error updating review with images:', updateError);
+          }
+        }
+        
+        return { success: true, data: uploadedImageUrls };
+      } catch (error) {
+        console.error('Error in uploadReviewImages:', error);
+        return { success: false, error: { message: 'Failed to upload review images' } };
+      }
+    },
+    
     delete: async (reviewId: string): Promise<FirebaseResponse<void>> => {
       try {
         await firebase.firestore().collection('reviews').doc(reviewId).delete();
@@ -1029,7 +1122,28 @@ export const firebaseService = {
       }
     },
     
-    // Add other review-related methods as needed
+    // Add method to update a review
+    update: async (reviewId: string, updates: any): Promise<FirebaseResponse<null>> => {
+      try {
+        // Clean the update data
+        const sanitizedData = Object.entries(updates).reduce((acc, [key, value]) => {
+          if (value !== undefined) {
+            acc[key] = value;
+          }
+          return acc;
+        }, {} as Record<string, any>);
+        
+        await firebase.firestore().collection('reviews').doc(reviewId).update({
+          ...sanitizedData,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+        
+        return { success: true };
+      } catch (error) {
+        console.error('Error updating review:', error);
+        return { success: false, error: { message: 'Failed to update review' } };
+      }
+    }
   },
   
   // Método para obtener el servicio de chat bajo demanda
