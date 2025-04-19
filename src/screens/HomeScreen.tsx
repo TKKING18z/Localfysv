@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,8 @@ import {
   Modal,
   ScrollView,
   Switch,
-  Platform
+  Platform,
+  InteractionManager
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -26,9 +27,18 @@ import BusinessCard from '../components/BusinessCard';
 import SkeletonBusinessCard from '../components/SkeletonBusinessCard';
 import { useLocation } from '../hooks/useLocation';
 import BasicAdInterstitial from '../components/ads/BasicAdInterstitial';
+import { useNetwork } from '../context/NetworkContext';
+import OfflineBanner from '../components/common/OfflineBanner';
+import { FlashList } from '@shopify/flash-list';
 
-// Definir el tipo de navegación usando directamente RootStackParamList
+// Define navigation type using RootStackParamList directly
 type NavigationProps = StackNavigationProp<RootStackParamList>;
+
+// Constants to improve performance
+const MAX_ITEMS_SLOW_CONNECTION = 8;
+const MAX_ITEMS_NORMAL = 20;
+const LOCATION_REFRESH_INTERVAL = 60000; // 1 minute
+const DEBOUNCE_SEARCH_DELAY = 300; // ms
 
 const HomeScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -41,14 +51,23 @@ const HomeScreen: React.FC = () => {
     setSelectedCategory,
     refreshBusinesses,
     toggleFavorite,
-    isFavorite
+    isFavorite,
+    loadMoreBusinesses,
+    hasMoreBusinesses,
+    resetPagination,
+    observeBusinesses,
+    dataReady
   } = useBusinesses();
+  
+  // Add NetworkContext to adapt UI based on connection quality
+  const { isSlowConnection, isConnected } = useNetwork();
   
   // Add ChatContext to get unread messages count
   const { unreadTotal, refreshConversations } = useChat();
   
   const { userLocation, refreshLocation, getFormattedDistance } = useLocation();
 
+  // State variables
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Business[]>([]);
@@ -56,7 +75,7 @@ const HomeScreen: React.FC = () => {
   const [displayedBusinesses, setDisplayedBusinesses] = useState<Business[]>([]);
   const [sortByDistance, setSortByDistance] = useState(false);
   
-  // Nuevos estados para los filtros
+  // Filter states
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [filterByOpenNow, setFilterByOpenNow] = useState(false);
   const [filterByRating, setFilterByRating] = useState(false);
@@ -70,89 +89,183 @@ const HomeScreen: React.FC = () => {
   });
   const [activeFiltersCount, setActiveFiltersCount] = useState(0);
 
-  // Añadir una referencia para rastrear si estamos actualizando
+  // Refs for performance optimization
   const isRefreshingRef = useRef(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastLocationRefreshRef = useRef(Date.now());
+  
+  // Memoize the maximum number of items to display based on connection speed
+  const maxItemsToDisplay = useMemo(() => {
+    // En iOS limitar aún más para garantizar que las imágenes carguen correctamente
+    if (Platform.OS === 'ios') {
+      return isSlowConnection ? 6 : 12;
+    }
+    return isSlowConnection ? MAX_ITEMS_SLOW_CONNECTION : MAX_ITEMS_NORMAL;
+  }, [isSlowConnection]);
 
-  // Update displayed businesses with all filters applied
-  useEffect(() => {
-    let currentBusinesses = showSearch ? searchResults : filteredBusinesses;
-    
-    // Filter by open now if selected
-    if (filterByOpenNow) {
-      currentBusinesses = currentBusinesses.filter(business => {
-        // Assuming business has businessHours property with day of week keys
-        // This is a simplified implementation - you may need to adapt to your data structure
-        if (!business.businessHours) return false;
-        
-        const now = new Date();
-        const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
-        const currentHour = now.getHours();
-        const currentMinutes = now.getMinutes();
-        const currentTime = currentHour * 60 + currentMinutes; // convert to minutes
-        
-        // Safely access business hours
-        const dayHours = business.businessHours[dayOfWeek];
-        if (!dayHours || dayHours.closed) return false;
-        
-        // Parse open and close times (assuming format like "9:00" or "21:30")
-        const openTimeParts = dayHours.open?.split(':').map(Number) || [0, 0];
-        const closeTimeParts = dayHours.close?.split(':').map(Number) || [0, 0];
-        
-        const openTimeMinutes = openTimeParts[0] * 60 + (openTimeParts[1] || 0);
-        const closeTimeMinutes = closeTimeParts[0] * 60 + (closeTimeParts[1] || 0);
-        
-        return currentTime >= openTimeMinutes && currentTime <= closeTimeMinutes;
-      });
+  // Añadir estado para controlar negocios visibles 
+  const [visibleBusinessIds, setVisibleBusinessIds] = useState<string[]>([]);
+  
+  // Ref para tracking de llamadas de paginación
+  const isLoadingMoreRef = useRef(false);
+
+  // Calculate distance between user and business in km (optimized)
+  const getDistanceToBusinessInKm = useCallback((business: Business): number | undefined => {
+    if (!userLocation || !business.location) {
+      return undefined;
     }
     
-    // Filter by maximum distance if set
-    if (maxDistance !== null && userLocation) {
-      currentBusinesses = currentBusinesses.filter(business => {
-        const distance = getDistanceToBusinessInKm(business);
-        return distance !== undefined && distance <= maxDistance;
-      });
-    }
-    
-    // Filter by minimum rating if set
-    if (selectedRating !== null) {
-      currentBusinesses = currentBusinesses.filter(business => {
-        // Assuming business has rating property
-        return business.rating && business.rating >= selectedRating;
-      });
-    }
-    
-    // Sort businesses based on selected sort method
-    if (sortByDistance && userLocation) {
-      currentBusinesses = [...currentBusinesses].sort((a, b) => {
-        const distanceA = getDistanceToBusinessInKm(a);
-        const distanceB = getDistanceToBusinessInKm(b);
+    let businessLocation;
+    try {
+      businessLocation = typeof business.location === 'string' 
+        ? JSON.parse(business.location)
+        : business.location;
         
-        if (distanceA === undefined) return 1;
-        if (distanceB === undefined) return -1;
-        
-        return distanceA - distanceB;
-      });
+      if (!businessLocation.latitude || !businessLocation.longitude) {
+        return undefined;
+      }
+      
+      // Calculate distance using the Haversine formula
+      const R = 6371; // Radius of the earth in km
+      const dLat = deg2rad(businessLocation.latitude - userLocation.latitude);
+      const dLon = deg2rad(businessLocation.longitude - userLocation.longitude);
+      const a = 
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(deg2rad(userLocation.latitude)) * Math.cos(deg2rad(businessLocation.latitude)) * 
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    } catch (error) {
+      return undefined;
+    }
+  }, [userLocation]);
+  
+  // Helper function to convert degrees to radians
+  const deg2rad = (deg: number) => {
+    return deg * (Math.PI/180);
+  };
+
+  // Versión mejorada y optimizada de handleSearch
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    
+    // Clear any existing timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
     }
     
-    if (filterByRating) {
-      currentBusinesses = [...currentBusinesses].sort((a, b) => {
-        const ratingA = a.rating || 0;
-        const ratingB = b.rating || 0;
-        return ratingB - ratingA; // Sort by descending rating
-      });
+    if (query.trim() === '') {
+      setShowSearch(false);
+      setSearchResults([]);
+      return;
     }
 
-    setDisplayedBusinesses(currentBusinesses);
-    
-    // Count active filters
-    let count = 0;
-    if (filterByOpenNow) count++;
-    if (maxDistance !== null) count++;
-    if (selectedRating !== null) count++;
-    if (sortByDistance || filterByRating) count++;
-    if (selectedCategory) count++;
-    setActiveFiltersCount(count);
-    
+    // Debounce search for better performance
+    searchTimeoutRef.current = setTimeout(() => {
+      setShowSearch(true);
+      
+      // Mover la búsqueda a un worker en segundo plano
+      const workerSearch = () => {
+        return new Promise<Business[]>(resolve => {
+          // Usar setTimeout para sacar la operación del hilo principal
+          setTimeout(() => {
+            // Use a more efficient search with lower-cased strings
+            const lowerQuery = query.toLowerCase();
+            const filtered = businesses.filter(
+              business => 
+                business.name.toLowerCase().includes(lowerQuery) ||
+                (business.category && business.category.toLowerCase().includes(lowerQuery))
+            );
+            
+            // Limit results based on connection quality
+            resolve(filtered.slice(0, maxItemsToDisplay));
+          }, 0);
+        });
+      };
+      
+      // Ejecutar búsqueda en segundo plano
+      workerSearch().then(results => {
+        setSearchResults(results);
+      });
+    }, DEBOUNCE_SEARCH_DELAY);
+  }, [businesses, maxItemsToDisplay]);
+
+  // Mover operaciones de filtrado fuera del hilo principal
+  const applyFiltersAsync = useCallback(async () => {
+    return new Promise<Business[]>(resolve => {
+      // Defer heavy filtering to a background task
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          let currentBusinesses = showSearch ? searchResults : filteredBusinesses;
+          
+          // Apply filters conditionally for better performance on slow devices
+          // Filter by open now
+          if (filterByOpenNow) {
+            currentBusinesses = currentBusinesses.filter(business => {
+              if (!business.businessHours) return false;
+              
+              const now = new Date();
+              const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
+              const currentHour = now.getHours();
+              const currentMinutes = now.getMinutes();
+              const currentTime = currentHour * 60 + currentMinutes;
+              
+              const dayHours = business.businessHours[dayOfWeek];
+              if (!dayHours || dayHours.closed) return false;
+              
+              try {
+                const openTimeParts = dayHours.open?.split(':').map(Number) || [0, 0];
+                const closeTimeParts = dayHours.close?.split(':').map(Number) || [0, 0];
+                
+                const openTimeMinutes = openTimeParts[0] * 60 + (openTimeParts[1] || 0);
+                const closeTimeMinutes = closeTimeParts[0] * 60 + (closeTimeParts[1] || 0);
+                
+                return currentTime >= openTimeMinutes && currentTime <= closeTimeMinutes;
+              } catch (error) {
+                return false;
+              }
+            });
+          }
+          
+          // Filter by maximum distance
+          if (maxDistance !== null && userLocation) {
+            currentBusinesses = currentBusinesses.filter(business => {
+              const distance = getDistanceToBusinessInKm(business);
+              return distance !== undefined && distance <= maxDistance;
+            });
+          }
+          
+          // Filter by minimum rating
+          if (selectedRating !== null) {
+            currentBusinesses = currentBusinesses.filter(business => {
+              return business.rating && business.rating >= selectedRating;
+            });
+          }
+          
+          // Optimize sort performance for slow devices
+          if (sortByDistance && userLocation) {
+            // Pre-calculate distances for sorting to avoid repetitive calculations
+            const businessesWithDistances = currentBusinesses.map(business => {
+              const distance = getDistanceToBusinessInKm(business) || Infinity;
+              return { business, distance };
+            });
+            
+            businessesWithDistances.sort((a, b) => a.distance - b.distance);
+            currentBusinesses = businessesWithDistances.map(item => item.business);
+          } else if (filterByRating) {
+            currentBusinesses = [...currentBusinesses].sort((a, b) => {
+              const ratingA = a.rating || 0;
+              const ratingB = b.rating || 0;
+              return ratingB - ratingA;
+            });
+          }
+          
+          // Limit displayed items for slow connections/devices
+          const limitedBusinesses = currentBusinesses.slice(0, maxItemsToDisplay);
+          resolve(limitedBusinesses);
+        }, 0);
+      });
+    });
   }, [
     showSearch, 
     searchResults, 
@@ -162,11 +275,106 @@ const HomeScreen: React.FC = () => {
     filterByOpenNow, 
     maxDistance, 
     selectedRating,
-    filterByRating
+    filterByRating,
+    maxItemsToDisplay,
+    getDistanceToBusinessInKm
   ]);
 
+  // Actualizar el efecto para usar applyFiltersAsync
+  useEffect(() => {
+    let isMounted = true;
+    
+    applyFiltersAsync().then(filteredResults => {
+      if (isMounted) {
+        setDisplayedBusinesses(filteredResults);
+        
+        // Count active filters
+        let count = 0;
+        if (filterByOpenNow) count++;
+        if (maxDistance !== null) count++;
+        if (selectedRating !== null) count++;
+        if (sortByDistance || filterByRating) count++;
+        if (selectedCategory) count++;
+        setActiveFiltersCount(count);
+      }
+    });
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    showSearch, 
+    searchResults, 
+    filteredBusinesses, 
+    sortByDistance, 
+    userLocation, 
+    filterByOpenNow, 
+    maxDistance, 
+    selectedRating,
+    filterByRating,
+    maxItemsToDisplay,
+    applyFiltersAsync
+  ]);
+  
+  // Función para manejar cambios en elementos visibles
+  const onViewableItemsChanged = useCallback(({viewableItems}: {
+    viewableItems: Array<{
+      item: Business;
+      isViewable: boolean;
+      key: string;
+      index: number | null;
+    }>;
+  }) => {
+    const visibleIds = viewableItems
+      .filter(item => item.isViewable)
+      .map(item => item.item.id);
+    
+    if (visibleIds.length > 0) {
+      setVisibleBusinessIds(visibleIds);
+    }
+  }, []);
+  
+  // Configuración de viewability
+  const viewabilityConfig = useMemo(() => ({
+    itemVisiblePercentThreshold: 50
+  }), []);
+  
+  // Ref para el viewability tracking
+  const viewabilityConfigCallbackPairs = useRef([
+    { viewabilityConfig, onViewableItemsChanged }
+  ]);
+  
+  // Observar solo negocios visibles (optimización para Firebase listeners)
+  useEffect(() => {
+    // Solo observar cuando hay IDs y estamos en pantalla visible
+    if (visibleBusinessIds.length > 0) {
+      const unsubscribe = observeBusinesses(visibleBusinessIds);
+      return unsubscribe;
+    }
+  }, [visibleBusinessIds, observeBusinesses]);
+  
+  // Función para cargar más negocios
+  const onEndReached = useCallback(() => {
+    if (isLoadingMoreRef.current || refreshing || !hasMoreBusinesses || showSearch) {
+      return;
+    }
+    
+    isLoadingMoreRef.current = true;
+    
+    // Añadir intervalo para evitar múltiples llamadas
+    setTimeout(async () => {
+      try {
+        await loadMoreBusinesses();
+      } catch (error) {
+        console.error('Error loading more businesses:', error);
+      } finally {
+        isLoadingMoreRef.current = false;
+      }
+    }, 400);
+  }, [refreshing, hasMoreBusinesses, loadMoreBusinesses, showSearch]);
+
   // Apply selected filters
-  const applyFilters = () => {
+  const applyFilters = useCallback(() => {
     setFilterByOpenNow(tempFilters.openNow);
     setSelectedRating(tempFilters.rating);
     setMaxDistance(tempFilters.maxDistance);
@@ -183,20 +391,20 @@ const HomeScreen: React.FC = () => {
     }
     
     setShowFilterModal(false);
-  };
+  }, [tempFilters]);
 
   // Reset all filters
-  const resetFilters = () => {
+  const resetFilters = useCallback(() => {
     setTempFilters({
       openNow: false,
       rating: null,
       maxDistance: null,
       sortBy: 'default'
     });
-  };
+  }, []);
 
   // Initialize temp filters when opening modal
-  const openFilterModal = () => {
+  const openFilterModal = useCallback(() => {
     setTempFilters({
       openNow: filterByOpenNow,
       rating: selectedRating,
@@ -204,7 +412,7 @@ const HomeScreen: React.FC = () => {
       sortBy: sortByDistance ? 'distance' : filterByRating ? 'rating' : 'default'
     });
     setShowFilterModal(true);
-  };
+  }, [filterByOpenNow, selectedRating, maxDistance, sortByDistance, filterByRating]);
 
   // Render distance filter options
   const renderDistanceOptions = () => {
@@ -267,97 +475,87 @@ const HomeScreen: React.FC = () => {
     );
   };
 
-  // Calculate distance between user and business in km (for sorting)
-  const getDistanceToBusinessInKm = useCallback((business: Business): number | undefined => {
-    if (!userLocation || !business.location) {
-      return undefined;
-    }
+  // Optimize the refresh handler to respect network conditions
+  const onRefresh = useCallback(async () => {
+    if (isRefreshingRef.current) return;
     
-    // Handle location whether it's an object or needs to be parsed
-    let businessLocation;
+    setRefreshing(true);
+    isRefreshingRef.current = true;
+    
     try {
-      businessLocation = typeof business.location === 'string' 
-        ? JSON.parse(business.location)
-        : business.location;
-        
-      if (!businessLocation.latitude || !businessLocation.longitude) {
-        return undefined;
+      // Reset pagination first
+      resetPagination();
+      
+      // Only refresh location if enough time has passed or we have none
+      const now = Date.now();
+      const shouldRefreshLocation = 
+        !userLocation || 
+        (now - lastLocationRefreshRef.current > LOCATION_REFRESH_INTERVAL);
+      
+      const tasks = [refreshBusinesses()];
+      
+      if (shouldRefreshLocation) {
+        tasks.push(refreshLocation());
+        lastLocationRefreshRef.current = now;
       }
       
-      // Calculate distance using the Haversine formula (rough approximation)
-      const R = 6371; // Radius of the earth in km
-      const dLat = deg2rad(businessLocation.latitude - userLocation.latitude);
-      const dLon = deg2rad(businessLocation.longitude - userLocation.longitude);
-      const a = 
-        Math.sin(dLat/2) * Math.sin(dLat/2) +
-        Math.cos(deg2rad(userLocation.latitude)) * Math.cos(deg2rad(businessLocation.latitude)) * 
-        Math.sin(dLon/2) * Math.sin(dLon/2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-      return R * c;
+      // Use Promise.all for parallel execution
+      await Promise.all(tasks);
+      
+      // Only refresh conversations when connected
+      if (isConnected) {
+        await refreshConversations();
+      }
     } catch (error) {
-      return undefined;
+      console.error('Error refreshing data:', error);
+    } finally {
+      setRefreshing(false);
+      
+      // Allow future refreshes after a delay
+      setTimeout(() => {
+        isRefreshingRef.current = false;
+      }, 500);
     }
-  }, [userLocation]);
-  
-  // Helper function to convert degrees to radians
-  const deg2rad = (deg: number) => {
-    return deg * (Math.PI/180);
-  };
+  }, [refreshBusinesses, refreshLocation, refreshConversations, userLocation, isConnected, resetPagination]);
 
-  // Handle search
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    
-    if (query.trim() === '') {
-      setShowSearch(false);
-      return;
-    }
-
-    setShowSearch(true);
-    const filtered = businesses.filter(
-      business => business.name.toLowerCase().includes(query.toLowerCase()) ||
-                 business.category.toLowerCase().includes(query.toLowerCase())
-    );
-    setSearchResults(filtered);
-  };
-
-  // Handle refresh with location update
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await Promise.all([
-      refreshBusinesses(),
-      refreshLocation()
-    ]);
-    setRefreshing(false);
-  }, [refreshBusinesses, refreshLocation]);
-
-  // Toggle distance sorting
-  const toggleDistanceSort = () => {
+  // Toggle distance sorting with network condition check
+  const toggleDistanceSort = useCallback(() => {
     if (!userLocation && !sortByDistance) {
       Alert.alert(
         "Ubicación no disponible",
         "Para ordenar por distancia, necesitamos acceso a tu ubicación. Activa la ubicación en la configuración de tu dispositivo.",
-        [
-          { text: "OK" }
-        ]
+        [{ text: "OK" }]
       );
       return;
     }
-    setSortByDistance(!sortByDistance);
-  };
+    
+    // Limit sorting on slow connections
+    if (isSlowConnection && !sortByDistance) {
+      Alert.alert(
+        "Conexión lenta detectada",
+        "Ordenar por distancia puede ser lento en tu conexión actual. ¿Deseas continuar?",
+        [
+          { text: "Cancelar", style: "cancel" },
+          { text: "Continuar", onPress: () => setSortByDistance(true) }
+        ]
+      );
+    } else {
+      setSortByDistance(!sortByDistance);
+    }
+  }, [userLocation, sortByDistance, isSlowConnection]);
 
-  // Navigate to map view
-  const navigateToMapView = () => {
+  // Navigate to map view - memoized
+  const navigateToMapView = useCallback(() => {
     navigation.navigate('Map', { selectingDeliveryLocation: false });
-  };
+  }, [navigation]);
 
-  // Navigate to business detail
-  const navigateToBusinessDetail = (business: Business) => {
+  // Navigate to business detail - memoized
+  const navigateToBusinessDetail = useCallback((business: Business) => {
     navigation.navigate('BusinessDetail', { businessId: business.id });
-  };
+  }, [navigation]);
 
-  // Render category item
-  const renderCategoryItem = ({ item }: { item: string | null }) => (
+  // Render category item - memoized
+  const renderCategoryItem = useCallback(({ item }: { item: string | null }) => (
     <TouchableOpacity
       style={[
         styles.categoryItem,
@@ -374,9 +572,9 @@ const HomeScreen: React.FC = () => {
         {item === null ? 'Todos' : item}
       </Text>
     </TouchableOpacity>
-  );
+  ), [selectedCategory, setSelectedCategory]);
 
-  // Render business item
+  // Render business item with memoized callback
   const renderBusinessItem = useCallback(({ item }: { item: Business }) => {
     // Get distance if available
     const distance = getFormattedDistance(item);
@@ -389,22 +587,30 @@ const HomeScreen: React.FC = () => {
           onPress={() => navigateToBusinessDetail(item)}
           onFavoritePress={() => toggleFavorite(item.id)}
           distance={distance}
+          showOpenStatus={!isSlowConnection}
+          isVisible={true}
         />
       </View>
     );
-  }, [isFavorite, navigateToBusinessDetail, toggleFavorite, getFormattedDistance]);
+  }, [
+    isFavorite, 
+    navigateToBusinessDetail, 
+    toggleFavorite, 
+    getFormattedDistance,
+    isSlowConnection
+  ]);
 
-  // Render skeleton loaders
-  const renderSkeletons = () => (
+  // Render skeleton loaders - memoized to avoid recreating components
+  const renderSkeletons = useCallback(() => (
     <View style={styles.businessGrid}>
-      {Array.from({ length: 6 }).map((_, index) => (
+      {Array.from({ length: isSlowConnection ? 4 : 6 }).map((_, index) => (
         <SkeletonBusinessCard key={index} />
       ))}
     </View>
-  );
+  ), [isSlowConnection]);
 
-  // Render empty state
-  const renderEmptyState = () => (
+  // Render empty state - memoized
+  const renderEmptyState = useCallback(() => (
     <View style={styles.noResultsContainer}>
       {showSearch ? (
         <>
@@ -417,205 +623,109 @@ const HomeScreen: React.FC = () => {
         <>
           <MaterialIcons name="store-mall-directory" size={64} color="#C7C7CC" />
           <Text style={styles.noResultsText}>
-            No hay negocios disponibles en esta categoría
+            {isConnected 
+              ? "No hay negocios disponibles en esta categoría"
+              : "No se pueden cargar negocios sin conexión"}
           </Text>
         </>
       )}
     </View>
-  );
+  ), [showSearch, searchQuery, isConnected]);
 
-  // Reemplazar la useFocusEffect existente
+  // Update data when screen gains focus
   useFocusEffect(
     useCallback(() => {
-      // Evitar múltiples actualizaciones consecutivas
+      // Avoid multiple consecutive updates
       if (isRefreshingRef.current) return;
       
-      console.log('HomeScreen obtuvo el foco - actualizando datos');
+      console.log('HomeScreen gained focus - updating data');
       
-      // Marcar que estamos actualizando
+      // Mark that we're refreshing
       isRefreshingRef.current = true;
       
-      // Actualizar datos secuencialmente
-      const updateData = async () => {
+      // Use InteractionManager to defer non-UI work
+      InteractionManager.runAfterInteractions(async () => {
         try {
-          await refreshBusinesses();
-          await refreshConversations();
+          if (isConnected) {
+            await refreshBusinesses();
+            
+            // Only refresh conversations when connected and not on slow connection
+            if (!isSlowConnection) {
+              await refreshConversations();
+            }
+          }
         } catch (error) {
-          console.error('Error actualizando datos:', error);
+          console.error('Error updating data:', error);
         } finally {
-          // Permitir futuras actualizaciones después de un retraso
+          // Allow future updates after a delay
           setTimeout(() => {
             isRefreshingRef.current = false;
-          }, 1000); // Evitar actualizaciones por 1 segundo
+          }, 1000);
         }
-      };
-      
-      updateData();
+      });
       
       return () => {
-        // No es necesario limpiar nada aquí
+        // No cleanup needed
       };
-    }, [refreshBusinesses, refreshConversations])
+    }, [refreshBusinesses, refreshConversations, isConnected, isSlowConnection])
   );
 
-  // Render the filter modal
-  const renderFilterModal = () => {
+  // Memoize the FlatList key extractor for better performance
+  const keyExtractor = useCallback((item: Business) => item.id, []);
+  
+  // Optimize column wrapper style for FlatList
+  const columnWrapperStyle = useMemo(() => styles.businessRow, []);
+  
+  // Renderizar el componente de carga para la paginación
+  const renderFooter = useCallback(() => {
+    if (!hasMoreBusinesses) return null;
+    
     return (
-      <Modal
-        visible={showFilterModal}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setShowFilterModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Filtros de búsqueda</Text>
-              <TouchableOpacity
-                style={styles.closeButton}
-                onPress={() => setShowFilterModal(false)}
-              >
-                <MaterialIcons name="close" size={24} color="#333333" />
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView style={styles.modalBody}>
-              {/* Filter by category */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Categorías</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                  <View style={styles.categoriesWrapper}>
-                    {['Todos', ...categories].map((cat, index) => (
-                      <TouchableOpacity
-                        key={`category-${index}`}
-                        style={[
-                          styles.categoryItem,
-                          (index === 0 && !selectedCategory) || selectedCategory === (index === 0 ? null : cat) 
-                            ? styles.categoryItemActive 
-                            : {}
-                        ]}
-                        onPress={() => setSelectedCategory(index === 0 ? null : cat)}
-                      >
-                        <Text 
-                          style={[
-                            styles.categoryText,
-                            (index === 0 && !selectedCategory) || selectedCategory === (index === 0 ? null : cat) 
-                              ? styles.categoryTextActive 
-                              : {}
-                          ]}
-                        >
-                          {cat}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </ScrollView>
-              </View>
-              
-              {/* Filter by distance */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Distancia máxima</Text>
-                {renderDistanceOptions()}
-              </View>
-              
-              {/* Filter by rating */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Calificación mínima</Text>
-                {renderRatingOptions()}
-              </View>
-              
-              {/* Filter by open now */}
-              <View style={styles.filterSection}>
-                <View style={styles.filterToggleRow}>
-                  <Text style={styles.filterSectionTitle}>Abierto ahora</Text>
-                  <Switch 
-                    value={tempFilters.openNow}
-                    onValueChange={(value) => setTempFilters({...tempFilters, openNow: value})}
-                    trackColor={{ false: '#E0E0E0', true: '#007AFF' }}
-                    thumbColor={'#FFFFFF'}
-                  />
-                </View>
-              </View>
-              
-              {/* Sort options */}
-              <View style={styles.filterSection}>
-                <Text style={styles.filterSectionTitle}>Ordenar por</Text>
-                <View style={styles.filterOptionsRow}>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterChip,
-                      tempFilters.sortBy === 'default' && styles.filterChipActive
-                    ]}
-                    onPress={() => setTempFilters({...tempFilters, sortBy: 'default'})}
-                  >
-                    <Text 
-                      style={[
-                        styles.filterChipText,
-                        tempFilters.sortBy === 'default' && styles.filterChipTextActive
-                      ]}
-                    >
-                      Relevancia
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterChip,
-                      tempFilters.sortBy === 'distance' && styles.filterChipActive
-                    ]}
-                    onPress={() => setTempFilters({...tempFilters, sortBy: 'distance'})}
-                  >
-                    <Text 
-                      style={[
-                        styles.filterChipText,
-                        tempFilters.sortBy === 'distance' && styles.filterChipTextActive
-                      ]}
-                    >
-                      Distancia
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.filterChip,
-                      tempFilters.sortBy === 'rating' && styles.filterChipActive
-                    ]}
-                    onPress={() => setTempFilters({...tempFilters, sortBy: 'rating'})}
-                  >
-                    <Text 
-                      style={[
-                        styles.filterChipText,
-                        tempFilters.sortBy === 'rating' && styles.filterChipTextActive
-                      ]}
-                    >
-                      Calificación
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </ScrollView>
-            
-            <View style={styles.modalFooter}>
-              <TouchableOpacity 
-                style={styles.resetButton}
-                onPress={resetFilters}
-              >
-                <Text style={styles.resetButtonText}>Restablecer</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.applyButton}
-                onPress={applyFilters}
-              >
-                <Text style={styles.applyButtonText}>Aplicar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <View style={styles.loadingMore}>
+        <SkeletonBusinessCard />
+        <SkeletonBusinessCard />
+      </View>
     );
-  };
+  }, [hasMoreBusinesses]);
+  
+  // Crear optimized props para FlashList (reemplazando FlatList)
+  const flashListProps = useMemo(() => ({
+    data: displayedBusinesses,
+    renderItem: renderBusinessItem,
+    keyExtractor: (item: Business) => item.id,
+    numColumns: 2,
+    estimatedItemSize: 200, // Altura estimada de cada elemento para FlashList
+    onEndReached: onEndReached,
+    onEndReachedThreshold: 0.5,
+    refreshControl: (
+      <RefreshControl
+        refreshing={refreshing}
+        onRefresh={onRefresh}
+        colors={['#007AFF']}
+        tintColor="#007AFF"
+      />
+    ),
+    ListFooterComponent: renderFooter,
+    viewabilityConfigCallbackPairs: Platform.OS === 'ios' ? [] : viewabilityConfigCallbackPairs.current || [], // Usar arreglo vacío para iOS
+    drawDistance: isSlowConnection ? 400 : 800, // Optimizar el área de búfer
+    contentContainerStyle: styles.listContent,
+    disableAutoLayout: Platform.OS === 'ios', // Desactivar AutoLayout en iOS para evitar errores
+  }), [
+    displayedBusinesses, 
+    renderBusinessItem, 
+    onEndReached,
+    refreshing,
+    onRefresh,
+    renderFooter,
+    isSlowConnection
+  ]);
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FF" />
+      
+      {/* Offline Banner */}
+      <OfflineBanner />
       
       {/* Header */}
       <View style={styles.header}>
@@ -785,76 +895,252 @@ const HomeScreen: React.FC = () => {
       {loading && !refreshing ? (
         renderSkeletons()
       ) : (
-        <FlatList
-          data={displayedBusinesses}
-          keyExtractor={(item) => item.id}
-          renderItem={renderBusinessItem}
-          numColumns={2}
-          columnWrapperStyle={styles.businessRow}
-          contentContainerStyle={styles.listContent}
-          ListHeaderComponent={
-            <>
-              {/* Categories */}
-              <View style={styles.categoriesContainer}>
-                <Text style={styles.sectionTitle}>Categorías</Text>
-                <FlatList
-                  horizontal
-                  data={['Todos', ...categories]}
-                  renderItem={({ item, index }) => renderCategoryItem({ 
-                    item: index === 0 ? null : item
-                  })}
-                  keyExtractor={(item, index) => index === 0 ? 'all' : item}
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.categoriesList}
+        <>
+          {/* Categorías */}
+          <View style={styles.categoriesContainer}>
+            <Text style={styles.sectionTitle}>Categorías</Text>
+            <FlatList
+              horizontal
+              data={['Todos', ...categories]}
+              renderItem={({ item, index }) => renderCategoryItem({ 
+                item: index === 0 ? null : item
+              })}
+              keyExtractor={(item, index) => index === 0 ? 'all' : item}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.categoriesList}
+              initialNumToRender={4}
+              maxToRenderPerBatch={4}
+              windowSize={3}
+              removeClippedSubviews={Platform.OS === 'android'}
+            />
+          </View>
+          
+          {/* Businesses Header with Sorting Options */}
+          <View style={styles.businessesHeader}>
+            <Text style={styles.sectionTitle}>
+              {selectedCategory ? selectedCategory : 'Negocios populares'}
+            </Text>
+            <View style={styles.sortOptions}>
+              {showSearch && (
+                <Text style={styles.resultsText}>
+                  {searchResults.length} resultados
+                </Text>
+              )}
+              <TouchableOpacity 
+                style={[styles.sortButton, sortByDistance && styles.sortButtonActive]} 
+                onPress={toggleDistanceSort}
+              >
+                <MaterialIcons 
+                  name="near-me" 
+                  size={16} 
+                  color={sortByDistance ? "#FFFFFF" : "#007AFF"} 
                 />
+                <Text style={[styles.sortButtonText, sortByDistance && styles.sortButtonTextActive]}>
+                  Cercanos
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+          
+          {/* Only render FlashList when data is fully ready to prevent bubblingEventTypes errors */}
+          {dataReady && displayedBusinesses && displayedBusinesses.length > 0 ? (
+            Platform.OS === 'ios' ? (
+              // En iOS, usar FlatList con configuración muy básica y limitar el número de items
+              <FlatList
+                data={displayedBusinesses.slice(0, maxItemsToDisplay)}
+                renderItem={renderBusinessItem}
+                keyExtractor={(item) => item.id}
+                numColumns={2}
+                columnWrapperStyle={styles.businessRow}
+                onEndReached={onEndReached}
+                onEndReachedThreshold={0.5}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={refreshing}
+                    onRefresh={onRefresh}
+                    colors={['#007AFF']}
+                    tintColor="#007AFF"
+                  />
+                }
+                ListFooterComponent={renderFooter}
+                contentContainerStyle={styles.listContent}
+                removeClippedSubviews={false}
+                maxToRenderPerBatch={4}
+                windowSize={3}
+                initialNumToRender={4}
+              />
+            ) : (
+              // En Android, seguir usando FlashList
+              <FlashList
+                {...flashListProps}
+                ListEmptyComponent={!loading ? renderEmptyState : null}
+              />
+            )
+          ) : !loading ? (
+            renderEmptyState()
+          ) : null}
+        </>
+      )}
+      
+      {/* Render Filter Modal */}
+      <Modal
+        visible={showFilterModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowFilterModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filtros de búsqueda</Text>
+              <TouchableOpacity
+                style={styles.closeButton}
+                onPress={() => setShowFilterModal(false)}
+              >
+                <MaterialIcons name="close" size={24} color="#333333" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalBody}>
+              {/* Filter by category */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Categorías</Text>
+                <ScrollView 
+                  horizontal 
+                  showsHorizontalScrollIndicator={false}
+                  removeClippedSubviews={Platform.OS === 'android'}
+                >
+                  <View style={styles.categoriesWrapper}>
+                    {['Todos', ...categories].map((cat, index) => (
+                      <TouchableOpacity
+                        key={`category-${index}`}
+                        style={[
+                          styles.categoryItem,
+                          (index === 0 && !selectedCategory) || selectedCategory === (index === 0 ? null : cat) 
+                            ? styles.categoryItemActive 
+                            : {}
+                        ]}
+                        onPress={() => setSelectedCategory(index === 0 ? null : cat)}
+                      >
+                        <Text 
+                          style={[
+                            styles.categoryText,
+                            (index === 0 && !selectedCategory) || selectedCategory === (index === 0 ? null : cat) 
+                              ? styles.categoryTextActive 
+                              : {}
+                          ]}
+                        >
+                          {cat}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </ScrollView>
               </View>
               
-              {/* Businesses Header with Sorting Options */}
-              <View style={styles.businessesHeader}>
-                <Text style={styles.sectionTitle}>
-                  {selectedCategory ? selectedCategory : 'Negocios populares'}
-                </Text>
-                <View style={styles.sortOptions}>
-                  {showSearch && (
-                    <Text style={styles.resultsText}>
-                      {searchResults.length} resultados
-                    </Text>
-                  )}
-                  <TouchableOpacity 
-                    style={[styles.sortButton, sortByDistance && styles.sortButtonActive]} 
-                    onPress={toggleDistanceSort}
+              {/* Filter by distance */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Distancia máxima</Text>
+                {renderDistanceOptions()}
+              </View>
+              
+              {/* Filter by rating */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Calificación mínima</Text>
+                {renderRatingOptions()}
+              </View>
+              
+              {/* Filter by open now */}
+              <View style={styles.filterSection}>
+                <View style={styles.filterToggleRow}>
+                  <Text style={styles.filterSectionTitle}>Abierto ahora</Text>
+                  <Switch 
+                    value={tempFilters.openNow}
+                    onValueChange={(value) => setTempFilters({...tempFilters, openNow: value})}
+                    trackColor={{ false: '#E0E0E0', true: '#007AFF' }}
+                    thumbColor={'#FFFFFF'}
+                  />
+                </View>
+              </View>
+              
+              {/* Sort options */}
+              <View style={styles.filterSection}>
+                <Text style={styles.filterSectionTitle}>Ordenar por</Text>
+                <View style={styles.filterOptionsRow}>
+                  <TouchableOpacity
+                    style={[
+                      styles.filterChip,
+                      tempFilters.sortBy === 'default' && styles.filterChipActive
+                    ]}
+                    onPress={() => setTempFilters({...tempFilters, sortBy: 'default'})}
                   >
-                    <MaterialIcons 
-                      name="near-me" 
-                      size={16} 
-                      color={sortByDistance ? "#FFFFFF" : "#007AFF"} 
-                    />
-                    <Text style={[styles.sortButtonText, sortByDistance && styles.sortButtonTextActive]}>
-                      Cercanos
+                    <Text 
+                      style={[
+                        styles.filterChipText,
+                        tempFilters.sortBy === 'default' && styles.filterChipTextActive
+                      ]}
+                    >
+                      Relevancia
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.filterChip,
+                      tempFilters.sortBy === 'distance' && styles.filterChipActive
+                    ]}
+                    onPress={() => setTempFilters({...tempFilters, sortBy: 'distance'})}
+                  >
+                    <Text 
+                      style={[
+                        styles.filterChipText,
+                        tempFilters.sortBy === 'distance' && styles.filterChipTextActive
+                      ]}
+                    >
+                      Distancia
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.filterChip,
+                      tempFilters.sortBy === 'rating' && styles.filterChipActive
+                    ]}
+                    onPress={() => setTempFilters({...tempFilters, sortBy: 'rating'})}
+                  >
+                    <Text 
+                      style={[
+                        styles.filterChipText,
+                        tempFilters.sortBy === 'rating' && styles.filterChipTextActive
+                      ]}
+                    >
+                      Calificación
                     </Text>
                   </TouchableOpacity>
                 </View>
               </View>
-            </>
-          }
-          ListEmptyComponent={!loading ? renderEmptyState : null}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              colors={['#007AFF']}
-              tintColor="#007AFF"
-            />
-          }
-        />
-      )}
-      
-      {/* Render Filter Modal */}
-      {renderFilterModal()}
+            </ScrollView>
+            
+            <View style={styles.modalFooter}>
+              <TouchableOpacity 
+                style={styles.resetButton}
+                onPress={resetFilters}
+              >
+                <Text style={styles.resetButtonText}>Restablecer</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.applyButton}
+                onPress={applyFilters}
+              >
+                <Text style={styles.applyButtonText}>Aplicar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
 
+// Memoize styles to prevent recreation
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -869,8 +1155,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
+    shadowRadius: Platform.OS === 'ios' ? 4 : 2,
     elevation: 2,
     zIndex: 1,
   },
@@ -903,8 +1189,8 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
+    shadowRadius: Platform.OS === 'ios' ? 4 : 2,
     elevation: 2,
     zIndex: 0,
     marginBottom: 8,
@@ -927,7 +1213,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
     color: '#333333',
-    paddingVertical: 8,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 6,
   },
   categoriesContainer: {
     paddingVertical: 16,
@@ -951,8 +1237,8 @@ const styles = StyleSheet.create({
     marginRight: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.05,
-    shadowRadius: 3,
+    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
+    shadowRadius: Platform.OS === 'ios' ? 3 : 2,
     elevation: 2,
   },
   categoryItemActive: {
@@ -979,24 +1265,28 @@ const styles = StyleSheet.create({
   },
   businessGrid: {
     flex: 1,
-    paddingHorizontal: 16, // Add padding to the grid
+    paddingHorizontal: 16,
     marginTop: 16,
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between', // Ensure cards are spaced horizontally
+    justifyContent: 'space-between',
   },
   businessRow: {
-    justifyContent: 'space-between', // Ensure cards are spaced horizontally
-    paddingHorizontal: 16, // Add horizontal padding
-    marginBottom: 16, // Add vertical spacing between rows
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   listContent: {
     paddingBottom: Platform.OS === 'ios' ? 150 : 120,
     paddingTop: 16,
   },
   gridItemContainer: {
-    width: '48%', // Ensure two cards fit in a row with spacing
-    marginBottom: 8, // Reduced vertical spacing between cards
+    width: '48%',
+    marginBottom: 8,
+    // Add hardware acceleration hint for Android
+    ...(Platform.OS === 'android' && {
+      backfaceVisibility: 'hidden',
+    }),
   },
   noResultsContainer: {
     alignItems: 'center',
@@ -1037,7 +1327,6 @@ const styles = StyleSheet.create({
   sortButtonTextActive: {
     color: '#FFFFFF',
   },
-  // Styles for notification badge on the bell icon
   notificationBadge: {
     position: 'absolute',
     top: -6,
@@ -1055,7 +1344,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: 'bold',
   },
-  // New styles for filter functionality
   filterButton: {
     backgroundColor: '#F0F0F5',
     width: 48,
@@ -1221,7 +1509,14 @@ const styles = StyleSheet.create({
   categoriesWrapper: {
     flexDirection: 'row',
     paddingVertical: 8,
+  },
+  loadingMore: {
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 16,
   }
 });
 
-export default HomeScreen;
+export default React.memo(HomeScreen);

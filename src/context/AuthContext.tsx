@@ -125,43 +125,60 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     const unsubscribe = firebase.auth().onAuthStateChanged(async (firebaseUser) => {
       console.log('Auth state changed:', firebaseUser?.uid);
       
-      if (firebaseUser) {
-        setUser(firebaseUser);
-        
-        // Restaurar o guardar datos de sesión
-        const existingSession = await restoreSession();
-        const authMethod = existingSession?.authMethod || 'email';
-        await saveSessionData(firebaseUser, authMethod);
-        
-        if (notificationService) {
-          try {
-            const permissionResult = await notificationService.requestNotificationPermissions();
-            if (permissionResult.success && permissionResult.data?.granted) {
-              const tokenResult = await notificationService.registerForPushNotifications();
-              if (tokenResult.success && tokenResult.data?.token) {
-                await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
+      try {
+        if (firebaseUser) {
+          // Set user state after a slight delay to ensure all React renders complete first
+          setTimeout(() => {
+            setUser(firebaseUser);
+          }, 0);
+          
+          // Restaurar o guardar datos de sesión
+          const existingSession = await restoreSession();
+          const authMethod = existingSession?.authMethod || 'email';
+          await saveSessionData(firebaseUser, authMethod);
+          
+          if (notificationService) {
+            try {
+              const permissionResult = await notificationService.requestNotificationPermissions();
+              if (permissionResult.success && permissionResult.data?.granted) {
+                const tokenResult = await notificationService.registerForPushNotifications();
+                if (tokenResult.success && tokenResult.data?.token) {
+                  await notificationService.saveTokenToFirestore(firebaseUser.uid, tokenResult.data.token);
+                }
               }
+            } catch (notificationError: unknown) {
+              console.error('Error setting up notifications:', notificationError);
             }
-          } catch (notificationError: unknown) {
-            console.error('Error setting up notifications:', notificationError);
+          }
+        } else {
+          // Set user state to null after a slight delay
+          setTimeout(() => {
+            setUser(null);
+          }, 0);
+          
+          // Limpiar datos de sesión
+          try {
+            await AsyncStorage.multiRemove([
+              STORAGE_KEYS.USER_DATA,
+              STORAGE_KEYS.AUTH_PERSISTENCE,
+              STORAGE_KEYS.SESSION_DATA
+            ]);
+            console.log('Session data cleared');
+          } catch (error) {
+            console.error('Error clearing session data:', error);
           }
         }
-      } else {
-        setUser(null);
-        // Limpiar datos de sesión
-        try {
-          await AsyncStorage.multiRemove([
-            STORAGE_KEYS.USER_DATA,
-            STORAGE_KEYS.AUTH_PERSISTENCE,
-            STORAGE_KEYS.SESSION_DATA
-          ]);
-          console.log('Session data cleared');
-        } catch (error) {
-          console.error('Error clearing session data:', error);
-        }
+      } catch (err) {
+        console.error('Error processing auth state change:', err);
+        setTimeout(() => {
+          setUser(null);
+        }, 0);
+      } finally {
+        // Set loading state after a slight delay
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 0);
       }
-      
-      setIsLoading(false);
     });
     
     return () => unsubscribe();
@@ -183,7 +200,11 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
         
         if (userDoc.exists) {
           const userToSet = userCredential.user;
-          setUser(userToSet);
+          
+          // Use setTimeout to defer state update
+          setTimeout(() => {
+            setUser(userToSet);
+          }, 0);
           
           // Guardar datos de sesión
           await saveSessionData(userToSet, 'email');
@@ -198,7 +219,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
       Alert.alert('Error de inicio de sesión', error.message);
       return false;
     } finally {
-      setIsLoading(false);
+      setTimeout(() => {
+        setIsLoading(false);
+      }, 0);
     }
   };
 

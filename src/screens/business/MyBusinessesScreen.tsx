@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,12 +19,34 @@ import { MaterialIcons } from '@expo/vector-icons';
 import { Business } from '../../context/BusinessContext';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import 'firebase/compat/storage';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
 import { userService } from '../../services/authService';
 import BusinessDashboard from '../../components/dashboard/BusinessDashboard';
 import { analyticsService } from '../../services/analyticsService';
 import { BusinessAnalytics, TimePeriod } from '../../types/analyticsTypes';
+
+// Define interfaces for Firestore document data
+interface Review {
+  id: string;
+  businessId: string;
+  rating: number;
+  comment?: string;
+  userId: string;
+  createdAt: firebase.firestore.Timestamp;
+  [key: string]: any; // For any additional fields
+}
+
+interface Reservation {
+  id: string;
+  businessId: string;
+  status: 'pending' | 'confirmed' | 'cancelled';
+  value: number;
+  userId: string;
+  date: firebase.firestore.Timestamp;
+  [key: string]: any; // For any additional fields
+}
 
 // Define type with role property
 interface UserWithRole extends firebase.User {
@@ -43,65 +65,66 @@ const MyBusinessesScreen: React.FC = () => {
   const [analytics, setAnalytics] = useState<BusinessAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
 
-  // Verificar que el usuario tenga el rol correcto
-  useEffect(() => {
-    const checkUserRole = async () => {
-      if (!user) {
-        // Si no hay usuario, redirigir al login
-        navigation.navigate('Login');
-        return;
-      }
-      
-      // Try to obtain role from user object; if missing, fetch from Firestore
-      let userWithRole = user as UserWithRole;
-      if (!userWithRole.role) {
-        try {
-          const userDoc = await firebase.firestore()
-            .collection('users')
-            .doc(user.uid)
-            .get();
-          if (userDoc.exists) {
-            const userData = userDoc.data();
-            userWithRole.role = userData?.role; // role should be 'business_owner' if applicable
-          }
-        } catch (error) {
-          console.error('Error al obtener rol de usuario:', error);
-          // Si hay error, asumimos que es propietario para no bloquear el flujo
-          userWithRole.role = 'business_owner';
-        }
-      }
-      
-      // Verificar que el usuario sea de tipo business_owner
-      if (userWithRole.role !== 'business_owner') {
-        Alert.alert(
-          'Acceso restringido',
-          'Esta sección solo está disponible para propietarios de negocios.',
-          [
-            { 
-              text: 'OK', 
-              onPress: () => navigation.navigate('Home') 
-            }
-          ]
-        );
-        return;
-      }
-      
-      // Verificar y corregir la integridad de los datos
-      if (userService && userService.verifyUserDataIntegrity) {
-        await userService.verifyUserDataIntegrity(user.uid);
-      } else {
-        console.log('userService.verifyUserDataIntegrity no está disponible');
-      }
-      
-      // Cargar los negocios
-      loadUserBusinesses();
-    };
+  // Memoized function to check user role
+  const checkUserRole = useCallback(async () => {
+    if (!user) {
+      // Si no hay usuario, redirigir al login
+      navigation.navigate('Login');
+      return;
+    }
     
+    // Try to obtain role from user object; if missing, fetch from Firestore
+    let userWithRole = user as UserWithRole;
+    if (!userWithRole.role) {
+      try {
+        const userDoc = await firebase.firestore()
+          .collection('users')
+          .doc(user.uid)
+          .get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          userWithRole.role = userData?.role; // role should be 'business_owner' if applicable
+        }
+      } catch (error) {
+        console.error('Error al obtener rol de usuario:', error);
+        // Si hay error, asumimos que es propietario para no bloquear el flujo
+        userWithRole.role = 'business_owner';
+      }
+    }
+    
+    // Verificar que el usuario sea de tipo business_owner
+    if (userWithRole.role !== 'business_owner') {
+      Alert.alert(
+        'Acceso restringido',
+        'Esta sección solo está disponible para propietarios de negocios.',
+        [
+          { 
+            text: 'OK', 
+            onPress: () => navigation.navigate('Home') 
+          }
+        ]
+      );
+      return;
+    }
+    
+    // Verificar y corregir la integridad de los datos
+    if (userService && userService.verifyUserDataIntegrity) {
+      await userService.verifyUserDataIntegrity(user.uid);
+    } else {
+      console.log('userService.verifyUserDataIntegrity no está disponible');
+    }
+    
+    // Cargar los negocios
+    loadUserBusinesses();
+  }, [user, navigation]);
+
+  // Use effect with memoized function
+  useEffect(() => {
     checkUserRole();
-  }, [user]);
+  }, [checkUserRole]);
   
-  // Cargar negocios del usuario actual
-  const loadUserBusinesses = async () => {
+  // Memoized function to load businesses
+  const loadUserBusinesses = useCallback(async () => {
     try {
       setLoading(true);
       
@@ -122,7 +145,7 @@ const MyBusinessesScreen: React.FC = () => {
         userBusinesses.push({
           id: doc.id,
           ...doc.data(),
-          acceptsReservations: doc.data().acceptsReservations ?? true  // Valor por defecto si no existe
+          acceptsReservations: doc.data().acceptsReservations ?? true
         } as Business);
       });
       
@@ -132,7 +155,7 @@ const MyBusinessesScreen: React.FC = () => {
       
       // Cargar datos analíticos después de obtener los negocios
       if (userBusinesses.length > 0) {
-        loadAnalyticsData(userBusinesses.map(business => business.id));
+        loadRealAnalyticsData(userBusinesses.map(business => business.id));
       } else {
         setAnalyticsLoading(false);
       }
@@ -141,150 +164,121 @@ const MyBusinessesScreen: React.FC = () => {
       setLoading(false);
       Alert.alert('Error', 'No se pudieron cargar tus negocios. Intenta de nuevo más tarde.');
     }
-  };
+  }, [user]);
 
-  // Función para cargar datos analíticos con manejo de errores mejorado
-  const loadAnalyticsData = async (businessIds: string[]) => {
+  // Function to load real analytics data from Firestore
+  const loadRealAnalyticsData = useCallback(async (businessIds: string[]) => {
     try {
       setAnalyticsLoading(true);
-      console.log('Cargando datos analíticos para negocios:', businessIds);
+      console.log('Cargando datos analíticos reales para negocios:', businessIds);
       
-      // Asegurarse de que analyticsService esté importado correctamente
+      // Make sure the analytics service is available
       if (!analyticsService || !analyticsService.getBusinessesAnalytics) {
         console.error('AnalyticsService no está disponible');
-        // Crear datos de muestra para desarrollo
-        setAnalytics(createSampleAnalyticsData(businessIds));
         setAnalyticsLoading(false);
         return;
       }
       
-      // Intentar obtener datos analíticos reales
-      try {
-        const analyticsData = await analyticsService.getBusinessesAnalytics(businessIds);
-        console.log('Datos analíticos recibidos exitosamente');
-        
-        if (!analyticsData) {
-          console.warn('No se recibieron datos analíticos');
-          // Usar datos de muestra como fallback
-          setAnalytics(createSampleAnalyticsData(businessIds));
-        } else {
-          setAnalytics(analyticsData);
+      // First, refresh each business's analytics from actual data
+      await Promise.all(businessIds.map(async (businessId) => {
+        try {
+          // Get real reservation data
+          const reservationsQuery = await firebase.firestore()
+            .collection('reservations')
+            .where('businessId', '==', businessId)
+            .get();
+            
+          const reservations: Reservation[] = reservationsQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          } as Reservation));
+          
+          // Get real reviews data
+          const reviewsQuery = await firebase.firestore()
+            .collection('reviews')
+            .where('businessId', '==', businessId)
+            .get();
+            
+          const reviews: Review[] = reviewsQuery.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          } as Review));
+          
+          // Update analytics with real data
+          if (reviews.length > 0) {
+            const totalRating = reviews.reduce((sum, review) => sum + (review.rating || 0), 0);
+            const averageRating = totalRating / reviews.length;
+            
+            await analyticsService.trackReview(businessId, averageRating);
+          }
+          
+          // Update reservations data
+          const confirmedReservations = reservations.filter(r => r.status === 'confirmed');
+          if (confirmedReservations.length > 0) {
+            const value = confirmedReservations.reduce((sum, r) => sum + (r.value || 0), 0);
+            await analyticsService.trackReservation(businessId, 'confirmed', value);
+          }
+          
+          // Track a visit 
+          await analyticsService.trackBusinessVisit(businessId);
+        } catch (error) {
+          console.error(`Error refreshing data for business ${businessId}:`, error);
         }
-      } catch (error) {
-        console.error('Error al obtener datos analíticos:', error);
-        // Usar datos de muestra en caso de error
-        setAnalytics(createSampleAnalyticsData(businessIds));
+      }));
+      
+      // Now get the updated analytics data
+      const analyticsData = await analyticsService.getBusinessesAnalytics(businessIds);
+      
+      if (!analyticsData) {
+        console.warn('No se recibieron datos analíticos');
+        setAnalyticsLoading(false);
+        return;
       }
       
+      console.log('Datos analíticos reales obtenidos:', analyticsData);
+      setAnalytics(analyticsData);
       setAnalyticsLoading(false);
     } catch (error) {
-      console.error('Error loading analytics data:', error);
-      // Usar datos de muestra en caso de error
-      setAnalytics(createSampleAnalyticsData(businessIds));
+      console.error('Error loading real analytics data:', error);
       setAnalyticsLoading(false);
     }
-  };
+  }, []);
   
-  // Función para crear datos de muestra para desarrollo
-  const createSampleAnalyticsData = (businessIds: string[]): BusinessAnalytics => {
-    console.log('Creando datos de muestra para desarrollo');
-    // Crear un objeto con datos de muestra estructurados según BusinessAnalytics
-    const businessesAnalytics: Record<string, any> = {};
-    
-    businessIds.forEach(id => {
-      businessesAnalytics[id] = {
-        visits: Math.floor(Math.random() * 500) + 100,
-        maxVisits: 1000,
-        rating: (Math.random() * 3) + 2, // Rating entre 2-5
-        reservations: Math.floor(Math.random() * 50)
-      };
-    });
-    
-    return {
-      totalVisits: businessIds.length * 200,
-      visitsTrend: 15,
-      totalReservations: {
-        count: businessIds.length * 20,
-        confirmed: businessIds.length * 15,
-        pending: businessIds.length * 5,
-        value: businessIds.length * 1500
-      },
-      reservationsTrend: 8,
-      revenueTrend: 12,
-      averageRating: 4.2,
-      businessesAnalytics,
-      visitsData: {
-        [TimePeriod.DAY]: Array.from({length: 24}, (_, i) => ({
-          label: `${i}:00`,
-          value: Math.floor(Math.random() * 30)
-        })),
-        [TimePeriod.WEEK]: Array.from({length: 7}, (_, i) => {
-          const days = ['Dom', 'Lun', 'Mar', 'Mie', 'Jue', 'Vie', 'Sab'];
-          return {
-            label: days[i],
-            value: Math.floor(Math.random() * 100) + 50
-          };
-        }),
-        [TimePeriod.MONTH]: Array.from({length: 30}, (_, i) => ({
-          label: `${i+1}`,
-          value: Math.floor(Math.random() * 150) + 100
-        })),
-        [TimePeriod.YEAR]: Array.from({length: 12}, (_, i) => {
-          const months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
-          return {
-            label: months[i],
-            value: Math.floor(Math.random() * 1000) + 500
-          };
-        })
-      },
-      pendingActions: {
-        reservations: [],
-        messages: [],
-        reviews: []
-      }
-    };
-  };
-  
-  // Refrescar la lista
-  const handleRefresh = async () => {
+  // Memoized refresh handler
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadUserBusinesses();
     setRefreshing(false);
-  };
+  }, [loadUserBusinesses]);
   
-  // Filtrar negocios por búsqueda
-  const filteredBusinesses = businesses.filter(business =>
-    business.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filtered businesses (memoized to avoid recalculation on every render)
+  const filteredBusinesses = useMemo(() => {
+    return businesses.filter(business =>
+      business.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [businesses, searchQuery]);
 
-  // Ir a la pantalla de añadir negocio
-  const handleAddBusiness = () => {
+  // Memoized handlers
+  const handleAddBusiness = useCallback(() => {
     navigation.navigate('BusinessOnboardingModeSelection');
-  };
+  }, [navigation]);
   
-  // Editar un negocio existente
-  const handleEditBusiness = (business: Business) => {
+  const handleEditBusiness = useCallback((business: Business) => {
     navigation.navigate('EditBusiness', { businessId: business.id });
-  };
+  }, [navigation]);
   
-  // Ver detalles de un negocio
-  const handleViewBusiness = (business: Business) => {
-    // Registrar visita para análisis cuando se ve un negocio
+  const handleViewBusiness = useCallback((business: Business) => {
+    // Track visit for analytics
     if (analyticsService && analyticsService.trackBusinessVisit) {
-      analyticsService.trackBusinessVisit(business.id)
-        .then(success => {
-          console.log(`Visita registrada para negocio ${business.id}: ${success}`);
-        })
-        .catch(error => {
-          console.error('Error al registrar visita:', error);
-        });
+      analyticsService.trackBusinessVisit(business.id).catch(error => {
+        console.error('Error al registrar visita:', error);
+      });
     }
     
     navigation.navigate('BusinessDetail', { businessId: business.id });
-  };
+  }, [navigation]);
   
-  // Eliminar un negocio
-  const handleDeleteBusiness = (business: Business) => {
+  const handleDeleteBusiness = useCallback((business: Business) => {
     Alert.alert(
       'Eliminar Negocio',
       `¿Estás seguro de querer eliminar "${business.name}"? Esta acción no se puede deshacer.`,
@@ -297,19 +291,18 @@ const MyBusinessesScreen: React.FC = () => {
             try {
               setLoading(true);
               
-              // Eliminar el negocio de Firestore
+              // Delete business from Firestore
               await firebase.firestore()
                 .collection('businesses')
                 .doc(business.id)
                 .delete();
               
-              // Eliminar las imágenes asociadas
+              // Delete associated images
               if (business.images && business.images.length > 0) {
                 const storage = firebase.storage();
                 for (const image of business.images) {
                   if (image.url) {
                     try {
-                      // Extraer la ruta de la URL de la imagen
                       const imageRef = storage.refFromURL(image.url);
                       await imageRef.delete();
                     } catch (imageError) {
@@ -319,7 +312,17 @@ const MyBusinessesScreen: React.FC = () => {
                 }
               }
               
-              // Actualizar la lista
+              // Also delete analytics data
+              try {
+                await firebase.firestore()
+                  .collection('analytics')
+                  .doc(business.id)
+                  .delete();
+              } catch (analyticsError) {
+                console.error('Error deleting analytics data:', analyticsError);
+              }
+              
+              // Update list
               setBusinesses(businesses.filter(b => b.id !== business.id));
               Alert.alert('Éxito', 'Negocio eliminado correctamente');
             } catch (error) {
@@ -332,13 +335,14 @@ const MyBusinessesScreen: React.FC = () => {
         }
       ]
     );
-  };
+  }, [businesses]);
   
-  // Renderizar cada elemento de la lista
-  const renderBusinessItem = (item: Business) => {
+  // Memoized render function for business items
+  const renderBusinessItem = useCallback((item: Business) => {
+    const businessAnalytics = analytics?.businessesAnalytics?.[item.id];
+    
     return (
       <View style={styles.businessCard} key={item.id}>
-        {/* Imagen del negocio */}
         <View style={styles.imageContainer}>
           {item.images && item.images.length > 0 ? (
             <Image 
@@ -353,21 +357,20 @@ const MyBusinessesScreen: React.FC = () => {
           )}
         </View>
         
-        {/* Información del negocio */}
         <View style={styles.businessInfo}>
           <Text style={styles.businessName}>{item.name}</Text>
           <Text style={styles.businessCategory}>{item.category}</Text>
           
           <View style={styles.statsRow}>
-            {analytics && analytics.businessesAnalytics[item.id] ? (
+            {businessAnalytics ? (
               <>
                 <View style={styles.statItem}>
                   <MaterialIcons name="visibility" size={16} color="#8E8E93" />
-                  <Text style={styles.statText}>{analytics.businessesAnalytics[item.id].visits || 0} vistas</Text>
+                  <Text style={styles.statText}>{businessAnalytics.visits || 0} vistas</Text>
                 </View>
                 <View style={styles.statItem}>
                   <MaterialIcons name="star" size={16} color="#FFCC00" />
-                  <Text style={styles.statText}>{(analytics.businessesAnalytics[item.id].rating || 0).toFixed(1)}</Text>
+                  <Text style={styles.statText}>{(businessAnalytics.rating || 0).toFixed(1)}</Text>
                 </View>
               </>
             ) : (
@@ -385,7 +388,6 @@ const MyBusinessesScreen: React.FC = () => {
           </View>
         </View>
         
-        {/* Botones de acción */}
         <View style={styles.actionsContainer}>
           <TouchableOpacity 
             style={styles.actionButton}
@@ -410,19 +412,19 @@ const MyBusinessesScreen: React.FC = () => {
         </View>
       </View>
     );
-  };
+  }, [analytics, handleViewBusiness, handleEditBusiness, handleDeleteBusiness]);
   
-  const renderEmptyState = () => (
+  // Memoized empty state component
+  const EmptyState = useMemo(() => (
     <View style={styles.emptyContainer}>
       <MaterialIcons name="store" size={64} color="#D1D1D6" />
       <Text style={styles.emptyText}>No has registrado ningún negocio</Text>
       <Text style={styles.emptySubtext}>¡Comienza a agregar tus negocios para que los usuarios puedan encontrarlos!</Text>
     </View>
-  );
+  ), []);
   
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
@@ -434,7 +436,6 @@ const MyBusinessesScreen: React.FC = () => {
         <View style={styles.placeholder} />
       </View>
       
-      {/* Nueva barra de búsqueda */}
       <View style={styles.searchContainer}>
         <TextInput 
           value={searchQuery}
@@ -444,7 +445,6 @@ const MyBusinessesScreen: React.FC = () => {
         />
       </View>
       
-      {/* Main scrollable content */}
       {loading && !refreshing ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -462,36 +462,30 @@ const MyBusinessesScreen: React.FC = () => {
             />
           }
         >
-          {/* Dashboard de Estadísticas */}
-          {businesses.length > 0 && (
-            <BusinessDashboard 
-              analytics={analytics} 
-              loading={analyticsLoading} 
-              businesses={businesses}
-              onSelectBusiness={(businessId) => {
-                // Navegar al detalle del negocio y registrar la visita
-                const business = businesses.find(b => b.id === businessId);
-                if (business) {
-                  handleViewBusiness(business);
-                }
-              }}
-              period={TimePeriod.WEEK}
-              onRefreshData={() => loadAnalyticsData(businesses.map(b => b.id))}
-            />
-          )}
+          <BusinessDashboard 
+            analytics={analytics} 
+            loading={analyticsLoading} 
+            businesses={businesses}
+            onSelectBusiness={(businessId) => {
+              const business = businesses.find(b => b.id === businessId);
+              if (business) {
+                handleViewBusiness(business);
+              }
+            }}
+            period={TimePeriod.WEEK}
+            onRefreshData={() => loadRealAnalyticsData(businesses.map(b => b.id))}
+          />
           
-          {/* Lista de negocios */}
           <View style={styles.listContent}>
             {filteredBusinesses.length > 0 ? (
-              filteredBusinesses.map(business => renderBusinessItem(business))
+              filteredBusinesses.map(renderBusinessItem)
             ) : (
-              renderEmptyState()
+              EmptyState
             )}
           </View>
         </ScrollView>
       )}
       
-      {/* Botón para agregar negocio */}
       <TouchableOpacity 
         style={styles.floatingButton}
         onPress={handleAddBusiness}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 
@@ -20,7 +20,7 @@ interface StatisticCardProps {
 /**
  * Componente para mostrar una estadística simple con ícono, título, valor y tendencia.
  */
-const StatisticCard: React.FC<StatisticCardProps> = ({
+const StatisticCard: React.FC<StatisticCardProps> = memo(({
   icon,
   title,
   value,
@@ -105,7 +105,7 @@ const StatisticCard: React.FC<StatisticCardProps> = ({
       <CardContent />
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {

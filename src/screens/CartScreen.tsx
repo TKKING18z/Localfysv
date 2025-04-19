@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Dimensions,
   ScrollView,
   TextInput,
+  InteractionManager
 } from 'react-native';
 import { useNavigation, useRoute, useIsFocused } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -25,6 +26,7 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { usePoints, ActiveRedemption } from '../context/PointsContext';
+import { useNetwork } from '../context/NetworkContext';
 
 type CartNavigationProp = StackNavigationProp<RootStackParamList, 'Cart'>;
 
@@ -39,6 +41,9 @@ export const CartScreen: React.FC = () => {
   const [selectedItem, setSelectedItem] = useState<CartItem | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  
+  // Add NetworkContext to optimize for slow connections
+  const { isSlowConnection, isConnected } = useNetwork();
   
   // Por defecto, asumimos que los negocios aceptan efectivo
   // Esto podría obtenerse de la API del negocio en una versión futura
@@ -66,35 +71,74 @@ export const CartScreen: React.FC = () => {
   const [finalTotal, setFinalTotal] = useState(totalPrice);
   const [discountModalVisible, setDiscountModalVisible] = useState(false);
 
-  // Cargar descuentos disponibles
+  // Memoize businessName to avoid recalculations
+  const businessName = useMemo(() => 
+    cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy',
+  [cart.businessName, cart.items]);
+
+  // Comprobar si el negocio acepta efectivo
   useEffect(() => {
-    if (user && isFocused) {
-      getActiveRedemptions().then(() => {
-        if (hasAvailableDiscount()) {
-          const discount = getAvailableDiscount();
-          setActiveDiscount(discount);
-          
-          // Calcular el descuento
-          if (discount) {
-            calculateDiscount(discount);
+    // Aquí podrías hacer una llamada a la API para verificar si el negocio acepta pago contra entrega
+    // Por ahora, asumimos que todos los negocios lo aceptan
+    setAcceptsCashOnDelivery(true);
+  }, [cart.businessId]);
+
+  // Cargar descuentos disponibles - optimized with lazy initialization
+  useEffect(() => {
+    if (!user || !isFocused) return;
+    
+    // Use InteractionManager to defer non-critical operations
+    InteractionManager.runAfterInteractions(() => {
+      if (!isSlowConnection) {
+        // Load discounts normally for good connections
+        loadDiscounts();
+      } else {
+        // Delay loading discounts on slow connections
+        const timeoutId = setTimeout(loadDiscounts, 1000);
+        return () => clearTimeout(timeoutId);
+      }
+    });
+    
+    async function loadDiscounts() {
+      try {
+        const redemptions = await getActiveRedemptions();
+        
+        // Wrap discount checks in try-catch to prevent crashes
+        try {
+          if (redemptions.length > 0 && hasAvailableDiscount()) {
+            const discount = getAvailableDiscount();
+            setActiveDiscount(discount);
+            
+            // Calculate discount if available
+            if (discount) {
+              calculateDiscount(discount);
+            }
+          } else {
+            setActiveDiscount(null);
+            setDiscountAmount(0);
           }
-        } else {
+        } catch (error) {
+          console.error('Error processing discount:', error);
           setActiveDiscount(null);
           setDiscountAmount(0);
         }
-      });
+      } catch (error) {
+        console.error('Error loading discounts:', error);
+        setActiveDiscount(null);
+        setDiscountAmount(0);
+      }
     }
-  }, [user, isFocused, totalPrice]);
+  }, [user, isFocused, totalPrice, isSlowConnection]);
 
-  // Actualizar el precio final cuando cambia el precio total o el descuento
+  // Actualizar el precio final cuando cambia el precio total o el descuento - memoized
   useEffect(() => {
     // Asegurarse de que el descuento no supere el precio total
     const safeDiscountAmount = Math.min(discountAmount, totalPrice);
     setFinalTotal(Math.max(0, totalPrice - safeDiscountAmount));
   }, [totalPrice, discountAmount]);
 
-  // Calcular el monto del descuento basado en el tipo de descuento
-  const calculateDiscount = (discount: ActiveRedemption) => {
+  // Calcular el monto del descuento basado en el tipo de descuento - memoized
+  const calculateDiscount = useCallback((discount: ActiveRedemption) => {
     if (!discount) return;
 
     if (discount.discountAmount !== undefined) {
@@ -107,16 +151,16 @@ export const CartScreen: React.FC = () => {
     } else {
       setDiscountAmount(0);
     }
-  };
+  }, [totalPrice]);
 
-  // Función para remover un descuento activo
-  const removeDiscount = () => {
+  // Función para remover un descuento activo - memoized
+  const removeDiscount = useCallback(() => {
     setActiveDiscount(null);
     setDiscountAmount(0);
-  };
+  }, []);
 
-  // Función para mostrar el modal de confirmación de uso de descuento
-  const showDiscountConfirmation = () => {
+  // Función para mostrar el modal de confirmación de uso de descuento - memoized
+  const showDiscountConfirmation = useCallback(() => {
     if (!activeDiscount) return;
     
     let discountDescription = '';
@@ -144,50 +188,48 @@ export const CartScreen: React.FC = () => {
         }
       ]
     );
-  };
+  }, [activeDiscount]);
 
-  // Comprobar si el negocio acepta efectivo
+  // Handle selected location from MapScreen - memoized
   useEffect(() => {
-    // Aquí podrías hacer una llamada a la API para verificar si el negocio acepta pago contra entrega
-    // Por ahora, asumimos que todos los negocios lo aceptan
-    setAcceptsCashOnDelivery(true);
-  }, [cart.businessId]);
-
-  // Handle selected location from MapScreen
-  useEffect(() => {
-    if (isFocused && route.params && 'selectedLocation' in route.params && !processedLocationParams.current) {
-      const { selectedLocation, locationAddress } = route.params as any;
-      if (selectedLocation && locationAddress) {
-        setDeliveryAddress(locationAddress);
-        // Mark as processed to prevent infinite loop
-        processedLocationParams.current = true;
-        
-        // Clear params after processing to allow reselecting the same location later
-        setTimeout(() => {
-          navigation.setParams({ selectedLocation: undefined, locationAddress: undefined });
-        }, 100);
-      }
+    if (!isFocused || !route.params || !('selectedLocation' in route.params) || processedLocationParams.current) {
+      return;
+    }
+    
+    const { selectedLocation, locationAddress } = route.params as any;
+    if (selectedLocation && locationAddress) {
+      setDeliveryAddress(locationAddress);
+      processedLocationParams.current = true;
+      
+      // Clear params after processing to allow reselecting the same location later
+      setTimeout(() => {
+        navigation.setParams({ selectedLocation: undefined, locationAddress: undefined });
+      }, 100);
     }
     
     // Reset the flag when screen loses focus
-    if (!isFocused) {
-      processedLocationParams.current = false;
-    }
+    return () => {
+      if (!isFocused) {
+        processedLocationParams.current = false;
+      }
+    };
   }, [isFocused, route.params, setDeliveryAddress, navigation]);
 
-  const handleBack = () => {
+  // Navigation handlers - memoized
+  const handleBack = useCallback(() => {
     navigation.goBack();
-  };
+  }, [navigation]);
 
-  const handleQuantityChange = (id: string, newQuantity: number) => {
+  // Item manipulation handlers - memoized
+  const handleQuantityChange = useCallback((id: string, newQuantity: number) => {
     if (newQuantity <= 0) {
       handleRemoveItem(id);
     } else {
       updateQuantity(id, newQuantity);
     }
-  };
+  }, [updateQuantity]);
 
-  const handleRemoveItem = (id: string) => {
+  const handleRemoveItem = useCallback((id: string) => {
     Alert.alert(
       "Eliminar item",
       "¿Estás seguro que deseas eliminar este item del carrito?",
@@ -196,9 +238,9 @@ export const CartScreen: React.FC = () => {
         { text: "Eliminar", style: "destructive", onPress: () => removeFromCart(id) }
       ]
     );
-  };
+  }, [removeFromCart]);
 
-  const handleClearCart = () => {
+  const handleClearCart = useCallback(() => {
     Alert.alert(
       "Vaciar carrito",
       "¿Estás seguro que deseas vaciar tu carrito?",
@@ -207,7 +249,7 @@ export const CartScreen: React.FC = () => {
         { text: "Vaciar", style: "destructive", onPress: () => clearCart() }
       ]
     );
-  };
+  }, [clearCart]);
 
   const handleConfirmOrder = () => {
     // Validación básica del carrito
@@ -304,7 +346,7 @@ export const CartScreen: React.FC = () => {
                 if (activeDiscount && activeDiscount.id) {
                   markRedemptionAsUsed(activeDiscount.id)
                     .then(() => console.log('Descuento marcado como usado'))
-                    .catch(err => console.error('Error al marcar descuento como usado:', err));
+                    .catch((err: Error) => console.error('Error al marcar descuento como usado:', err));
                 }
                 
                 // Otorgar puntos por la compra si el usuario está autenticado
@@ -430,25 +472,33 @@ export const CartScreen: React.FC = () => {
     }
   };
 
-  const openProductDetail = (item: CartItem) => {
+  const openProductDetail = useCallback((item: CartItem) => {
     setSelectedItem(item);
     setModalVisible(true);
-  };
+  }, []);
 
-  // Function to open map for location selection
-  const openLocationMap = () => {
+  // Function to open map for location selection - memoized
+  const openLocationMap = useCallback(() => {
     navigation.navigate('Map', { 
       selectingDeliveryLocation: true,
       currentAddress: cart.deliveryAddress || ''
     });
-  };
+  }, [navigation, cart.deliveryAddress]);
 
-  const renderItem = ({ item }: { item: CartItem }) => {
+  // Memoize the rendered item to improve list performance
+  const renderItem = useCallback(({ item }: { item: CartItem }) => {
     return (
       <View style={styles.cartItem}>
         <TouchableOpacity onPress={() => openProductDetail(item)}>
           {item.image ? (
-            <Image source={{ uri: item.image }} style={styles.itemImage} contentFit="cover" />
+            <Image 
+              source={{ uri: item.image }} 
+              style={styles.itemImage} 
+              contentFit="cover"
+              // Add caching for better performance
+              cachePolicy="memory-disk"
+              recyclingKey={item.id}
+            />
           ) : (
             <View style={[styles.itemImage, styles.placeholderImage]}>
               <MaterialIcons name="restaurant" size={24} color="#BBBBBB" />
@@ -505,7 +555,10 @@ export const CartScreen: React.FC = () => {
         </View>
       </View>
     );
-  };
+  }, [handleQuantityChange, handleRemoveItem, openProductDetail]);
+
+  // Memoize the FlatList key extractor for better list performance
+  const keyExtractor = useCallback((item: CartItem) => item.id, []);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -517,7 +570,7 @@ export const CartScreen: React.FC = () => {
           <View style={styles.titleContainer}>
             <Text style={styles.title}>Tu Carrito</Text>
             <Text style={styles.businessNameHeader}>
-              {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
+              {businessName}
             </Text>
           </View>
           {cart.items.length > 0 && (
@@ -532,8 +585,14 @@ export const CartScreen: React.FC = () => {
             <FlatList
               data={cart.items}
               renderItem={renderItem}
-              keyExtractor={item => item.id}
+              keyExtractor={keyExtractor}
               showsVerticalScrollIndicator={false}
+              // Performance optimizations for lists
+              initialNumToRender={4}
+              maxToRenderPerBatch={isSlowConnection ? 2 : 4}
+              windowSize={isSlowConnection ? 3 : 5}
+              updateCellsBatchingPeriod={isSlowConnection ? 100 : 50}
+              removeClippedSubviews={Platform.OS === 'android'}
               contentContainerStyle={[
                 styles.listContent,
                 { 
@@ -547,7 +606,7 @@ export const CartScreen: React.FC = () => {
                   <View style={styles.businessInfoTextContainer}>
                     <Text style={styles.businessInfoLabel}>Productos de:</Text>
                     <Text style={styles.businessName}>
-                      {cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy'}
+                      {businessName}
                     </Text>
                   </View>
                 </View>
@@ -754,7 +813,7 @@ export const CartScreen: React.FC = () => {
                     <View style={styles.detailSection}>
                       <Text style={styles.detailSectionTitle}>Negocio</Text>
                       <Text style={styles.businessNameText}>
-                        {selectedItem.businessName || cart.businessName || 'Localfy'}
+                        {businessName}
                       </Text>
                     </View>
                   </View>

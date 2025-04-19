@@ -27,6 +27,18 @@ export interface PointsReward {
   businessId?: string; // Optional: For business-specific rewards
 }
 
+// Add ActiveRedemption type for discounts
+export interface ActiveRedemption {
+  id: string;
+  name: string;
+  description?: string;
+  discountAmount?: number;
+  discountPercent?: number;
+  expiryDate?: firebase.firestore.Timestamp;
+  isUsed: boolean;
+  businessId?: string;
+}
+
 interface PointsContextType {
   totalPoints: number;
   transactions: PointsTransaction[];
@@ -41,6 +53,11 @@ interface PointsContextType {
   redeemPoints: (rewardId: string, pointsCost: number, rewardName: string) => Promise<boolean>;
   getAvailableRewards: () => Promise<void>;
   getUserTransactions: (limit?: number) => Promise<PointsTransaction[]>;
+  // Add the missing methods
+  getActiveRedemptions: () => Promise<ActiveRedemption[]>;
+  hasAvailableDiscount: () => boolean;
+  getAvailableDiscount: () => ActiveRedemption | null;
+  markRedemptionAsUsed: (redemptionId: string) => Promise<boolean>;
 }
 
 const PointsContext = createContext<PointsContextType | undefined>(undefined);
@@ -52,6 +69,8 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
   const [rewards, setRewards] = useState<PointsReward[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  // Add state for active redemptions
+  const [activeRedemptions, setActiveRedemptions] = useState<ActiveRedemption[]>([]);
   
   const db = firebase.firestore();
   
@@ -59,10 +78,15 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
   useEffect(() => {
     if (user) {
       refreshPoints();
+      // Also fetch active redemptions
+      getActiveRedemptions().catch(err => 
+        console.error('Error loading redemptions on mount:', err)
+      );
     } else {
       // Reset state when user logs out
       setTotalPoints(0);
       setTransactions([]);
+      setActiveRedemptions([]);
     }
   }, [user]);
   
@@ -572,6 +596,84 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     }
   };
   
+  /**
+   * Get user's active redemptions (discounts)
+   */
+  const getActiveRedemptions = async (): Promise<ActiveRedemption[]> => {
+    if (!user) return [];
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      const redemptionsRef = db.collection('userRedemptions')
+        .where('userId', '==', user.uid)
+        .where('isUsed', '==', false)
+        .where('expiryDate', '>', firebase.firestore.Timestamp.now());
+      
+      const redemptionsSnapshot = await redemptionsRef.get();
+      const redemptionsData = redemptionsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as ActiveRedemption[];
+      
+      // Cache the redemptions in state
+      setActiveRedemptions(redemptionsData);
+      return redemptionsData;
+    } catch (err: any) {
+      console.error('Error getting active redemptions:', err);
+      setError(err.message || 'Failed to get active redemptions');
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  };
+  
+  /**
+   * Check if user has any available discounts
+   */
+  const hasAvailableDiscount = (): boolean => {
+    return activeRedemptions.length > 0;
+  };
+  
+  /**
+   * Get the first available discount
+   */
+  const getAvailableDiscount = (): ActiveRedemption | null => {
+    if (!hasAvailableDiscount()) return null;
+    // Return the first available discount
+    // You could implement more complex logic here to choose the best discount
+    return activeRedemptions[0];
+  };
+  
+  /**
+   * Mark a redemption as used
+   */
+  const markRedemptionAsUsed = async (redemptionId: string): Promise<boolean> => {
+    if (!user) return false;
+    
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Update the redemption in Firestore
+      await db.collection('userRedemptions').doc(redemptionId).update({
+        isUsed: true,
+        usedAt: firebase.firestore.Timestamp.now()
+      });
+      
+      // Update local state
+      setActiveRedemptions(prev => prev.filter(r => r.id !== redemptionId));
+      return true;
+    } catch (err: any) {
+      console.error('Error marking redemption as used:', err);
+      setError(err.message || 'Failed to mark redemption as used');
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+  
   const value = {
     totalPoints,
     transactions,
@@ -585,7 +687,12 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     awardPointsForVisit,
     redeemPoints,
     getAvailableRewards,
-    getUserTransactions
+    getUserTransactions,
+    // Add the new methods to the context value
+    getActiveRedemptions,
+    hasAvailableDiscount,
+    getAvailableDiscount,
+    markRedemptionAsUsed
   };
   
   return (

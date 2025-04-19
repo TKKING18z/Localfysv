@@ -1,5 +1,8 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import {
+  NavigationContainer,
+  useNavigationContainerRef
+} from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -8,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { useChat, ChatProvider } from '../context/ChatContext';
 import * as Notifications from 'expo-notifications';
 import OfflineBanner from '../components/common/OfflineBanner';
+import { notificationService } from '../../services/NotificationService';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -66,6 +70,14 @@ import OrdersListScreen from '../screens/orders/OrdersListScreen';
 import BusinessOrdersScreen from '../screens/orders/BusinessOrdersScreen';
 // @ts-ignore
 import BusinessSelectorScreen from '../screens/orders/BusinessSelectorScreen';
+
+// Importar nueva pantalla de redes sociales
+import SocialMediaScreen from '../screens/SocialMediaScreen';
+
+// Import business onboarding screens
+import BusinessOnboardingWelcomeScreen from '../screens/onboarding/BusinessOnboardingWelcomeScreen';
+import BusinessOnboardingModeSelectionScreen from '../screens/onboarding/BusinessOnboardingModeSelectionScreen';
+import BusinessOnboardingStepsScreen from '../screens/onboarding/BusinessOnboardingStepsScreen';
 
 // Define the root stack parameter list with properly typed screen params
 export type RootStackParamList = {
@@ -129,6 +141,10 @@ export type RootStackParamList = {
     isCartPayment?: boolean; // Flag para indicar si el pago viene del carrito
     deliveryAddress?: string | null; // Dirección de entrega
     deliveryNotes?: string | null; // Notas para el repartidor
+    appliedDiscountId?: string; // ID del descuento aplicado
+    discountAmount?: number; // Cantidad del descuento aplicado
+    shouldAwardPoints?: boolean; // Si se deben otorgar puntos por la compra
+    pointsToAward?: number; // Cantidad de puntos a otorgar
   };
   // Nueva ruta para carrito
   Cart: {
@@ -153,6 +169,12 @@ export type RootStackParamList = {
   };
   // Nueva ruta para seleccionar negocio
   BusinessSelector: undefined;
+  // Nueva ruta para redes sociales
+  SocialMedia: undefined;
+  // Business onboarding screens
+  BusinessOnboardingWelcome: undefined;
+  BusinessOnboardingModeSelection: undefined;
+  BusinessOnboardingSteps: undefined;
 };
 
 // Define tab navigator parameter list
@@ -195,8 +217,6 @@ const CustomAddButton = ({onPress}: {onPress: () => void}) => (
     </View>
   </TouchableOpacity>
 );
-
-// Hook useChat ya importado arriba
 
 // Bottom Tab Navigator
 function MainTabs() {
@@ -325,91 +345,97 @@ const AuthStack = () => (
 
 // Main App Navigator
 const AppNavigator = () => {
-  // Usar el hook de autenticación
   const { user, isLoading } = useAuth();
-  const responseListener = useRef<any>();
-  const notificationListener = useRef<any>();
+  const navigationRef = useNavigationContainerRef<RootStackParamList>();
   const appState = useRef(AppState.currentState);
-  // Estados para manejar funciones del contexto
-  const [updateNotificationToken, setUpdateNotificationToken] = React.useState<((token: string) => Promise<void>) | undefined>(undefined);
 
   // Configurar manejadores de notificaciones
   useEffect(() => {
-    // Configurar cómo se manejarán las notificaciones cuando se reciban
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        priority: Notifications.AndroidNotificationPriority.HIGH,
-      }),
-    });
-    
-    // Escuchar cuando se reciben notificaciones mientras la app está abierta
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
-      console.log('[AppNavigator] Notification received in foreground:', notification);
-      // Aquí podrías reproducir un sonido, mostrar una alerta, etc.
+    // Verificar que el servicio esté disponible
+    if (!notificationService) {
+      console.error('[AppNavigator] NotificationService not available.');
+      return;
+    }
+
+    // Listener para notificaciones recibidas (app en primer plano)
+    const notificationReceivedSubscription = Notifications.addNotificationReceivedListener(notification => {
+      console.log('[AppNavigator] Notification received in foreground:', notification?.request?.content?.title);
+      // Opcional: Podrías usar el ChatContext para actualizar el badge count aquí si es necesario
+      // o mostrar una alerta in-app personalizada.
     });
 
-    // Escuchar cuando el usuario interactúa con una notificación
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
-      console.log('[AppNavigator] User tapped on notification:', response);
-      
-      // Obtener datos de la notificación
+    // Listener para respuesta a notificaciones (tap)
+    const notificationResponseSubscription = Notifications.addNotificationResponseReceivedListener(response => {
+      console.log('[AppNavigator] User tapped on notification:');
       const data = response.notification.request.content.data;
       console.log('[AppNavigator] Notification data:', data);
-      
-      // Navegar basado en el tipo de notificación
-      if (data && data.type === 'chat') {
-        // Navegar a la conversación específica
-        if (data.conversationId) {
-          // Aquí necesitaríamos tener acceso al objeto de navegación
-          // Esto se implementaría con una función separada o usando un contexto de navegación
-          console.log('[AppNavigator] Should navigate to conversation:', data.conversationId);
-          // navigation.navigate('Chat', { conversationId: data.conversationId });
+
+      // Verificar si la referencia de navegación está lista
+      if (navigationRef.isReady()) {
+        // Navegar basado en el tipo de notificación
+        if (data && data.type === 'chat' && data.conversationId) {
+          console.log('[AppNavigator] Navigating to Chat screen:', data.conversationId);
+          // Navegar a la conversación específica
+          // Asegúrate que 'Chat' y 'conversationId' coincidan con tu RootStackParamList
+          navigationRef.navigate('Chat', { conversationId: data.conversationId });
+        } else if (data && data.type === 'chat') {
+          // Si es de chat pero sin ID específico, ir a la lista
+          console.log('[AppNavigator] Navigating to Conversations screen');
+          navigationRef.navigate('MainTabs', { screen: 'Conversations' });
         } else {
-          // Navegar a la lista de conversaciones
-          console.log('[AppNavigator] Should navigate to conversations list');
-          // navigation.navigate('Conversations');
+          // Manejar otros tipos de notificaciones o simplemente ir a Home
+          console.log('[AppNavigator] Notification type not handled or unknown, navigating to Home.');
+          navigationRef.navigate('MainTabs', { screen: 'Home' });
         }
       }
     });
-    
-    // Configurar listener para cambios en el estado de la app
-    const subscription = AppState.addEventListener('change', nextAppState => {
+
+    // Listener para cambios de estado de la app (refrescar token)
+    const appStateSubscription = AppState.addEventListener('change', nextAppState => {
       if (
-        appState.current.match(/inactive|background/) && 
-        nextAppState === 'active' && 
+        appState.current.match(/inactive|background/) &&
+        nextAppState === 'active' &&
         user
       ) {
         console.log('[AppNavigator] App has come to the foreground, refreshing notification token');
-        // Volver a registrar el token cuando la app vuelve a primer plano
         refreshNotificationToken();
       }
-      
       appState.current = nextAppState;
+    });
+
+    // Comprobar si la app fue abierta por una notificación
+    notificationService.getLastNotificationResponse().then(response => {
+      if (response && navigationRef.isReady()) {
+        console.log('[AppNavigator] App opened via notification tap (initial check):');
+        const data = response.notification.request.content.data;
+        console.log('[AppNavigator] Initial notification data:', data);
+        // Lógica de navegación similar al listener
+        if (data && data.type === 'chat' && data.conversationId) {
+          navigationRef.navigate('Chat', { conversationId: data.conversationId });
+        } else if (data && data.type === 'chat') {
+          navigationRef.navigate('MainTabs', { screen: 'Conversations' });
+        }
+        // No navegar a Home aquí para evitar anular navegación inicial si no es de chat
+      }
     });
 
     return () => {
       // Limpiar listeners al desmontar
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
-      subscription.remove();
+      Notifications.removeNotificationSubscription(notificationReceivedSubscription);
+      Notifications.removeNotificationSubscription(notificationResponseSubscription);
+      appStateSubscription.remove();
     };
-  }, [user]);
-  
+  }, [user, navigationRef]);
+
   // Función para refrescar token de notificaciones
   const refreshNotificationToken = async () => {
     if (!user) return;
+    if (!notificationService) {
+      console.log('[AppNavigator] Notification service not available for refresh.');
+      return;
+    }
     
     try {
-      // Cargar dinámicamente el servicio de notificaciones
-      const notificationService = require('../../services/NotificationService').notificationService;
-      if (!notificationService) {
-        console.log('[AppNavigator] Notification service not available');
-        return;
-      }
-      
       // Verificar permisos
       const permissionResult = await notificationService.requestNotificationPermissions();
       if (permissionResult.success && permissionResult.data?.granted) {
@@ -418,9 +444,6 @@ const AppNavigator = () => {
         if (tokenResult.success && tokenResult.data?.token) {
           // Actualizar token en Firestore
           await notificationService.saveTokenToFirestore(user.uid, tokenResult.data.token);
-          if (typeof updateNotificationToken === 'function') {
-            updateNotificationToken(tokenResult.data.token);
-          }
           console.log('[AppNavigator] Notification token refreshed successfully');
         }
       }
@@ -433,13 +456,6 @@ const AppNavigator = () => {
   const AppWithChat = () => {
     // Usar el hook de chat dentro del contexto
     const chatContext = useChat();
-    
-    // Actualizar el token cuando el contexto cambie
-    useEffect(() => {
-      if (chatContext && chatContext.updateNotificationToken) {
-        setUpdateNotificationToken(() => chatContext.updateNotificationToken);
-      }
-    }, [chatContext]);
     
     return (
       <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -593,6 +609,26 @@ const AppNavigator = () => {
                 headerTintColor: '#007AFF'
               }} 
             />
+            
+            {/* Business Onboarding Flow */}
+            <Stack.Screen 
+              name="BusinessOnboardingWelcome" 
+              component={BusinessOnboardingWelcomeScreen}
+              options={{ headerShown: false }} 
+            />
+            <Stack.Screen 
+              name="BusinessOnboardingModeSelection" 
+              component={BusinessOnboardingModeSelectionScreen}
+              options={{ headerShown: false }} 
+            />
+            <Stack.Screen 
+              name="BusinessOnboardingSteps" 
+              component={BusinessOnboardingStepsScreen}
+              options={{ headerShown: false }} 
+            />
+            
+            {/* Nueva ruta para redes sociales */}
+            <Stack.Screen name="SocialMedia" component={SocialMediaScreen} />
           </>
         ) : (
           <Stack.Screen name="Auth" component={AuthStack} />
@@ -613,7 +649,7 @@ const AppNavigator = () => {
   // ChatProvider ya está importado
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navigationRef}>
       <OfflineBanner />
       <ChatProvider>
         <AppWithChat />

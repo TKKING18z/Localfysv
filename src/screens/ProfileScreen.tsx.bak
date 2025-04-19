@@ -677,6 +677,91 @@ const ProfileScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
         
+        {/* Social Media Section */}
+        <View style={styles.sectionContainer}>
+          <Text style={styles.sectionTitle}>Redes Sociales</Text>
+          
+          <View style={styles.socialLinksContainer}>
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://facebook.com/localfy')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#1877F2' }]}>
+                <MaterialIcons name="facebook" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>Facebook</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://instagram.com/localfy')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#C13584' }]}>
+                <MaterialIcons name="camera-alt" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>Instagram</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://twitter.com/localfy')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#1DA1F2' }]}>
+                <MaterialIcons name="alternate-email" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>Twitter</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.socialLinksContainer}>
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://youtube.com/c/localfy')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#FF0000' }]}>
+                <MaterialIcons name="smart-display" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>YouTube</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://localfy.app')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#007AFF' }]}>
+                <MaterialIcons name="public" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>Sitio Web</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.socialButton}
+              onPress={() => Linking.openURL('https://tiktok.com/@localfy')}
+            >
+              <View style={[styles.socialIconCircle, { backgroundColor: '#000000' }]}>
+                <MaterialIcons name="music-note" size={22} color="white" />
+              </View>
+              <Text style={styles.socialButtonText}>TikTok</Text>
+            </TouchableOpacity>
+          </View>
+          
+          <View style={styles.followUsContainer}>
+            <Text style={styles.followUsText}>¡Síguenos y forma parte de nuestra comunidad!</Text>
+            <TouchableOpacity 
+              style={styles.shareAppButton}
+              onPress={() => {
+                Share.share({
+                  message: '¡Descubre Localfy! La mejor app para encontrar negocios locales en tu área. Descárgala ahora: https://localfy.app/download',
+                  title: 'Localfy App'
+                });
+              }}
+            >
+              <MaterialIcons name="share" size={16} color="white" />
+              <Text style={styles.shareAppButtonText}>Compartir</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+        
         {/* Logout Button */}
         <TouchableOpacity
           style={styles.logoutButton}
@@ -1131,6 +1216,73 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(0, 122, 255, 0.05)',
     marginBottom: 8,
+  },
+  socialLinksContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  socialButton: {
+    width: '30%',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#F0F0F5',
+    borderRadius: 12,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  socialIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  socialButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333333',
+  },
+  followUsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#F0F0F5',
+    borderRadius: 12,
+    backgroundColor: '#F8F9FF',
+    marginTop: 8,
+  },
+  followUsText: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  shareAppButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  shareAppButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: 'white',
+    marginLeft: 6,
   },
 });
 

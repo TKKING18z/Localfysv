@@ -1,10 +1,10 @@
-import React, { memo, useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Dimensions } from 'react-native';
+import React, { memo, useEffect, useState, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Dimensions, Platform, Image } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Image } from 'expo-image';
 import { Business } from '../context/BusinessContext';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import { useNetwork } from '../context/NetworkContext';
 
 interface BusinessCardProps {
   business: Business;
@@ -12,52 +12,85 @@ interface BusinessCardProps {
   distance?: string;
   onPress: () => void;
   onFavoritePress: () => void;
-  showOpenStatus?: boolean; // Added property
-  style?: any; // Added style property
+  showOpenStatus?: boolean;
+  style?: any;
+  isVisible?: boolean;
 }
 
 const { width } = Dimensions.get('window');
-const cardWidth = (width - 48) / 2; // 2 columns with padding
+const cardWidth = (width - 48) / 2;
+const isIOS = Platform.OS === 'ios'; // Define outside component to avoid recreation
 
-const BusinessCard: React.FC<BusinessCardProps> = ({
+// Move this outside component to avoid recreating on every render
+const getPlaceholderColor = (name: string) => {
+  const colors = [
+    '#007AFF', '#34C759', '#FF9500', '#FF2D55', '#AF52DE', 
+    '#5856D6', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
+  ];
+  const sum = name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  return colors[sum % colors.length];
+};
+
+const BusinessCard: React.FC<BusinessCardProps> = memo(({
   business,
   isFavorite,
   distance,
   onPress,
   onFavoritePress,
-  style, // Use the style prop
-  showOpenStatus = true  // Enable by default
+  style,
+  showOpenStatus = true,
+  isVisible = true
 }) => {
-  // Estado para almacenar la información más reciente del negocio
+  // Use network context for adaptive loading
+  const { isSlowConnection, isConnected } = useNetwork();
+  
+  // Use local state for current business, but don't update too frequently
   const [currentBusiness, setCurrentBusiness] = useState<Business>(business);
-  // Referencia para controlar si ya estamos escuchando cambios
-  const isListeningRef = useRef(false);
-  // Almacenar la última vez que actualizamos datos para limitar la frecuencia
+  const [listenerId, setListenerId] = useState<string | null>(null);
   const lastUpdateRef = useRef(Date.now());
   
-  // Configurar escucha en tiempo real para los cambios en el negocio
+  // Añadir estado para tracking de carga de imágenes
+  const [imageLoaded, setImageLoaded] = useState(false);
+  
+  // Estado para el manejo de errores de imagen
+  const [imageError, setImageError] = useState(false);
+  
+  // Create an optimized interval for updates based on connection speed
+  const updateInterval = useMemo(() => isSlowConnection ? 10000 : 5000, [isSlowConnection]);
+
+  // Memoize business data that doesn't change often
+  const placeholderColor = useMemo(() => getPlaceholderColor(business.name), [business.name]);
+  const firstLetter = useMemo(() => business.name.charAt(0).toUpperCase(), [business.name]);
+  
+  // Optimizar el listener para que solo se active cuando el componente es visible
   useEffect(() => {
-    // Actualizar el estado local cuando cambie la prop business
-    setCurrentBusiness(business);
+    // Update local state when business prop changes
+    if (business.id !== currentBusiness.id) {
+      setCurrentBusiness(business);
+    }
     
-    // Solo establecer escucha si tenemos un ID de negocio y no estamos ya escuchando
-    if (!business || !business.id || isListeningRef.current) {
+    // Skip real-time updates if component is not visible, we don't have connectivity, 
+    // or on slow connections with existing listener
+    if (!isVisible || !business.id || !isConnected || (isSlowConnection && listenerId)) {
       return;
     }
     
-    // Marcar que estamos escuchando para evitar duplicados
-    isListeningRef.current = true;
+    // Cleanup previous listener
+    if (listenerId) {
+      firebase.firestore().collection('businesses').doc(business.id).onSnapshot(() => {});
+      setListenerId(null);
+    }
     
+    // Set up new listener with throttling - sólo si es visible
     const businessRef = firebase.firestore().collection('businesses').doc(business.id);
     
-    // Escuchar cambios en tiempo real - con throttling para evitar excesivas actualizaciones
     const unsubscribe = businessRef.onSnapshot(
       (doc) => {
         if (doc.exists) {
-          // Verificar si han pasado al menos 2 segundos desde la última actualización
+          // Throttle updates to prevent excessive renders
           const now = Date.now();
-          if (now - lastUpdateRef.current < 2000) {
-            return; // Ignorar actualizaciones demasiado frecuentes
+          if (now - lastUpdateRef.current < updateInterval) {
+            return;
           }
           
           lastUpdateRef.current = now;
@@ -67,82 +100,78 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
             ...doc.data()
           } as Business;
           
-          // Solo actualizar si hay cambios relevantes
+          // Only update if there are significant changes
           if (JSON.stringify(updatedBusiness) !== JSON.stringify(currentBusiness)) {
             setCurrentBusiness(updatedBusiness);
           }
         }
       },
       (error) => {
-        console.error('Error al escuchar cambios en el negocio:', error);
+        console.error('Error listening to business updates:', error);
       }
     );
     
-    // Limpiar la escucha cuando el componente se desmonte
+    setListenerId(business.id);
+    
     return () => {
       unsubscribe();
-      isListeningRef.current = false;
+      setListenerId(null);
     };
-  }, [business.id]);
+  }, [business.id, business, isConnected, isSlowConnection, updateInterval, isVisible, currentBusiness.id]);
   
-  // Utilizamos currentBusiness en lugar de business en todo el componente para asegurar
-  // que siempre estamos mostrando los datos más actualizados
-  
-  // Determinar la imagen a mostrar
-  const getBusinessImage = () => {
+  // Memoize business image to prevent recreating on each render
+  const businessImage = useMemo(() => {
     if (currentBusiness.images && currentBusiness.images.length > 0) {
-      // Primero busca la imagen marcada como principal
       const mainImage = currentBusiness.images.find(img => img.isMain);
       if (mainImage && mainImage.url) {
         return mainImage.url;
       }
-      // Si no hay imagen principal, usa la primera
       if (currentBusiness.images[0].url) {
         return currentBusiness.images[0].url;
       }
     }
     return null;
-  };
+  }, [currentBusiness.images]);
   
-  // Obtener imagen o null si no hay
-  const businessImage = getBusinessImage();
+  // Determine cache policy based on network
+  const cachePolicy = useMemo(() => 
+    isSlowConnection ? "disk" : "memory-disk", 
+  [isSlowConnection]);
   
-  // Generar un color basado en el nombre del negocio para el placeholder
-  const getPlaceholderColor = () => {
-    const colors = [
-      '#007AFF', '#34C759', '#FF9500', '#FF2D55', '#AF52DE', 
-      '#5856D6', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
-    ];
-    const sum = currentBusiness.name.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return colors[sum % colors.length];
-  };
-  
-  // Obtener la primera letra del nombre del negocio
-  const getFirstLetter = () => {
-    return currentBusiness.name.charAt(0).toUpperCase();
-  };
+  // Determine image size based on connection (lower quality for slow connection)
+  const imageQuality = useMemo(() => {
+    // If the URL contains options for resizing, modify them based on connection
+    if (businessImage && businessImage.includes('?') && isSlowConnection) {
+      // Reducir aún más la calidad para conexiones lentas y muchos negocios
+      return businessImage + '&quality=low&width=300';
+    } else if (businessImage && businessImage.includes('?')) {
+      // Calidad normal pero con tamaño controlado
+      return businessImage + '&width=500';
+    }
+    return businessImage;
+  }, [businessImage, isSlowConnection]);
 
-  // Truncar nombre si es muy largo
-  const truncateName = (name: string, maxLength: number = 20) => {
-    if (name.length <= maxLength) return name;
-    return name.substring(0, maxLength) + '...';
-  };
+  // Memoize truncated name to prevent recalculation
+  const truncatedName = useMemo(() => {
+    const maxLength = 20;
+    if (currentBusiness.name.length <= maxLength) return currentBusiness.name;
+    return currentBusiness.name.substring(0, maxLength) + '...';
+  }, [currentBusiness.name]);
 
-  // Función para determinar si el negocio está abierto o cerrado
-  const isBusinessOpen = () => {
-    if (!currentBusiness.businessHours) return false;
+  // Memoize isOpen calculation to avoid recalculating on every render
+  const isOpen = useMemo(() => {
+    // Solo calcular si es necesario mostrar el estado
+    if (!showOpenStatus || !currentBusiness.businessHours) return false;
 
     const now = new Date();
     const dayOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'][now.getDay()];
     const currentHour = now.getHours();
     const currentMinutes = now.getMinutes();
-    const currentTime = currentHour * 60 + currentMinutes; // Convertir a minutos
+    const currentTime = currentHour * 60 + currentMinutes;
 
-    // Acceder de forma segura a las horas del día actual
     const dayHours = currentBusiness.businessHours[dayOfWeek];
     if (!dayHours || dayHours.closed) return false;
 
-    // Analizar horarios de apertura y cierre (formato como "9:00" o "21:30")
     try {
       const openTimeParts = dayHours.open?.split(':').map(Number) || [0, 0];
       const closeTimeParts = dayHours.close?.split(':').map(Number) || [0, 0];
@@ -154,31 +183,40 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
     } catch (error) {
       return false;
     }
+  }, [currentBusiness.businessHours, showOpenStatus]);
+  
+  // Agregar función para manejar carga de imágenes
+  const handleImageLoad = () => {
+    setImageLoaded(true);
   };
-
-  // Determinar si el negocio está abierto
-  const isOpen = isBusinessOpen();
+  
+  // Agregar función para manejar errores de imágenes
+  const handleImageError = () => {
+    setImageError(true);
+    console.error(`Error loading image for business: ${business.name}`);
+  };
 
   return (
     <TouchableOpacity
-      style={[styles.container, style]} // Apply external style
+      style={[styles.container, style]}
       onPress={onPress}
       activeOpacity={0.9}
+      hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
     >
       {/* Background image or placeholder */}
       <View style={styles.imageContainer}>
-        {businessImage ? (
+        {businessImage && !imageError ? (
+          // Usar el componente Image nativo de React Native para máxima compatibilidad
           <Image
             source={{ uri: businessImage }}
             style={styles.image}
-            contentFit="cover"
-            cachePolicy="memory-disk"
-            placeholder={getPlaceholderColor()}
-            transition={200}
+            resizeMode="cover"
+            onLoad={handleImageLoad}
+            onError={handleImageError}
           />
         ) : (
-          <View style={[styles.placeholderContainer, { backgroundColor: getPlaceholderColor() }]}>
-            <Text style={styles.placeholderText}>{getFirstLetter()}</Text>
+          <View style={[styles.placeholderContainer, { backgroundColor: placeholderColor }]}>
+            <Text style={styles.placeholderText}>{firstLetter}</Text>
           </View>
         )}
         
@@ -195,7 +233,7 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
           />
         </TouchableOpacity>
 
-        {/* Open/Closed Status Badge */}
+        {/* Open/Closed Status Badge - Only render if needed */}
         {showOpenStatus && (
           <View style={[
             styles.statusBadge,
@@ -210,14 +248,14 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
 
       {/* Business information */}
       <View style={styles.infoContainer}>
-        <Text style={styles.name} numberOfLines={1}>
-          {truncateName(currentBusiness.name)}
+        <Text style={styles.name} numberOfLines={1} ellipsizeMode="tail">
+          {truncatedName}
         </Text>
-        <Text style={styles.category} numberOfLines={1}>
+        <Text style={styles.category} numberOfLines={1} ellipsizeMode="tail">
           {currentBusiness.category || "Sin categoría"}
         </Text>
         
-        {/* Distance (if available) */}
+        {/* Only render distance if available */}
         {distance && (
           <View style={styles.distanceContainer}>
             <MaterialIcons name="location-on" size={12} color="#8E8E93" />
@@ -227,22 +265,37 @@ const BusinessCard: React.FC<BusinessCardProps> = ({
       </View>
     </TouchableOpacity>
   );
-};
+}, (prevProps, nextProps) => {
+  // Custom comparison to prevent unnecessary re-renders
+  const areEqual = 
+    prevProps.business.id === nextProps.business.id &&
+    prevProps.isFavorite === nextProps.isFavorite &&
+    prevProps.distance === nextProps.distance &&
+    prevProps.showOpenStatus === nextProps.showOpenStatus &&
+    prevProps.isVisible === nextProps.isVisible;
+  
+  return areEqual;
+});
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1, // Take up all available space in parent container
+    flex: 1,
     borderRadius: 16,
     backgroundColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
+    shadowOpacity: Platform.OS === 'ios' ? 0.1 : 0.05,
+    shadowRadius: Platform.OS === 'ios' ? 4 : 2,
     elevation: 2,
     overflow: 'hidden',
+    // Add hardware acceleration hint for Android
+    ...(Platform.OS === 'android' && {
+      backfaceVisibility: 'hidden',
+      renderToHardwareTextureAndroid: true,
+    }),
   },
   imageContainer: {
-    height: 120, // Fixed height for image container
+    height: 120,
     position: 'relative',
   },
   image: {
@@ -271,6 +324,11 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.3)',
     borderRadius: 12,
     padding: 6,
+    // Add hardware acceleration hint
+    ...(Platform.OS === 'android' && {
+      backfaceVisibility: 'hidden',
+      renderToHardwareTextureAndroid: true,
+    }),
   },
   infoContainer: {
     padding: 12,
@@ -295,7 +353,6 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     marginLeft: 2,
   },
-  // Estilos para el badge de estado (abierto/cerrado)
   statusBadge: {
     position: 'absolute',
     top: 8,
@@ -306,10 +363,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.6)',
   },
   openBadge: {
-    backgroundColor: 'rgba(52, 199, 89, 0.8)', // Verde semi-transparente
+    backgroundColor: 'rgba(52, 199, 89, 0.8)',
   },
   closedBadge: {
-    backgroundColor: 'rgba(255, 59, 48, 0.8)', // Rojo semi-transparente
+    backgroundColor: 'rgba(255, 59, 48, 0.8)',
   },
   statusText: {
     color: 'white',
@@ -318,5 +375,4 @@ const styles = StyleSheet.create({
   },
 });
 
-// Using memo to prevent unnecessary re-renders
-export default memo(BusinessCard);
+export default BusinessCard;

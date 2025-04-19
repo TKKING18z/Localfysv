@@ -1,7 +1,8 @@
-import React, { createContext, useState, useContext, useEffect, ReactNode } from 'react';
+import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 // Interfaces para los nuevos tipos de datos
 export interface BusinessHours {
@@ -88,6 +89,11 @@ interface BusinessContextType {
   getFavoriteBusinesses: () => Business[];
   getBusinessById: (id: string) => Promise<Business | null>;
   updateBusiness: (id: string, data: Partial<Business>) => Promise<boolean>;
+  loadMoreBusinesses: () => Promise<boolean>;
+  hasMoreBusinesses: boolean;
+  resetPagination: () => void;
+  observeBusinesses: (businessIds: string[]) => () => void;
+  dataReady: boolean;
 }
 
 // Create context
@@ -102,6 +108,20 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
+  
+  // Add data ready state to prevent premature rendering
+  const [dataReady, setDataReady] = useState<boolean>(false);
+  
+  // Añadir estado para paginación
+  const [lastVisible, setLastVisible] = useState<firebase.firestore.QueryDocumentSnapshot | null>(null);
+  const [hasMoreBusinesses, setHasMoreBusinesses] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+  
+  // Estado para almacenar los observadores activos
+  const [activeListeners, setActiveListeners] = useState<{[id: string]: () => void}>({});
+  
+  // Tamaño de página para paginación
+  const PAGE_SIZE = 20;
   
   // Load favorites from AsyncStorage
   useEffect(() => {
@@ -206,10 +226,31 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     };
   };
   
-  // Function to fetch businesses from Firestore
+  // Safe state update function to prevent bubblingEventTypes errors
+  const safeStateUpdate = (updateFn: () => void, delay = 100) => {
+    // En iOS, usar tiempos de espera más largos
+    const actualDelay = Platform.OS === 'ios' ? delay * 2 : delay;
+    
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        try {
+          updateFn();
+          resolve();
+        } catch (err) {
+          console.error('Error in state update:', err);
+          resolve();
+        }
+      }, actualDelay);
+    });
+  };
+  
+  // Función optimizada para cargar negocios con paginación
   const fetchBusinesses = async () => {
-    setLoading(true);
-    setError(null);
+    await safeStateUpdate(() => {
+      setLoading(true);
+      setError(null);
+      setDataReady(false); // Ensure data is marked as not ready during fetch
+    });
     
     try {
       // Verificar si el usuario está autenticado
@@ -219,14 +260,37 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
       // Asegurarnos que Firebase esté correctamente inicializado
       if (firebase.apps.length === 0) {
         console.error('Firebase no está inicializado correctamente');
-        setError('Error en la inicialización de la aplicación. Por favor, reinicia la app.');
-        setLoading(false);
+        await safeStateUpdate(() => {
+          setError('Error en la inicialización de la aplicación. Por favor, reinicia la app.');
+          setLoading(false);
+        });
         return;
       }
       
-      // Intentar acceder a la colección de negocios
-      const businessesCollection = firebase.firestore().collection('businesses');
+      // Resetear el estado de paginación
+      await safeStateUpdate(() => {
+        setLastVisible(null);
+        setHasMoreBusinesses(true);
+      });
+      
+      // Intentar acceder a la colección de negocios con paginación
+      const businessesCollection = firebase.firestore().collection('businesses')
+        .orderBy('createdAt', 'desc')
+        .limit(PAGE_SIZE);
+      
       const snapshot = await businessesCollection.get();
+      
+      if (snapshot.empty) {
+        await safeStateUpdate(() => {
+          setBusinesses([]);
+          setFilteredBusinesses([]);
+          setCategories([]);
+          setHasMoreBusinesses(false);
+          setLoading(false);
+          setDataReady(true); // Mark data as ready even when empty
+        }, 200);
+        return;
+      }
       
       const businessesList: Business[] = [];
       const categoriesSet = new Set<string>();
@@ -239,21 +303,199 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         if (data.category) categoriesSet.add(data.category);
       });
       
+      // Guardar el último documento para paginación
+      await safeStateUpdate(() => {
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMoreBusinesses(snapshot.docs.length === PAGE_SIZE);
+      });
+      
       console.log(`Negocios cargados: ${businessesList.length}`);
       
-      setBusinesses(businessesList);
-      setFilteredBusinesses(selectedCategory 
-        ? businessesList.filter(b => b.category === selectedCategory)
-        : businessesList
-      );
-      setCategories(Array.from(categoriesSet));
-      setLoading(false);
+      // First update non-UI-affecting state
+      await safeStateUpdate(() => {
+        setBusinesses(businessesList);
+        setFilteredBusinesses(selectedCategory 
+          ? businessesList.filter(b => b.category === selectedCategory)
+          : businessesList
+        );
+        setCategories(Array.from(categoriesSet));
+      }, 200);
+      
+      // Then update UI-affecting state with additional delay
+      await safeStateUpdate(() => {
+        setLoading(false);
+        setDataReady(true); // Mark data as ready for rendering
+      }, 300);
     } catch (err) {
       console.error('Error fetching businesses:', err);
-      setError('Error al cargar los negocios. Por favor, intenta más tarde.');
-      setLoading(false);
+      await safeStateUpdate(() => {
+        setError('Error al cargar los negocios. Por favor, intenta más tarde.');
+        setLoading(false);
+        setDataReady(true); // Mark data as ready even on error
+      }, 200);
     }
   };
+  
+  // Función para cargar más negocios (paginación)
+  const loadMoreBusinesses = async (): Promise<boolean> => {
+    if (isLoadingMore || !hasMoreBusinesses || !lastVisible) {
+      return false;
+    }
+    
+    await safeStateUpdate(() => {
+      setIsLoadingMore(true);
+    });
+    
+    try {
+      let query = firebase.firestore().collection('businesses')
+        .orderBy('createdAt', 'desc')
+        .startAfter(lastVisible)
+        .limit(PAGE_SIZE);
+      
+      if (selectedCategory) {
+        query = firebase.firestore().collection('businesses')
+          .where('category', '==', selectedCategory)
+          .orderBy('createdAt', 'desc')
+          .startAfter(lastVisible)
+          .limit(PAGE_SIZE);
+      }
+      
+      const snapshot = await query.get();
+      
+      if (snapshot.empty) {
+        await safeStateUpdate(() => {
+          setHasMoreBusinesses(false);
+          setIsLoadingMore(false);
+        });
+        return false;
+      }
+      
+      const newBusinesses: Business[] = [];
+      const categoriesSet = new Set<string>(categories);
+      
+      snapshot.forEach(doc => {
+        const data = doc.data();
+        const business = normalizeBusinessData(doc.id, data);
+        
+        newBusinesses.push(business);
+        if (data.category) categoriesSet.add(data.category);
+      });
+      
+      // Update pagination state
+      await safeStateUpdate(() => {
+        setLastVisible(snapshot.docs[snapshot.docs.length - 1]);
+        setHasMoreBusinesses(snapshot.docs.length === PAGE_SIZE);
+      });
+      
+      // Update data state
+      await safeStateUpdate(() => {
+        setBusinesses(prev => [...prev, ...newBusinesses]);
+        
+        if (selectedCategory) {
+          const filteredNew = newBusinesses.filter(b => b.category === selectedCategory);
+          setFilteredBusinesses(prev => [...prev, ...filteredNew]);
+        } else {
+          setFilteredBusinesses(prev => [...prev, ...newBusinesses]);
+        }
+        
+        setCategories(Array.from(categoriesSet));
+      }, 200);
+      
+      // Finally update loading state
+      await safeStateUpdate(() => {
+        setIsLoadingMore(false);
+      }, 200);
+      
+      return true;
+    } catch (err) {
+      console.error('Error loading more businesses:', err);
+      await safeStateUpdate(() => {
+        setIsLoadingMore(false);
+      }, 200);
+      return false;
+    }
+  };
+  
+  // Función para reiniciar la paginación
+  const resetPagination = () => {
+    safeStateUpdate(() => {
+      setLastVisible(null);
+      setHasMoreBusinesses(true);
+    });
+  };
+  
+  // Función optimizada para observar solo negocios específicos
+  const observeBusinesses = useCallback((businessIds: string[]) => {
+    // Limpiar listeners anteriores que ya no necesitamos
+    Object.entries(activeListeners).forEach(([id, unsubscribe]) => {
+      if (!businessIds.includes(id)) {
+        unsubscribe();
+        safeStateUpdate(() => {
+          setActiveListeners(prev => {
+            const newListeners = {...prev};
+            delete newListeners[id];
+            return newListeners;
+          });
+        });
+      }
+    });
+    
+    // Añadir nuevos listeners solo para los IDs que no están siendo observados
+    const newListenersMap: {[id: string]: () => void} = {};
+    
+    businessIds.forEach(id => {
+      // Skip if already listening
+      if (activeListeners[id]) return;
+      
+      const unsubscribe = firebase.firestore()
+        .collection('businesses')
+        .doc(id)
+        .onSnapshot(
+          (doc) => {
+            if (doc.exists) {
+              const updatedBusiness = normalizeBusinessData(doc.id, doc.data());
+              
+              // Use safeStateUpdate to update businesses data
+              safeStateUpdate(() => {
+                setBusinesses(prev => 
+                  prev.map(b => b.id === id ? updatedBusiness : b)
+                );
+              }, 200);
+              
+              safeStateUpdate(() => {
+                setFilteredBusinesses(prev => 
+                  prev.map(b => b.id === id ? updatedBusiness : b)
+                );
+              }, 200);
+            }
+          },
+          (error) => {
+            console.error(`Error observing business ${id}:`, error);
+          }
+        );
+      
+      newListenersMap[id] = unsubscribe;
+    });
+    
+    // Actualizar el mapa de listeners activos
+    if (Object.keys(newListenersMap).length > 0) {
+      safeStateUpdate(() => {
+        setActiveListeners(prev => ({...prev, ...newListenersMap}));
+      }, 100);
+    }
+    
+    // Devolver función para limpiar todos los listeners
+    return () => {
+      Object.values(newListenersMap).forEach(unsubscribe => unsubscribe());
+    };
+  }, [activeListeners]);
+  
+  // Limpiar todos los listeners al desmontar
+  useEffect(() => {
+    return () => {
+      Object.values(activeListeners).forEach(unsubscribe => unsubscribe());
+    };
+  }, [activeListeners]);
   
   // Function to get a single business by ID
   const getBusinessById = async (id: string): Promise<Business | null> => {
@@ -321,7 +563,17 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   
   // Initial data load
   useEffect(() => {
-    fetchBusinesses();
+    console.log('Initial data load in BusinessContext');
+    
+    // En iOS, esperar un poco más antes de cargar datos iniciales
+    // para asegurar que todos los componentes nativos estén inicializados
+    const initialLoadDelay = Platform.OS === 'ios' ? 500 : 0;
+    
+    const timer = setTimeout(() => {
+      fetchBusinesses();
+    }, initialLoadDelay);
+    
+    return () => clearTimeout(timer);
   }, []);
   
   // Filter businesses when category changes
@@ -335,13 +587,15 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   
   // Toggle favorite status for a business
   const toggleFavorite = (businessId: string) => {
-    setFavorites(prevFavorites => {
-      if (prevFavorites.includes(businessId)) {
-        return prevFavorites.filter(id => id !== businessId);
-      } else {
-        return [...prevFavorites, businessId];
-      }
-    });
+    safeStateUpdate(() => {
+      setFavorites(prevFavorites => {
+        if (prevFavorites.includes(businessId)) {
+          return prevFavorites.filter(id => id !== businessId);
+        } else {
+          return [...prevFavorites, businessId];
+        }
+      });
+    }, 100);
   };
   
   // Check if a business is in favorites
@@ -369,7 +623,12 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     favorites,
     getFavoriteBusinesses,
     getBusinessById,
-    updateBusiness
+    updateBusiness,
+    loadMoreBusinesses,
+    hasMoreBusinesses,
+    resetPagination,
+    observeBusinesses,
+    dataReady
   };
   
   return (

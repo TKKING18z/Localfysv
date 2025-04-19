@@ -68,14 +68,6 @@ const LoginScreen: React.FC = () => {
                         const userCredential = await firebase.auth().signInWithCredential(credential);
                         if (userCredential.user) {
                             await saveSessionData(userCredential.user, 'google');
-                            navigation.dispatch(
-                                CommonActions.reset({
-                                    index: 0,
-                                    routes: [
-                                        { name: 'MainTabs' }
-                                    ],
-                                })
-                            );
                         }
                     } catch (error) {
                         await googleAuthService.clearGoogleSession();
@@ -161,14 +153,6 @@ const LoginScreen: React.FC = () => {
             
             if (success) {
                 console.log("Login exitoso");
-                navigation.dispatch(
-                    CommonActions.reset({
-                        index: 0,
-                        routes: [
-                            { name: 'MainTabs' }
-                        ],
-                    })
-                );
             }
         } catch (error: any) {
             console.log("Error durante el login:", error);
@@ -198,14 +182,6 @@ const LoginScreen: React.FC = () => {
             
             if (result.success && result.user) {
                 await saveSessionData(result.user, 'google');
-                navigation.dispatch(
-                    CommonActions.reset({
-                        index: 0,
-                        routes: [
-                            { name: 'MainTabs' }
-                        ],
-                    })
-                );
             } else if (!result.success && result.error) {
                 if (result.error !== "Inicio de sesión con Google cancelado") {
                     Alert.alert("Error", result.error);

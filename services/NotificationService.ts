@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
+import 'firebase/compat/functions';
 
 // Tipo de respuesta estándar para todos los servicios
 export interface NotificationResult<T = any> {
@@ -77,233 +78,157 @@ export const requestNotificationPermissions = async (): Promise<NotificationResu
 export const registerForPushNotifications = async (): Promise<NotificationResult<{ token: string | null }>> => {
   try {
     // Verificar que la plataforma es compatible con push
-    const isWeb = !['ios', 'android'].includes(Platform.OS);
-    if (isWeb) {
-      console.log('[NotificationService] Push notifications not supported on this platform:', Platform.OS);
-      return {
-        success: false,
-        error: {
-          code: 'notifications/platform-not-supported',
-          message: 'Las notificaciones push no están soportadas en esta plataforma'
-        }
-      };
-    }
-
-    // En desarrollo, no necesitamos validar el projectId
-    if (!__DEV__) {
-      // En producción, verificaríamos la configuración
-      console.log('[NotificationService] Running in production mode, projectId would be required');
-      // No validamos para permitir el desarrollo
+    if (Platform.OS === 'web') {
+      console.warn('[NotificationService] Push notifications not fully supported on web.');
+      // Podríamos retornar un token simulado o null dependiendo de la estrategia
+      return { success: true, data: { token: null } };
     }
 
     // Solicitar permisos primero
     const permissionResult = await requestNotificationPermissions();
-    if (!permissionResult.success) {
+    if (!permissionResult.success || !permissionResult.data?.granted) {
       return {
         success: false,
-        error: permissionResult.error
-      };
-    }
-    
-    // Verificar que se otorgaron los permisos
-    if (!permissionResult.data?.granted) {
-      return {
-        success: false,
-        error: {
+        error: permissionResult.error || {
           code: 'notifications/permission-denied',
-          message: 'Los permisos de notificación no fueron otorgados'
-        }
+          message: 'Los permisos de notificación no fueron otorgados',
+        },
       };
     }
 
     // Obtener el token de Expo para notificaciones push
-    // En desarrollo, usamos un token simulado sin projectId
-    let tokenData;
-    if (__DEV__) {
-      try {
-        tokenData = await Notifications.getExpoPushTokenAsync({});
-      } catch (error) {
-        console.log('[NotificationService] Using development token instead');
-        // Si falla, usamos un token simulado
-        tokenData = { data: 'ExponentPushToken[development]' };
+    let expoPushToken;
+    try {
+      // Intenta obtener el token usando projectId si está disponible
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+      if (!projectId && !__DEV__) {
+        console.error('[NotificationService] Missing Expo projectId in app config (extra.eas.projectId). Notifications might not work in production.');
+        // No lanzamos error para permitir desarrollo/pruebas sin EAS projectId
       }
-    } else {
-      // En producción, necesitas un projectId válido configurado en EAS
-      tokenData = await Notifications.getExpoPushTokenAsync({
-        // Debes configurar tu projectId de Expo en EAS
-        // projectId: 'tu-uuid-de-proyecto-expo',
+      expoPushToken = await Notifications.getExpoPushTokenAsync({
+        projectId: projectId,
       });
+      console.log('[NotificationService] Expo Push token:', expoPushToken.data);
+    } catch (error: any) {
+      console.error('[NotificationService] Error getting Expo Push Token:', error);
+      // Considera retornar error o un token nulo/simulado
+      return {
+        success: false,
+        error: {
+          code: 'notifications/token-fetch-error',
+          message: `Failed to get push token: ${error.message}`,
+        },
+      };
     }
 
-    console.log('[NotificationService] Push token:', tokenData.data);
+    // Configuración específica de Android (Canal de Notificación)
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250], // Patrón de vibración
+        lightColor: '#FF231F7C', // Color de la luz LED (si aplica)
+      });
+    }
 
     return {
       success: true,
       data: {
-        token: tokenData.data
-      }
+        token: expoPushToken.data,
+      },
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('[NotificationService] Error registering for push:', error);
     return {
       success: false,
       error: {
         code: 'notifications/registration-error',
-        message: 'Error al registrar el dispositivo para notificaciones'
-      }
+        message: error.message || 'Error al registrar el dispositivo para notificaciones',
+      },
     };
   }
 };
 
-// Guardar token en Firestore
-export const saveTokenToFirestore = async (userId: string, token: string): Promise<NotificationResult<boolean>> => {
+// Guardar token en Firestore (versión simplificada usando notificationToken)
+export const saveTokenToFirestore = async (userId: string, token: string | null): Promise<NotificationResult<boolean>> => {
+  // Si el token es nulo (ej. en web o error), no intentamos guardarlo
+  if (!token) {
+    console.log('[NotificationService] No token provided, skipping save to Firestore.');
+    return { success: true, data: false }; // Indica que no se guardó nada
+  }
+
   try {
-    if (!userId || !token) {
+    if (!userId) {
       return {
         success: false,
         error: {
-          code: 'notifications/invalid-params',
-          message: 'ID de usuario o token inválidos'
-        }
+          code: 'notifications/invalid-user',
+          message: 'ID de usuario inválido para guardar token',
+        },
       };
     }
 
-    // Primero obtenemos el timestamp actual
-    const now = new Date();
-    
-    // Verificar si el documento del usuario existe
     const userRef = firebase.firestore().collection('users').doc(userId);
-    const userDoc = await userRef.get();
-    
-    if (!userDoc.exists) {
-      console.log('[NotificationService] User document does not exist, creating new entry');
-      // Si no existe, creamos el documento con los datos iniciales
-      await userRef.set({
-        notificationToken: token,
-        devices: [{
-          token,
-          platform: Platform.OS,
-          updatedAt: now
-        }],
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-    } else {
-      // Si ya existe, actualizamos los datos
-      // Obtenemos los dispositivos actuales para evitar duplicados
-      const userData = userDoc.data() || {};
-      const devices = userData.devices || [];
-      
-      // Verificamos si el token ya existe
-      const tokenExists = devices.some((device: any) => device.token === token);
-      
-      if (tokenExists) {
-        console.log('[NotificationService] Token already exists, updating timestamp');
-        // Si el token ya existe, actualizamos con arrayRemove y luego arrayUnion
-        await userRef.update({
-          notificationToken: token,
-          devices: firebase.firestore.FieldValue.arrayRemove(
-            ...devices.filter((device: any) => device.token === token)
-          ),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        
-        // Agregamos el dispositivo con timestamp actualizado
-        await userRef.update({
-          devices: firebase.firestore.FieldValue.arrayUnion({
-            token,
-            platform: Platform.OS,
-            updatedAt: now
-          })
-        });
-      } else {
-        console.log('[NotificationService] Adding new token to devices array');
-        // Si el token no existe, simplemente lo agregamos
-        await userRef.update({
-          notificationToken: token,
-          devices: firebase.firestore.FieldValue.arrayUnion({
-            token,
-            platform: Platform.OS,
-            updatedAt: now
-          }),
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    }
+    const updateData = {
+      notificationToken: token,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      // Opcional: guardar plataforma
+      lastPlatform: Platform.OS,
+    };
 
-    console.log('[NotificationService] Token saved to Firestore successfully');
+    // Usamos set con merge:true para crear o actualizar el documento
+    await userRef.set(updateData, { merge: true });
+
+    console.log(`[NotificationService] Token saved/updated for user ${userId}`);
     return {
       success: true,
-      data: true
+      data: true,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('[NotificationService] Error saving token to Firestore:', error);
     return {
       success: false,
       error: {
         code: 'notifications/token-save-error',
-        message: 'Error al guardar token en la base de datos'
-      }
+        message: error.message || 'Error al guardar token en la base de datos',
+      },
     };
   }
 };
 
 // Eliminar token de Firestore (al cerrar sesión)
-export const removeTokenFromFirestore = async (userId: string, token: string): Promise<NotificationResult<boolean>> => {
+export const removeTokenFromFirestore = async (userId: string): Promise<NotificationResult<boolean>> => {
   try {
-    if (!userId || !token) {
-      return {
-        success: false,
-        error: {
-          code: 'notifications/invalid-params',
-          message: 'ID de usuario o token inválidos'
-        }
-      };
+    if (!userId) {
+      return { success: false, error: { code: 'notifications/invalid-user', message: 'ID de usuario inválido' } };
     }
 
-    const userDoc = await firebase.firestore()
-      .collection('users')
-      .doc(userId)
-      .get();
+    const userRef = firebase.firestore().collection('users').doc(userId);
 
-    if (!userDoc.exists) {
-      return {
-        success: false,
-        error: {
-          code: 'notifications/user-not-found',
-          message: 'Usuario no encontrado'
-        }
-      };
-    }
+    // Eliminamos el campo notificationToken y actualizamos timestamp
+    await userRef.update({
+      notificationToken: firebase.firestore.FieldValue.delete(),
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
 
-    const userData = userDoc.data();
-    const devices = userData?.devices || [];
-
-    // Filtrar el dispositivo actual
-    const updatedDevices = devices.filter((device: any) => device.token !== token);
-
-    await firebase.firestore()
-      .collection('users')
-      .doc(userId)
-      .update({
-        notificationToken: firebase.firestore.FieldValue.delete(),
-        devices: updatedDevices,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    console.log('[NotificationService] Token removed from Firestore successfully');
+    console.log(`[NotificationService] Token removed for user ${userId}`);
     return {
       success: true,
-      data: true
+      data: true,
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('[NotificationService] Error removing token from Firestore:', error);
+    // Considerar no fallar si el documento no existe o el campo ya no está
+    if (error.code === 'not-found') {
+      console.warn(`[NotificationService] User ${userId} not found or token already removed.`);
+      return { success: true, data: false }; // No se eliminó nada, pero no es un error fatal
+    }
     return {
       success: false,
       error: {
         code: 'notifications/token-remove-error',
-        message: 'Error al eliminar token de la base de datos'
-      }
+        message: error.message || 'Error al eliminar token de la base de datos',
+      },
     };
   }
 };
@@ -337,64 +262,6 @@ export const sendLocalNotification = async (
       error: {
         code: 'notifications/local-send-error',
         message: 'Error al enviar notificación local'
-      }
-    };
-  }
-};
-
-// Enviar notificación para un nuevo mensaje de chat
-export const sendChatNotification = async (
-  token: string,
-  senderName: string,
-  messageText: string,
-  conversationId: string,
-  badgeCount: number = 1,
-  imageMessage: boolean = false
-): Promise<NotificationResult<boolean>> => {
-  try {
-    if (!token) {
-      return {
-        success: false,
-        error: {
-          code: 'notifications/missing-token',
-          message: 'Se requiere token de dispositivo para enviar notificación'
-        }
-      };
-    }
-
-    // Preparar texto para la notificación
-    const notificationBody = imageMessage
-      ? `${senderName} te ha enviado una imagen`
-      : messageText.length > 100
-        ? `${messageText.substring(0, 100)}...`
-        : messageText;
-
-    // En entorno de desarrollo, usar notificación local para pruebas
-    if (__DEV__) {
-      await sendLocalNotification(
-        senderName,
-        notificationBody,
-        {
-          type: 'chat',
-          conversationId,
-          badge: badgeCount
-        }
-      );
-      return { success: true, data: true };
-    } else {
-      // En producción, habría que usar un servicio como Firebase Cloud Functions
-      // para enviar notificaciones push, ya que no podemos enviar directamente
-      // desde el cliente por seguridad.
-      console.log('[NotificationService] Would send push notification in production to token:', token);
-      return { success: true, data: true };
-    }
-  } catch (error) {
-    console.error('[NotificationService] Error sending chat notification:', error);
-    return {
-      success: false,
-      error: {
-        code: 'notifications/chat-notification-error',
-        message: 'Error al enviar notificación de chat'
       }
     };
   }
@@ -473,44 +340,45 @@ export const syncBadgeCount = async (userId: string): Promise<NotificationResult
   }
 };
 
-// Resetear badge count a cero
-export const resetBadgeCount = async (userId: string): Promise<NotificationResult<boolean>> => {
+// Resetear badge count a cero (llamando a la Cloud Function)
+export const resetBadgeCount = async (): Promise<NotificationResult<boolean>> => {
   try {
-    if (!userId) {
+    // Obtenemos la referencia a la Cloud Function
+    const resetBadgeFunction = firebase.functions().httpsCallable('resetBadgeCount');
+
+    // Llamamos a la función (no necesita enviar userId, lo toma del contexto)
+    const result = await resetBadgeFunction();
+
+    if (result.data.success) {
+      console.log('[NotificationService] Cloud Function resetBadgeCount called successfully.');
+      // También reseteamos en el dispositivo localmente para inmediatez
+      await Notifications.setBadgeCountAsync(0);
+      return { success: true, data: true };
+    } else {
+      console.error('[NotificationService] Cloud Function resetBadgeCount returned failure:', result.data);
       return {
         success: false,
         error: {
-          code: 'notifications/invalid-user',
-          message: 'ID de usuario inválido'
-        }
+          code: 'notifications/reset-badge-cloud-error',
+          message: 'La función para resetear el contador falló.',
+        },
       };
     }
-
-    // Resetear en la base de datos
-    await firebase.firestore()
-      .collection('users')
-      .doc(userId)
-      .update({
-        badgeCount: 0,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      });
-
-    // Resetear en el dispositivo
-    await Notifications.setBadgeCountAsync(0);
-    console.log('[NotificationService] Badge count reset to 0');
-
-    return {
-      success: true,
-      data: true
-    };
-  } catch (error) {
-    console.error('[NotificationService] Error resetting badge count:', error);
+  } catch (error: any) {
+    console.error('[NotificationService] Error calling resetBadgeCount Cloud Function:', error);
+    // Manejar errores específicos de functions (permisos, etc.)
+    let code = 'notifications/reset-badge-error';
+    let message = error.message || 'Error al llamar la función para resetear contador.';
+    if (error.code === 'unauthenticated') {
+      code = 'notifications/unauthenticated';
+      message = 'Usuario no autenticado para resetear badge.';
+    } else if (error.code === 'permission-denied') {
+      code = 'notifications/permission-denied';
+      message = 'Permiso denegado para resetear badge.';
+    }
     return {
       success: false,
-      error: {
-        code: 'notifications/reset-badge-error',
-        message: 'Error al resetear contador de notificaciones'
-      }
+      error: { code, message },
     };
   }
 };
@@ -544,7 +412,7 @@ export const getLastNotificationResponse = async (): Promise<Notifications.Notif
   }
 };
 
-// Exportar el servicio completo
+// Exportar el servicio completo (eliminando sendChatNotification)
 export const notificationService = {
   configureNotifications,
   requestNotificationPermissions,
@@ -552,12 +420,11 @@ export const notificationService = {
   saveTokenToFirestore,
   removeTokenFromFirestore,
   sendLocalNotification,
-  sendChatNotification,
   setBadgeCount,
   syncBadgeCount,
   resetBadgeCount,
   registerNotificationHandlers,
-  getLastNotificationResponse
+  getLastNotificationResponse,
 };
 
 export default notificationService;

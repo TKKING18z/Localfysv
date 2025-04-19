@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, memo } from 'react';
 import { 
   View, 
   Text, 
@@ -9,9 +9,18 @@ import {
   ScrollView,
   Platform
 } from 'react-native';
-import { LineChart } from 'react-native-chart-kit';
-import { DataPoint, TimePeriod } from '../../types/analyticsTypes';
 import { MaterialIcons } from '@expo/vector-icons';
+import { DataPoint, TimePeriod } from '../../types/analyticsTypes';
+
+// Usar try-catch para importar el LineChart, por si react-native-svg falla
+let LineChart: any = null;
+try {
+  // Importación dinámica para manejar posibles fallos
+  const Charts = require('react-native-chart-kit');
+  LineChart = Charts.LineChart;
+} catch (error) {
+  console.error('Error al importar react-native-chart-kit:', error);
+}
 
 interface TrendsChartProps {
   data: DataPoint[];
@@ -25,7 +34,7 @@ interface TrendsChartProps {
   yAxisSuffix?: string;
 }
 
-const TrendsChart: React.FC<TrendsChartProps> = ({ 
+const TrendsChart: React.FC<TrendsChartProps> = memo(({ 
   data, 
   period, 
   title = 'Tendencias de Visitas', 
@@ -40,6 +49,7 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
   const [selectedPeriod, setSelectedPeriod] = useState<TimePeriod>(period);
   const [chartWidth, setChartWidth] = useState(screenWidth - 64);
   const [showFullChart, setShowFullChart] = useState(false);
+  const [svgError, setSvgError] = useState(!LineChart);
 
   // Actualizar período local cuando cambia desde props
   useEffect(() => {
@@ -202,6 +212,22 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
     formatTopBarValue: (value: number) => `${value}${yAxisSuffix}`
   }), [color, yAxisSuffix]);
 
+  // Determine the appropriate title based on the period
+  const chartTitle = useMemo(() => {
+    switch (period) {
+      case TimePeriod.DAY:
+        return 'Visitas por hora';
+      case TimePeriod.WEEK:
+        return 'Visitas por día';
+      case TimePeriod.MONTH:
+        return 'Visitas por día del mes';
+      case TimePeriod.YEAR:
+        return 'Visitas por mes';
+      default:
+        return 'Tendencia de visitas';
+    }
+  }, [period]);
+
   // Si está cargando, mostrar indicador
   if (isLoading) {
     return (
@@ -215,14 +241,42 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
     );
   }
 
-  // Si no hay datos válidos, mostrar un mensaje
-  if (!hasValidData) {
+  // Si no hay datos válidos o hay un error con SVG, mostrar mensaje apropiado
+  if (!hasValidData || svgError) {
     return (
       <View style={styles.container}>
         <Text style={styles.title}>{title}</Text>
         <View style={styles.noDataContainer}>
           <MaterialIcons name="analytics" size={32} color="#C7C7CC" />
-          <Text style={styles.noDataText}>No hay datos suficientes para mostrar el gráfico.</Text>
+          <Text style={styles.noDataText}>
+            {svgError 
+              ? "No se pudo cargar el gráfico. Reinstala la aplicación o actualiza el sistema." 
+              : "No hay datos suficientes para mostrar el gráfico."}
+          </Text>
+          {svgError && (
+            <View style={styles.altDataContainer}>
+              {optimizedData.length > 0 && (
+                <Text style={styles.altDataSummary}>
+                  Resumen: {optimizedData.reduce((sum, point) => sum + point.value, 0)} visitas totales
+                </Text>
+              )}
+              <TouchableOpacity 
+                style={styles.reloadButton}
+                onPress={() => {
+                  try {
+                    // Intentar cargar LineChart de nuevo
+                    const Charts = require('react-native-chart-kit');
+                    LineChart = Charts.LineChart;
+                    setSvgError(!LineChart);
+                  } catch (error) {
+                    console.error('Error al reimportar chart-kit:', error);
+                  }
+                }}
+              >
+                <Text style={styles.reloadButtonText}>Reintentar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
       </View>
     );
@@ -248,6 +302,31 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
         return chartWidth;
     }
   };
+
+  // Componente de vista simplificada para fallback cuando LineChart no está disponible
+  const SimplifiedChartView = () => (
+    <View style={[styles.chartContainer, { height }]}>
+      <View style={styles.simplifiedChart}>
+        {optimizedData.map((point, index) => (
+          <View 
+            key={index}
+            style={[
+              styles.dataBar, 
+              { 
+                height: `${(point.value / Math.max(...yValues)) * 70}%`,
+                backgroundColor: color
+              }
+            ]}
+          />
+        ))}
+      </View>
+      <View style={styles.simplifiedLabels}>
+        {optimizedLabels.filter(Boolean).map((label, index) => (
+          <Text key={index} style={styles.simplifiedLabel}>{label}</Text>
+        ))}
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -329,33 +408,40 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
       )}
       
       <View style={styles.chartContainer}>
-        <ScrollView 
-          horizontal 
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContainer}
-        >
-          <LineChart
-            data={chartData}
-            width={getChartWidth()}
-            height={height}
-            chartConfig={chartConfig}
-            bezier
-            style={styles.chart}
-            withDots={optimizedData.length <= 15} // Mostrar puntos solo si hay pocos datos
-            withShadow
-            withInnerLines
-            withOuterLines
-            withVerticalLines={optimizedData.length <= 20} // Líneas verticales solo si hay pocos datos
-            withHorizontalLines
-            fromZero
-            yAxisSuffix={yAxisSuffix}
-            segments={5}
-            // Configuración para prevenir sobresaturación
-            withHorizontalLabels={true}
-            horizontalLabelRotation={0}
-            verticalLabelRotation={0}
-          />
-        </ScrollView>
+        {LineChart ? (
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContainer}
+          >
+            <LineChart
+              data={chartData}
+              width={getChartWidth()}
+              height={height}
+              chartConfig={chartConfig}
+              bezier
+              style={styles.chart}
+              withDots={optimizedData.length <= 15} // Mostrar puntos solo si hay pocos datos
+              withShadow
+              withInnerLines
+              withOuterLines
+              withVerticalLines={optimizedData.length <= 20} // Líneas verticales solo si hay pocos datos
+              withHorizontalLines
+              fromZero
+              yAxisSuffix={yAxisSuffix}
+              segments={5}
+              // Configuración para prevenir sobresaturación
+              withHorizontalLabels={true}
+              horizontalLabelRotation={0}
+              verticalLabelRotation={0}
+              // Manejo de errores en el renderizado
+              onError={() => setSvgError(true)}
+            />
+          </ScrollView>
+        ) : (
+          // Vista simplificada cuando LineChart no está disponible
+          <SimplifiedChartView />
+        )}
       </View>
       
       {/* Leyenda para distinguir comportamientos */}
@@ -378,7 +464,7 @@ const TrendsChart: React.FC<TrendsChartProps> = ({
       )}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
@@ -479,7 +565,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#007AFF',
     fontStyle: 'italic',
-  }
+  },
+  // Estilos para la vista simplificada
+  altDataContainer: {
+    marginTop: 16,
+    alignItems: 'center',
+  },
+  altDataSummary: {
+    fontSize: 14,
+    color: '#333',
+    marginBottom: 12,
+  },
+  reloadButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+  },
+  reloadButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  simplifiedChart: {
+    flexDirection: 'row',
+    height: '80%',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    paddingHorizontal: 10,
+    backgroundColor: '#F5F7FF',
+    borderRadius: 12,
+    padding: 10,
+  },
+  dataBar: {
+    width: 15,
+    minHeight: 4,
+    borderRadius: 4,
+    marginHorizontal: 2,
+  },
+  simplifiedLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    height: '20%',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  simplifiedLabel: {
+    fontSize: 10,
+    color: '#8E8E93',
+  },
 });
 
 export default TrendsChart;

@@ -289,33 +289,44 @@ const ChatScreen: React.FC = () => {
   // Mark messages as read when the conversation becomes active
   useEffect(() => {
     let isMounted = true;
-    
-    const markAsRead = async () => {
+
+    const markAsReadAndResetBadge = async () => {
       if (!activeConversation || !user || !isMounted) return;
-      
+
       try {
+        console.log(`[ChatScreen] Marking conversation ${activeConversation.id} as read and resetting badge.`);
+        // Marcar mensajes como leídos en el contexto/backend
         await markConversationAsRead();
-        
-        // Resetear badge de notificaciones cuando la conversación está activa
+
+        // Resetear badge de notificaciones llamando a la Cloud Function
+        // (ya no necesita userId como argumento)
         try {
           if (isMounted) {
+            // Cargar el servicio dinámicamente o asegurarse que esté disponible
             const { notificationService } = require('../../../services/NotificationService');
-            await notificationService.resetBadgeCount(user.uid);
+            if (notificationService) {
+              await notificationService.resetBadgeCount();
+              console.log('[ChatScreen] resetBadgeCount Cloud Function called.');
+            } else {
+              console.warn('[ChatScreen] NotificationService not available to reset badge.');
+            }
           }
         } catch (notifError) {
-          console.error('[ChatScreen] Error resetting badge count:', notifError);
+          console.error('[ChatScreen] Error calling resetBadgeCount:', notifError);
         }
       } catch (error) {
-        console.error('Error marking conversation as read:', error);
+        console.error('[ChatScreen] Error marking conversation as read:', error);
       }
     };
-    
-    markAsRead();
-    
+
+    // Ejecutar la función al montar/enfocar esta pantalla con una conversación activa
+    markAsReadAndResetBadge();
+
     return () => {
       isMounted = false;
     };
-  }, [activeConversation?.id]); // Cambiando a solo depender del ID, no de toda la función
+    // Dependencias: Ejecutar si cambia el ID de la conversación activa o el usuario
+  }, [activeConversation?.id, user, markConversationAsRead]); // Añadido markConversationAsRead
   
   // Determine which error to display (context or local)
   const displayError = error || localError;
