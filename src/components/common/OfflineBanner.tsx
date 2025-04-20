@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { 
   View, 
   Text, 
@@ -24,6 +24,11 @@ interface OfflineBannerProps {
   slowConnectionText?: string;
   
   /**
+   * Text to display for poor connection quality
+   */
+  poorQualityText?: string;
+  
+  /**
    * Whether to show a retry button
    */
   showRetryButton?: boolean;
@@ -32,55 +37,114 @@ interface OfflineBannerProps {
    * Auto hide banner after X seconds when back online (0 to disable)
    */
   autoHideDelay?: number;
+  
+  /**
+   * Whether to show connection quality info for debugging
+   */
+  showDebugInfo?: boolean;
 }
 
 const OfflineBanner: React.FC<OfflineBannerProps> = ({ 
   offlineText = 'Sin conexión a Internet', 
   slowConnectionText = 'Conexión lenta',
+  poorQualityText = 'Conexión inestable',
   showRetryButton = true,
-  autoHideDelay = 3
+  autoHideDelay = 3,
+  showDebugInfo = false
 }) => {
-  const { isConnected, isInternetReachable, isSlowConnection, handleConnectionChange } = useNetwork();
+  const { 
+    isConnected, 
+    isInternetReachable, 
+    isSlowConnection, 
+    connectionQuality,
+    isLowPerformanceDevice,
+    connectionType,
+    handleConnectionChange 
+  } = useNetwork();
+  
   const insets = useSafeAreaInsets();
   const [isVisible, setIsVisible] = useState(false);
-  const [hideTimeout, setHideTimeout] = useState<NodeJS.Timeout | null>(null);
+  const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Animation values
-  const translateY = React.useRef(new Animated.Value(-100)).current;
-  const opacity = React.useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(-100)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  
+  // Determinar si el banner debe mostrarse basado en el estado de la red
+  const shouldShowBanner = useMemo(() => {
+    const isOffline = !isConnected || isInternetReachable === false;
+    const isPoorConnection = connectionQuality === 'poor';
+    const isWarningConnection = connectionQuality === 'fair' && isLowPerformanceDevice;
+    
+    return isOffline || isPoorConnection || isWarningConnection || isSlowConnection;
+  }, [isConnected, isInternetReachable, connectionQuality, isLowPerformanceDevice, isSlowConnection]);
+  
+  // Determinar mensaje y color según estado de conexión
+  const { message, iconName, bannerColor, bannerStyle } = useMemo(() => {
+    const isOffline = !isConnected || isInternetReachable === false;
+    
+    if (isOffline) {
+      return {
+        message: offlineText,
+        iconName: 'wifi-off' as any,
+        bannerColor: '#FF3B30',
+        bannerStyle: styles.offlineBanner
+      };
+    }
+    
+    if (connectionQuality === 'poor') {
+      return {
+        message: poorQualityText,
+        iconName: 'signal-cellular-0-bar' as any,
+        bannerColor: '#FF9500',
+        bannerStyle: styles.poorBanner
+      };
+    }
+    
+    if (isSlowConnection || connectionQuality === 'fair') {
+      return {
+        message: slowConnectionText,
+        iconName: 'network-cell' as any,
+        bannerColor: '#FFCC00',
+        bannerStyle: styles.slowBanner
+      };
+    }
+    
+    // Default - no debería llegar aquí si shouldShowBanner es correcto
+    return {
+      message: '',
+      iconName: 'wifi' as any,
+      bannerColor: '#34C759',
+      bannerStyle: styles.normalBanner
+    };
+  }, [isConnected, isInternetReachable, connectionQuality, isSlowConnection, offlineText, slowConnectionText, poorQualityText]);
   
   // Update banner visibility based on connection state
   useEffect(() => {
-    const shouldShow = 
-      !isConnected || 
-      isInternetReachable === false || 
-      isSlowConnection;
+    // Limpiar cualquier timeout anterior
+    if (hideTimeoutRef.current) {
+      clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
     
-    if (shouldShow) {
-      if (hideTimeout) {
-        clearTimeout(hideTimeout);
-        setHideTimeout(null);
-      }
-      
+    if (shouldShowBanner) {
       showBanner();
     } else if (isVisible) {
       // Auto hide when back online
       if (autoHideDelay > 0) {
-        const timeout = setTimeout(() => {
+        hideTimeoutRef.current = setTimeout(() => {
           hideBanner();
-          setHideTimeout(null);
         }, autoHideDelay * 1000);
-        
-        setHideTimeout(timeout);
       }
     }
     
     return () => {
-      if (hideTimeout) {
-        clearTimeout(hideTimeout);
+      if (hideTimeoutRef.current) {
+        clearTimeout(hideTimeoutRef.current);
+        hideTimeoutRef.current = null;
       }
     };
-  }, [isConnected, isInternetReachable, isSlowConnection]);
+  }, [shouldShowBanner, autoHideDelay, isVisible]);
   
   // Show the banner with animation
   const showBanner = () => {
@@ -130,16 +194,11 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
     return null;
   }
   
-  // Get appropriate message and icon
-  const isOffline = !isConnected || isInternetReachable === false;
-  const message = isOffline ? offlineText : slowConnectionText;
-  const iconName = isOffline ? 'wifi-off' : 'signal-wifi-0-bar';
-  const bannerColor = isOffline ? '#007AFF' : '#007AFF';
-  
   return (
     <Animated.View 
       style={[
         styles.container,
+        bannerStyle,
         { 
           backgroundColor: bannerColor,
           transform: [{ translateY }],
@@ -162,6 +221,15 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
           </TouchableOpacity>
         )}
       </View>
+      
+      {showDebugInfo && (
+        <View style={styles.debugContainer}>
+          <Text style={styles.debugText}>
+            Tipo: {connectionType} | Calidad: {connectionQuality} | 
+            Gama baja: {isLowPerformanceDevice ? 'Sí' : 'No'}
+          </Text>
+        </View>
+      )}
     </Animated.View>
   );
 };
@@ -175,7 +243,27 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
     zIndex: 1000,
     elevation: 5,
-    shadowColor: '#007AFF',
+  },
+  offlineBanner: {
+    shadowColor: '#FF3B30',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  poorBanner: {
+    shadowColor: '#FF9500',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  slowBanner: {
+    shadowColor: '#FFCC00',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.3,
+    shadowRadius: 2,
+  },
+  normalBanner: {
+    shadowColor: '#34C759',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.3,
     shadowRadius: 2,
@@ -203,6 +291,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginLeft: 8,
   },
+  debugContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 4,
+    alignItems: 'center',
+  },
+  debugText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 10,
+  }
 });
 
 export default OfflineBanner; 

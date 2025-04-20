@@ -10,5 +10,12 @@ module.exports = function (api) {
         }
       }]
     ],
+    env: {
+      production: {
+        plugins: ['transform-remove-console']
+      }
+    }
   };
 };
+// Custom Babel Plugins
+module.exports.plugins = ["transform-remove-console"];

@@ -10,6 +10,13 @@ import 'firebase/compat/firestore';
 import { AppState } from 'react-native';
 import { useNetInfo } from '@react-native-community/netinfo';
 
+// Sistema de logging controlado para evitar logs excesivos en producción
+const DEBUG = __DEV__ && false; // Cambiar a true solo durante desarrollo activo
+const log = (message: string, ...args: any[]) => {
+  if (DEBUG) {
+    console.log(message, ...args);
+  }
+};
 
 interface ChatContextType {
   conversations: Conversation[];
@@ -81,63 +88,67 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   }, []);
 
   // Define markConversationAsRead early to avoid circular dependency
-  const markConversationAsRead = useCallback(async () => {
-    if (!user || !activeConversation) {
-      console.log('[ChatContext] Cannot mark as read: missing user or active conversation');
+  const markConversationAsRead = useCallback(async (): Promise<void> => {
+    if (!activeConversationId || !user || !activeConversation) {
       return;
     }
     
-    if (isOffline) {
-      console.log('[ChatContext] Cannot mark as read: Device is offline');
+    // Evitar marcar como leído si ya no hay mensajes no leídos para este usuario
+    if (activeConversation.unreadCount && 
+        activeConversation.unreadCount[user.uid] === 0) {
+      log('[ChatContext] No unread messages to mark as read');
       return;
     }
+    
+    log(`[ChatContext] Marking conversation ${activeConversationId} as read`);
     
     try {
-      console.log(`[ChatContext] Marking conversation ${activeConversation.id} as read`);
-      await chatService.markMessagesAsRead(activeConversation.id, user.uid);
-      
-      // Update total unread
-      const updatedUnreadTotal = unreadTotal - (activeConversation.unreadCount?.[user.uid] || 0);
-      setUnreadTotal(Math.max(0, updatedUnreadTotal));
-      
-      // Update locally
-      setConversations(prevConversations => 
-        prevConversations.map((conv: Conversation) => 
-          conv.id === activeConversation.id 
-            ? { 
-                ...conv, 
-                unreadCount: { 
-                  ...conv.unreadCount, 
-                  [user.uid]: 0 
-                } 
-              }
-            : conv
-        )
+      const result = await chatService.markMessagesAsRead(
+        activeConversationId,
+        user.uid
       );
       
-      // Update active messages to show as read
-      setActiveMessages(prevMessages => 
-        prevMessages.map(msg => 
-          msg.senderId !== user.uid && !msg.read
-            ? { ...msg, read: true, status: MessageStatus.READ }
-            : msg
-        )
-      );
-      
-      // Limpiar el registro de mensajes ya notificados para esta conversación
-      // porque ya han sido leídos
-      notifiedConversations.current.set(activeConversation.id, 0);
-      
-      // Marcar todos los mensajes como notificados para evitar nuevas notificaciones
-      activeMessages.forEach(msg => {
-        notifiedMessageIds.current.add(msg.id);
-      });
-      
-      console.log('[ChatContext] Successfully marked as read');
+      if (result.success) {
+        log('[ChatContext] Successfully marked as read');
+        
+        // Actualizar el contador de no leídos
+        const updatedActiveConversation = {
+          ...activeConversation,
+          unreadCount: {
+            ...activeConversation.unreadCount,
+            [user.uid]: 0,
+          },
+        };
+        
+        // Actualizar conversación en la lista de conversaciones también
+        const updatedConversations = conversations.map((conv: Conversation) => {
+          if (conv.id === activeConversationId) {
+            return {
+              ...conv,
+              unreadCount: {
+                ...conv.unreadCount,
+                [user.uid]: 0,
+              },
+            };
+          }
+          return conv;
+        });
+        
+        // Actualizar estado
+        setActiveConversation(updatedActiveConversation);
+        setConversations(updatedConversations);
+        
+        // Actualizar unreadTotal
+        if (activeConversation.unreadCount && activeConversation.unreadCount[user.uid] > 0) {
+          setUnreadTotal(prev => Math.max(0, prev - activeConversation.unreadCount![user.uid]));
+        }
+      } else {
+        console.error('[ChatContext] Error marking messages as read:', result.error);
+      }
     } catch (error) {
-      console.error('[ChatContext] Error marking conversation as read:', error);
+      console.error('[ChatContext] Unexpected error marking messages as read:', error);
     }
-  }, [user, activeConversation, unreadTotal, isOffline, activeMessages]);
+  }, [user, activeConversation, activeConversationId, conversations]);
   
   // Effect to automatically clean up duplicate conversations
   useEffect(() => {
@@ -662,87 +673,59 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user, markConversationAsRead, activeConversationId, activeConversation]);
   
-  // Establecer conversación activa por ID
-  const setActiveConversationId = useCallback(async (id: string | null) => {
-    console.log(`[ChatContext] Setting active conversation ID: ${id}`);
-    
-    // Si ya es la conversación activa, no hacer nada
-    if (activeConversationId === id) {
-      console.log(`[ChatContext] Conversation ${id} is already active, skipping`);
-      return;
-    }
-    
-    // Si se solicita limpiar la conversación activa
-    if (id === null) {
+  // Corregir la firma de la función para aceptar null, igual que la interfaz
+  const setActiveConversationId = useCallback(async (conversationId: string | null) => {
+    // Si es null, limpiar la conversación actual
+    if (conversationId === null) {
       _setActiveConversationId(null);
       setActiveConversation(null);
       setActiveMessages([]);
       return;
     }
     
+    // Evitar actualizaciones innecesarias si la conversación ya está activa
+    if (activeConversationId === conversationId) {
+      log(`[ChatContext] Conversation ${conversationId} is already active, skipping`);
+      return;
+    }
+    
+    log(`[ChatContext] Setting active conversation ID: ${conversationId}`);
+    
+    // Actualizar el estado activo
+    _setActiveConversationId(conversationId);
+    setActiveMessages([]);
+    
+    // Cargar la conversación
     try {
       setLoading(true);
+      const result = await chatService.getConversation(conversationId);
       
-      // Buscar primero en las conversaciones ya cargadas
-      const existingConv = conversations.find(conv => conv.id === id);
-      
-      if (existingConv) {
-        setActiveConversation(existingConv);
-        _setActiveConversationId(id);
-        
-        // Cargar mensajes
-        try {
-          const messagesResult = await chatService.getMessages(id, 50);
+      if (result.success && result.data) {
+        // Solo actualizar si todavía estamos en la misma conversación
+        if (activeConversationId === conversationId) {
+          setActiveConversation(result.data);
           
-          if (messagesResult.success && messagesResult.data) {
-            setActiveMessages(messagesResult.data);
-          } else {
-            console.error('[ChatContext] Error loading messages:', messagesResult.error);
-            setActiveMessages([]);
-          }
-        } catch (error) {
-          console.error('[ChatContext] Error fetching messages:', error);
-          setActiveMessages([]);
-        }
-      } else {
-        console.log(`[ChatContext] Conversation ${id} not found in loaded conversations, fetching...`);
-        // Cargar la conversación desde Firestore
-        try {
-          const convResult = await chatService.getConversation(id);
-          
-          if (convResult.success && convResult.data) {
-            setActiveConversation(convResult.data);
-            _setActiveConversationId(id);
-            
-            // Cargar mensajes
-            const messagesResult = await chatService.getMessages(id, 50);
-            
+          // Cargar mensajes
+          try {
+            const messagesResult = await chatService.getMessages(conversationId, 50);
             if (messagesResult.success && messagesResult.data) {
               setActiveMessages(messagesResult.data);
-            } else {
-              console.error('[ChatContext] Error loading messages:', messagesResult.error);
-              setActiveMessages([]);
             }
-          } else {
-            console.error('[ChatContext] Conversation not found:', convResult.error);
-            setError(`No se pudo cargar la conversación: ${convResult.error?.message || 'Error desconocido'}`);
-            setActiveConversation(null);
-            setActiveMessages([]);
+          } catch (msgError) {
+            console.error('[ChatContext] Error fetching messages:', msgError);
           }
-        } catch (error) {
-          console.error('[ChatContext] Error fetching conversation:', error);
-          setError('Error cargando la conversación. Intente más tarde.');
-          setActiveConversation(null);
-          setActiveMessages([]);
         }
+      } else {
+        console.error('[ChatContext] Error loading conversation:', result.error);
+        setError('No se pudo cargar la conversación');
       }
     } catch (error) {
-      console.error('[ChatContext] Error setting active conversation:', error);
-      setError('Error activando la conversación. Intente más tarde.');
+      console.error('[ChatContext] Unexpected error loading conversation:', error);
+      setError('Error al cargar la conversación');
     } finally {
       setLoading(false);
     }
-  }, [conversations, activeConversationId]);
+  }, [activeConversationId]);
   
   // Enhanced send message function
   const sendMessage = useCallback(async (text: string, imageUrl?: string, replyTo?: ReplyInfo): Promise<boolean> => {

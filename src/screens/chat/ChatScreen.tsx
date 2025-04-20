@@ -1,5 +1,5 @@
 // React and React Native imports
-import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, memo } from 'react';
 import {
   View,
   FlatList,
@@ -48,9 +48,35 @@ import useKeyboard from '../../hooks/useKeyboard';
 // Types
 import { Message, MessageType, MessageStatus, ReplyInfo } from '../../../models/chatTypes';
 
+// Importar useNetwork
+import { useNetwork } from '../../context/NetworkContext';
+
 // Detailed type definitions
 type ChatScreenRouteProp = RouteProp<RootStackParamList, 'Chat'>;
 type ChatScreenNavigationProp = StackNavigationProp<RootStackParamList, 'Chat'>;
+
+// Optimizar ChatMessage con memo para evitar re-renders innecesarios
+const MemoizedChatMessage = memo(ChatMessage);
+
+// Agregar esta constante para limitar mensajes en dispositivos de gama baja
+const getMessageLimit = (isLowPerformanceDevice: boolean, isSlowConnection: boolean) => {
+  if (isLowPerformanceDevice && isSlowConnection) {
+    return 20; // Muy limitado para condiciones extremas
+  } else if (isLowPerformanceDevice) {
+    return 30; // Limitado para dispositivos de gama baja
+  } else if (isSlowConnection) {
+    return 35; // Limitado para conexiones lentas
+  }
+  return 50; // Valor por defecto
+};
+
+// Sistema de logging controlado para evitar logs excesivos en producción
+const DEBUG = __DEV__ && false; // Cambiar a true solo durante desarrollo activo
+const log = (message: string, ...args: any[]) => {
+  if (DEBUG) {
+    console.log(message, ...args);
+  }
+};
 
 const ChatScreen: React.FC = () => {
   // Navigation and route params
@@ -63,8 +89,8 @@ const ChatScreen: React.FC = () => {
   const { 
     activeConversation, 
     activeMessages, 
-    loading, 
-    error, 
+    loading: contextLoading, 
+    error: contextError, 
     sendMessage, 
     markConversationAsRead,
     uploadImage,
@@ -74,30 +100,8 @@ const ChatScreen: React.FC = () => {
     setActiveConversationId
   } = useChat();
   
-  // Inicializar conversación cuando la pantalla se monta - con protección mejorada
-  useLayoutEffect(() => {
-    // Variable para controlar si el componente está montado
-    let isMounted = true;
-    let hasInitialized = false; // Evitar inicializaciones repetidas
-    
-    console.log(`[ChatScreen] Setting active conversation on mount: ${conversationId}`);
-    
-    // Para evitar race conditions, envolvemos la inicialización en un timeout
-    const initTimer = setTimeout(() => {
-      if (isMounted && conversationId && !hasInitialized) {
-        hasInitialized = true;
-        setActiveConversationId(conversationId);
-      }
-    }, 50); // Pequeño delay para asegurar estabilidad en la navegación
-    
-    return () => {
-      // Limpiar timeout y marcar como desmontado
-      isMounted = false;
-      clearTimeout(initTimer);
-      
-      console.log('[ChatScreen] Unmounting');
-    };
-  }, [conversationId]); // Removiendo setActiveConversationId para evitar loops
+  // Agregar useNetwork para detectar condiciones de red y rendimiento
+  const { isSlowConnection, isLowPerformanceDevice, connectionQuality } = useNetwork();
   
   // Local state
   const [imageModalVisible, setImageModalVisible] = useState(false);
@@ -114,11 +118,15 @@ const ChatScreen: React.FC = () => {
   
   const maxRetries = 5;
 
-  // Refs
+  // Refs - Todas las referencias deben estar definidas al principio del componente
   const messagesListRef = useRef<FlatList>(null);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const inputRef = useRef<ChatInputRef>(null);
-
+  // Referencia para evitar llamadas repetidas de markAsRead
+  const markAsReadExecuted = useRef(false);
+  // Referencia para evitar suscripciones duplicadas
+  const subscribedRef = useRef(false);
+  
   // Usar el hook personalizado para detectar el teclado
   const { 
     keyboardHeight, 
@@ -179,6 +187,31 @@ const ChatScreen: React.FC = () => {
     };
   }, []);
   
+  // Inicializar conversación cuando la pantalla se monta - con protección mejorada
+  useLayoutEffect(() => {
+    // Variable para controlar si el componente está montado
+    let isMounted = true;
+    let hasInitialized = false; // Evitar inicializaciones repetidas
+    
+    log(`[ChatScreen] Setting active conversation on mount: ${conversationId}`);
+    
+    // Para evitar race conditions, envolvemos la inicialización en un timeout
+    const initTimer = setTimeout(() => {
+      if (isMounted && conversationId && !hasInitialized) {
+        hasInitialized = true;
+        setActiveConversationId(conversationId);
+      }
+    }, 50); // Pequeño delay para asegurar estabilidad en la navegación
+    
+    return () => {
+      // Limpiar timeout y marcar como desmontado
+      isMounted = false;
+      clearTimeout(initTimer);
+      
+      log('[ChatScreen] Unmounting');
+    };
+  }, [conversationId]); // Solo depender del conversationId, no de la función
+  
   // Animate in the chat screen
   useEffect(() => {
     Animated.timing(fadeAnim, {
@@ -188,36 +221,90 @@ const ChatScreen: React.FC = () => {
     }).start();
   }, [fadeAnim]);
   
+  // Mark messages as read when the conversation becomes active
+  useEffect(() => {
+    // Si no hay conversación activa o no hay usuario, no hacer nada
+    if (!activeConversation || !user) return;
+    
+    // Evitar ejecuciones redundantes con una referencia
+    if (markAsReadExecuted.current) return;
+    
+    // Marcar como ejecutado para evitar llamadas duplicadas
+    markAsReadExecuted.current = true;
+    
+    // Crear función asíncrona separada para mejor control
+    const executeMarkAsRead = async () => {
+      try {
+        log(`[ChatScreen] Marking conversation ${activeConversation.id} as read.`);
+        await markConversationAsRead();
+        
+        // Resetear badge después de marcar como leído (solo una vez)
+        try {
+          const notificationServiceModule = require('../../../services/NotificationService');
+          if (notificationServiceModule.notificationService) {
+            await notificationServiceModule.notificationService.resetBadgeCount();
+            log('[ChatScreen] Badge count reset successfully');
+          }
+        } catch (notifError) {
+          console.error('[ChatScreen] Error calling resetBadgeCount:', notifError);
+        }
+      } catch (error) {
+        console.error('[ChatScreen] Error marking conversation as read:', error);
+      }
+    };
+    
+    // Ejecutar función asíncrona
+    executeMarkAsRead();
+    
+    // Función de limpieza - resetear el flag solo cuando se desmonta el componente
+    // o cambia la conversación activa
+    return () => {
+      markAsReadExecuted.current = false;
+    };
+  }, [activeConversation?.id, user]); // Eliminar markConversationAsRead de las dependencias
+  
   // Enhanced conversation loading - evitando reintentos excesivos y listeners duplicados
   useEffect(() => {
-    // Verificar los requisitos básicos
-    if (!conversationId || !user || activeConversation?.id === conversationId) {
-      if (activeConversation?.id === conversationId) {
-        // Si ya tenemos la conversación activa correcta, solo actualizar el estado de carga
-        setIsLoadingData(false);
-      }
+    // Verificar los requisitos básicos - agregar una condición de salida temprana
+    if (!conversationId || !user) {
+      return; // Salida temprana si no hay ID de conversación o usuario
+    }
+    
+    // Si ya tenemos la conversación activa correcta, no hacer nada
+    if (activeConversation?.id === conversationId) {
+      setIsLoadingData(false);
       return;
     }
     
-    console.log(`[ChatScreen] Loading messages for conversation: ${conversationId}`);
+    // Evitar suscripciones duplicadas para el mismo ID
+    if (subscribedRef.current) {
+      return;
+    }
+    
+    log(`[ChatScreen] Loading messages for conversation: ${conversationId}`);
     
     // Variables para control y limpieza
     let isMounted = true;
     let messageListener: (() => void) | null = null;
+    subscribedRef.current = true;
     
     // Configurar suscripción a los mensajes
     const subscribeToMessages = () => {
       if (!isMounted || !conversationId) return null;
       
       try {
-        console.log(`[ChatService] Setting up message listener for conversation: ${conversationId}`);
+        log(`[ChatService] Setting up message listener for conversation: ${conversationId}`);
+        
+        // Usar el límite de mensajes adaptativo según el dispositivo y la conexión
+        const messageLimit = getMessageLimit(isLowPerformanceDevice, isSlowConnection);
+        log(`[ChatScreen] Using message limit: ${messageLimit} based on device performance and connection`);
         
         const messagesRef = firebase.firestore()
           .collection('conversations')
           .doc(conversationId)
           .collection('messages')
           .orderBy('timestamp', 'desc')
-          .limit(50);
+          .limit(messageLimit);
           
         return messagesRef.onSnapshot(snapshot => {
           if (!isMounted) return;
@@ -248,15 +335,21 @@ const ChatScreen: React.FC = () => {
               return aTime - bTime;
             });
             
-            console.log(`[ChatScreen] Successfully loaded conversation: ${conversationId}`);
-            setLocalMessages(sortedMessages);
-            setIsLoadingData(false);
+            // Optimización importante: solo actualizar el estado cuando haya cambios significativos
+            // Evita actualizaciones de estado innecesarias que causarían re-renders
+            const hasNewMessages = 
+              localMessages.length !== sortedMessages.length || 
+              (sortedMessages.length > 0 && localMessages.length > 0 && 
+               sortedMessages[sortedMessages.length - 1].id !== localMessages[localMessages.length - 1].id);
+               
+            if (hasNewMessages) {
+              log(`[ChatScreen] New/updated messages in conversation: ${conversationId}`);
+              setLocalMessages(sortedMessages);
+            }
             
-            // Marcar mensajes como leídos una vez que estén cargados
-            if (sortedMessages.length > 0) {
-              markConversationAsRead().catch(err => {
-                console.error('[ChatScreen] Error marking as read:', err);
-              });
+            // Establecer el estado de carga solo una vez
+            if (isLoadingData) {
+              setIsLoadingData(false);
             }
           }
         }, error => {
@@ -278,58 +371,17 @@ const ChatScreen: React.FC = () => {
     return () => {
       // Limpieza al desmontar o cambiar de conversación
       isMounted = false;
+      subscribedRef.current = false;
       
       if (messageListener) {
-        console.log(`[ChatScreen] Cleaning up message listener for: ${conversationId}`);
+        log(`[ChatScreen] Cleaning up message listener for: ${conversationId}`);
         messageListener();
       }
     };
-  }, [conversationId, user, activeConversation, markConversationAsRead]);
-  
-  // Mark messages as read when the conversation becomes active
-  useEffect(() => {
-    let isMounted = true;
-
-    const markAsReadAndResetBadge = async () => {
-      if (!activeConversation || !user || !isMounted) return;
-
-      try {
-        console.log(`[ChatScreen] Marking conversation ${activeConversation.id} as read and resetting badge.`);
-        // Marcar mensajes como leídos en el contexto/backend
-        await markConversationAsRead();
-
-        // Resetear badge de notificaciones llamando a la Cloud Function
-        // (ya no necesita userId como argumento)
-        try {
-          if (isMounted) {
-            // Cargar el servicio dinámicamente o asegurarse que esté disponible
-            const { notificationService } = require('../../../services/NotificationService');
-            if (notificationService) {
-              await notificationService.resetBadgeCount();
-              console.log('[ChatScreen] resetBadgeCount Cloud Function called.');
-            } else {
-              console.warn('[ChatScreen] NotificationService not available to reset badge.');
-            }
-          }
-        } catch (notifError) {
-          console.error('[ChatScreen] Error calling resetBadgeCount:', notifError);
-        }
-      } catch (error) {
-        console.error('[ChatScreen] Error marking conversation as read:', error);
-      }
-    };
-
-    // Ejecutar la función al montar/enfocar esta pantalla con una conversación activa
-    markAsReadAndResetBadge();
-
-    return () => {
-      isMounted = false;
-    };
-    // Dependencias: Ejecutar si cambia el ID de la conversación activa o el usuario
-  }, [activeConversation?.id, user, markConversationAsRead]); // Añadido markConversationAsRead
+  }, [conversationId, user, activeConversation?.id, isLowPerformanceDevice, isSlowConnection]);
   
   // Determine which error to display (context or local)
-  const displayError = error || localError;
+  const displayError = contextError || localError;
   
   // Determine which messages to display (context or local)
   const displayMessages = useMemo(() => {
@@ -523,8 +575,38 @@ const ChatScreen: React.FC = () => {
     </View>
   ), []);
   
+  // Memoizar la lista de mensajes para evitar recálculos innecesarios
+  const optimizedMessageRender = useCallback(({ item, index }: { item: Message; index: number }) => (
+    <MemoizedChatMessage 
+      message={item} 
+      isMine={item.senderId === user?.uid}
+      onImagePress={handleImagePress}
+      onRetry={handleRetryMessage}
+      onReply={handleReplyMessage}
+      previousMessage={index > 0 ? displayMessages[index - 1] : null}
+    />
+  ), [user?.uid, handleImagePress, handleRetryMessage, handleReplyMessage, displayMessages]);
+  
+  // Optimización para mejorar el rendimiento de scroll
+  const keyExtractor = useCallback((item: Message, index: number) => `${item.id}-${index}`, []);
+  
+  // Optimización para mejorar la experiencia en redes lentas
+  const renderLoadingPlaceholder = useCallback(() => {
+    if (contextLoading || isLoadingData) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="#007AFF" />
+          <Text style={styles.loadingText}>
+            {isSlowConnection ? 'Cargando mensajes (conexión lenta)...' : 'Cargando mensajes...'}
+          </Text>
+        </View>
+      );
+    }
+    return null;
+  }, [contextLoading, isLoadingData, isSlowConnection]);
+
   // Loading state with retry information
-  if ((loading && !activeConversation) || isLoadingData) {
+  if ((contextLoading && !activeConversation) || isLoadingData) {
     return (
       <View style={styles.centerContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
@@ -602,28 +684,24 @@ const ChatScreen: React.FC = () => {
             <FlatList
               ref={messagesListRef}
               data={displayMessages} 
-              keyExtractor={(item, index) => `${item.id}-${index}`}
-              renderItem={({ item, index }) => (
-                <ChatMessage 
-                  message={item} 
-                  isMine={item.senderId === user?.uid}
-                  onImagePress={handleImagePress}
-                  onRetry={handleRetryMessage}
-                  onReply={handleReplyMessage}
-                  previousMessage={index > 0 ? displayMessages[index - 1] : null}
-                />
-              )}
+              keyExtractor={keyExtractor}
+              renderItem={optimizedMessageRender}
               contentContainerStyle={styles.messagesContainer}
               inverted={false}
               ListEmptyComponent={EmptyStateComponent}
+              ListHeaderComponent={renderLoadingPlaceholder}
               onScroll={handleScroll}
-              scrollEventThrottle={16}
+              scrollEventThrottle={100} // Reducir de 16 a 100 para mejor rendimiento
               onContentSizeChange={() => {
                 if (scrollToBottom) {
                   scrollToBottomIfNeeded();
                 }
               }}
               showsVerticalScrollIndicator={true}
+              windowSize={isLowPerformanceDevice ? 5 : 10} // Optimizar ventana de renderizado
+              removeClippedSubviews={isLowPerformanceDevice} // Optimización para dispositivos de gama baja
+              maxToRenderPerBatch={isLowPerformanceDevice ? 5 : 10} // Renderizar menos elementos por lote
+              initialNumToRender={isLowPerformanceDevice ? 10 : 15} // Reducir renderización inicial
             />
           </View>
           
@@ -648,7 +726,7 @@ const ChatScreen: React.FC = () => {
           <ChatInput 
             onSend={handleSendMessage}
             uploadImage={uploadImage}
-            disabled={loading || isOffline}
+            disabled={contextLoading || isOffline}
             keyboardVisible={keyboardVisibleHook}
             isModernIphone={isModernIphone}
             replyActive={!!replyToMessage}
@@ -935,7 +1013,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: '600',
     fontSize: 15,
-  }
+  },
+  loadingContainer: {
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
+  },
 });
 
 export default ChatScreen;
