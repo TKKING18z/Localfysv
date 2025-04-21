@@ -555,16 +555,6 @@ const ProfileScreen: React.FC = () => {
                 <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
               </TouchableOpacity>
               
-              {/* Botón para registrar primer negocio */}
-              <TouchableOpacity 
-                style={[styles.menuItem, styles.upgradeMenuItem]}
-                onPress={() => navigation.navigate('BusinessSelector' as any, { isNewBusinessOwner: true })}
-              >
-                <MaterialIcons name="add-business" size={24} color="#007AFF" />
-                <Text style={styles.menuItemText}>Registrar Nuevo Negocio</Text>
-                <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
-              </TouchableOpacity>
-              
               <TouchableOpacity 
                 style={styles.menuItem}
                 onPress={() => {
@@ -592,22 +582,6 @@ const ProfileScreen: React.FC = () => {
           >
             <MaterialIcons name="favorite" size={24} color="#007AFF" />
             <Text style={styles.menuItemText}>Mis Favoritos</Text>
-            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
-          </TouchableOpacity>
-          
-          {/* Add Reservations Link */}
-          <TouchableOpacity 
-            style={styles.menuItem}
-            onPress={() => navigation.navigate('MyReservations', { 
-              isBusinessView: profile?.userType === 'Propietario' 
-            })}
-          >
-            <MaterialIcons name="event" size={24} color="#007AFF" />
-            <Text style={styles.menuItemText}>
-              {profile?.userType === 'Propietario'
-                ? 'Gestionar Reservaciones'
-                : 'Mis Reservaciones'}
-            </Text>
             <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
           

@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useRef, useCallback } from 'react';
 import NetInfo, { NetInfoState, NetInfoSubscription } from '@react-native-community/netinfo';
 import { AppState, AppStateStatus, Platform, Dimensions } from 'react-native';
-import DeviceInfo from 'react-native-device-info';
 
 interface NetworkContextValue {
   isConnected: boolean;
@@ -44,31 +43,24 @@ export const NetworkProvider: React.FC<NetworkProviderProps> = ({ children }) =>
   const lastCheckTime = useRef<number>(0);
   const consecutiveFailures = useRef<number>(0);
   
-  // Detección de dispositivo de bajo rendimiento una sola vez al inicio
+  // Detección simplificada de dispositivo de bajo rendimiento
   useEffect(() => {
-    const detectLowPerformanceDevice = async () => {
+    const detectLowPerformanceDevice = () => {
       try {
-        // Combinar múltiples factores para detectar dispositivos de gama baja
-        const totalMemory = await DeviceInfo.getTotalMemory();
-        const totalMemoryGB = totalMemory / (1024 * 1024 * 1024);
-        const apiLevel = await DeviceInfo.getApiLevel();
+        // Usar heurísticas simples sin DeviceInfo
         const { width, height } = Dimensions.get('window');
         const screenSize = width * height;
         
-        // Criterios conservadores para considerar un dispositivo como de gama baja
-        const isLowMemory = totalMemoryGB < 2.5; // Menos de 2.5GB de RAM
-        const isOldAndroid = Platform.OS === 'android' && apiLevel < 26; // Anterior a Android 8
-        const isOldiOS = Platform.OS === 'ios' && parseInt(Platform.Version as string, 10) < 12;
+        // Criterios simplificados
+        const isOldAndroid = Platform.OS === 'android' && parseInt(Platform.Version.toString(), 10) < 26; // Anterior a Android 8
+        const isOldiOS = Platform.OS === 'ios' && parseInt(Platform.Version.toString(), 10) < 12;
         const isLowResolution = screenSize < 1000000; // Resolución baja (menor a HD)
         
-        // Criterio: Cumplir al menos 2 de las condiciones
-        const lowPerformanceScore = [isLowMemory, isOldAndroid, isOldiOS, isLowResolution].filter(Boolean).length;
-        const isLowSpec = lowPerformanceScore >= 2;
+        // Criterio: Usar plataforma y resolución como indicadores
+        const isLowSpec = isOldAndroid || isOldiOS || isLowResolution;
         
-        console.log(`[NetworkContext] Device performance assessment:
-          Memory: ${totalMemoryGB.toFixed(2)}GB, 
+        console.log(`[NetworkContext] Simple device performance assessment:
           OS: ${Platform.OS} ${Platform.Version}, 
-          API Level: ${apiLevel}, 
           Resolution: ${width}x${height}
           Is low performance: ${isLowSpec}
         `);

@@ -14,6 +14,7 @@ import { PointsProvider } from './context/PointsContext';
 import { OnboardingProvider } from './context/OnboardingContext';
 import { BusinessOnboardingProvider } from './context/BusinessOnboardingContext';
 import { NetworkProvider } from './context/NetworkContext';
+import { NotificationProvider } from './context/NotificationContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import firebase from '../firebase.config';
 import 'react-native-gesture-handler';

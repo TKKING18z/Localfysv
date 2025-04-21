@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "options": {
+      "cpu": "gcf_gen1"
+    }
+  }
+} 

@@ -12,6 +12,7 @@ import { useChat, ChatProvider } from '../context/ChatContext';
 import * as Notifications from 'expo-notifications';
 import OfflineBanner from '../components/common/OfflineBanner';
 import { notificationService } from '../../services/NotificationService';
+import { NotificationProvider } from '../context/NotificationContext';
 
 // Screens
 import LoginScreen from '../screens/LoginScreen';
@@ -646,14 +647,14 @@ const AppNavigator = () => {
     );
   }
 
-  // ChatProvider ya está importado
-
   return (
     <NavigationContainer ref={navigationRef}>
       <OfflineBanner />
-      <ChatProvider>
-        <AppWithChat />
-      </ChatProvider>
+      <NotificationProvider>
+        <ChatProvider>
+          <AppWithChat />
+        </ChatProvider>
+      </NotificationProvider>
     </NavigationContainer>
   );
 };

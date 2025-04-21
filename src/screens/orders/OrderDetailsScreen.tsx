@@ -84,11 +84,9 @@ const OrderDetailsScreen: React.FC = () => {
         }
       }
       
-      // Opción 3: Para desarrollo, puedes habilitar esto para simular
-      // que el usuario es el dueño (¡quitar en producción!)
-      // isOwner = true;
-      
-      setIsBusinessOwner(isOwner);
+      // Por defecto, asegurarnos de que isOwner sea false a menos que se verifique exitosamente
+      setIsBusinessOwner(!!isOwner);
+      console.log('isBusinessOwner set to:', !!isOwner); // Debugging log
     } catch (error) {
       console.error('Error checking business ownership:', error);
       setIsBusinessOwner(false);
@@ -512,8 +510,8 @@ const OrderDetailsScreen: React.FC = () => {
           </View>
         )}
         
-        {/* This would be shown to business owners */}
-        {isBusinessOwner && order && (
+        {/* Esta sección es solo para dueños de negocios verificados */}
+        {isBusinessOwner === true && order && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Actualizar estado del pedido</Text>
             <View style={styles.businessActions}>
@@ -552,18 +550,6 @@ const OrderDetailsScreen: React.FC = () => {
                   <Text style={styles.actionButtonText}>Marcar como entregado</Text>
                 </TouchableOpacity>
               )}
-              
-              {/* Botón para mostrar anuncio intersticial */}
-              <BasicAdInterstitial 
-                title="Ver anuncio de recompensa" 
-                onClose={() => {
-                  // Dar alguna recompensa o beneficio después de ver el anuncio
-                  Alert.alert(
-                    '¡Gracias por ver el anuncio!', 
-                    'Has recibido 5 créditos de promoción para tu negocio.'
-                  );
-                }}
-              />
               
               {(order.status === 'created' || order.status === 'paid') && (
                 <TouchableOpacity 

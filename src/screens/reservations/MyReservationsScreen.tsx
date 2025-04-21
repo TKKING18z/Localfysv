@@ -13,7 +13,7 @@ import {
   Platform
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
+import { useNavigation, RouteProp, useRoute, useFocusEffect } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
@@ -22,6 +22,8 @@ import ReservationCard from '../../components/reservations/ReservationCard';
 import ReservationDetailModal from '../../components/reservations/ReservationDetailModal';
 import { Reservation } from '../../../models/reservationTypes';
 import { LinearGradient } from 'expo-linear-gradient';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
 
 type MyReservationsRouteProp = RouteProp<RootStackParamList, 'MyReservations'>;
 type NavigationProps = StackNavigationProp<RootStackParamList>;
@@ -37,12 +39,39 @@ const MyReservationsScreen: React.FC = () => {
   const route = useRoute<MyReservationsRouteProp>();
   const { user } = useAuth();
   const [isBusinessView, setIsBusinessView] = useState(route.params?.isBusinessView || false);
+  const [businessName, setBusinessName] = useState<string>('');
   const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [activeFilterTab, setActiveFilterTab] = useState<ReservationFilter>(ReservationFilter.ACTIVE);
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
 
   // Si hay un businessId específico en los params, lo usamos
   const businessId = route.params?.businessId;
+
+  // Fetch business name if we have a business ID
+  useEffect(() => {
+    const fetchBusinessName = async () => {
+      if (businessId) {
+        try {
+          const businessDoc = await firebase.firestore()
+            .collection('businesses')
+            .doc(businessId)
+            .get();
+          
+          if (businessDoc.exists) {
+            const business = businessDoc.data();
+            if (business && business.name) {
+              setBusinessName(business.name);
+            }
+          }
+        } catch (error) {
+          console.error('[MyReservationsScreen] Error fetching business name:', error);
+        }
+      }
+    };
+    
+    fetchBusinessName();
+  }, [businessId]);
 
   // Hook para manejar reservaciones
   const {
@@ -55,12 +84,40 @@ const MyReservationsScreen: React.FC = () => {
     refresh,
     cancelReservation,
     confirmReservation,
-    completeReservation
+    completeReservation,
+    lastLoaded
   } = useReservations({
     userId: isBusinessView ? undefined : user?.uid,
     businessId: isBusinessView ? (businessId || user?.uid) : undefined,
     initialFilter: ReservationFilter.ACTIVE
   });
+
+  // Refresh when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('[MyReservationsScreen] Screen focused, refreshing data');
+      if (!refreshing && !loading) {
+        refresh();
+      }
+      return () => {
+        // Cleanup if needed
+      };
+    }, [refresh, refreshing, loading])
+  );
+
+  // Also refresh when user changes
+  useEffect(() => {
+    if (user?.uid) {
+      console.log('[MyReservationsScreen] User changed, refreshing data');
+      refresh();
+    }
+  }, [user?.uid, refresh]);
+
+  // Refresh when isBusinessView changes
+  useEffect(() => {
+    console.log('[MyReservationsScreen] Business view changed to:', isBusinessView);
+    refresh();
+  }, [isBusinessView, refresh]);
 
   // Filtros disponibles
   const filterOptions: FilterOption[] = [
@@ -73,6 +130,7 @@ const MyReservationsScreen: React.FC = () => {
 
   // Manejador para cambiar filtro
   const handleFilterChange = useCallback((newFilter: ReservationFilter) => {
+    console.log('[MyReservationsScreen] Changing filter to:', newFilter);
     setActiveFilterTab(newFilter);
     setFilter(newFilter);
   }, [setFilter]);
@@ -82,6 +140,24 @@ const MyReservationsScreen: React.FC = () => {
     setSelectedReservation(reservation);
     setShowDetailModal(true);
   }, []);
+
+  // Manual refresh handler
+  const handleManualRefresh = useCallback(() => {
+    console.log('[MyReservationsScreen] Manual refresh triggered');
+    refresh();
+    setLastRefreshTime(new Date());
+  }, [refresh]);
+
+  // Handle change business (navigate back to business list or choose a different view)
+  const handleChangeBusiness = useCallback(() => {
+    if (isBusinessView && businessId) {
+      // If we're in business view and have a businessId, go back to business list
+      navigation.navigate('MyBusinesses');
+    } else {
+      // Otherwise toggle between personal/business view
+      setIsBusinessView(!isBusinessView);
+    }
+  }, [navigation, isBusinessView, businessId]);
 
   // Manejador para cancelar reserva
   const handleCancelReservation = useCallback(async (reservationId: string) => {
@@ -193,6 +269,13 @@ const MyReservationsScreen: React.FC = () => {
           : 'No hay reservaciones canceladas'}
       </Text>
       
+      <TouchableOpacity
+        style={styles.retryButton}
+        onPress={refresh}
+      >
+        <Text style={styles.retryButtonText}>Actualizar</Text>
+      </TouchableOpacity>
+      
       {!isBusinessView && (
         <TouchableOpacity
           style={styles.exploreButton}
@@ -212,6 +295,53 @@ const MyReservationsScreen: React.FC = () => {
     </View>
   );
 
+  // Last refresh indicator
+  const renderLastRefreshInfo = () => {
+    if (!lastLoaded) return null;
+    
+    const date = new Date(lastLoaded);
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const seconds = date.getSeconds().toString().padStart(2, '0');
+    
+    return (
+      <View style={styles.lastRefreshContainer}>
+        <Text style={styles.lastRefreshText}>
+          Última actualización: {hours}:{minutes}:{seconds}
+        </Text>
+      </View>
+    );
+  };
+
+  // Generate title based on view mode and business name
+  const getScreenTitle = () => {
+    if (isBusinessView) {
+      if (businessName) {
+        return `Reservaciones: ${businessName}`;
+      }
+      return 'Reservaciones de Negocio';
+    }
+    return 'Mis Reservaciones';
+  };
+
+  // Debug info for development
+  const renderDebugInfo = () => {
+    if (process.env.NODE_ENV !== 'development') return null;
+    
+    return (
+      <View style={styles.debugContainer}>
+        <Text style={styles.debugText}>
+          userId: {user?.uid ? user.uid.substring(0, 8) + '...' : 'none'}{'\n'}
+          businessId: {businessId ? businessId.substring(0, 8) + '...' : 'none'}{'\n'}
+          businessName: {businessName || 'N/A'}{'\n'}
+          isBusinessView: {isBusinessView ? 'true' : 'false'}{'\n'}
+          filter: {filter}{'\n'}
+          count: {reservations.length}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#F5F7FF" />
@@ -225,24 +355,42 @@ const MyReservationsScreen: React.FC = () => {
           <MaterialIcons name="arrow-back" size={24} color="#007AFF" />
         </TouchableOpacity>
         <Text style={styles.title}>
-          {isBusinessView ? 'Reservaciones de mi Negocio' : 'Mis Reservaciones'}
+          {getScreenTitle()}
         </Text>
-        {isBusinessView !== undefined && (
+        <View style={styles.headerButtonsContainer}>
           <TouchableOpacity 
-            style={styles.switchViewButton}
-            onPress={() => setIsBusinessView(!isBusinessView)}
+            style={styles.refreshButton}
+            onPress={handleManualRefresh}
+            disabled={refreshing || loading}
           >
             <MaterialIcons 
-              name={isBusinessView ? "person" : "store"} 
+              name="refresh" 
               size={24} 
               color="#007AFF" 
             />
           </TouchableOpacity>
-        )}
+          
+          <TouchableOpacity 
+            style={styles.switchViewButton}
+            onPress={handleChangeBusiness}
+          >
+            <MaterialIcons 
+              name={isBusinessView ? (businessId ? "business" : "person") : "store"} 
+              size={24} 
+              color="#007AFF" 
+            />
+          </TouchableOpacity>
+        </View>
       </View>
       
       {/* Filter tabs */}
       {renderFilterTabs()}
+      
+      {/* Last refresh indicator */}
+      {renderLastRefreshInfo()}
+      
+      {/* Debug info in development */}
+      {renderDebugInfo()}
       
       {/* Main content */}
       {loading && !refreshing ? (
@@ -323,9 +471,40 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333333',
+    flex: 1,
+    textAlign: 'center',
+  },
+  headerButtonsContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  refreshButton: {
+    padding: 8,
+    marginRight: 8,
   },
   switchViewButton: {
     padding: 8,
+  },
+  lastRefreshContainer: {
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    paddingVertical: 4,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  lastRefreshText: {
+    fontSize: 12,
+    color: '#666666',
+  },
+  debugContainer: {
+    backgroundColor: '#FFE8E6',
+    padding: 8,
+    margin: 8,
+    borderRadius: 4,
+  },
+  debugText: {
+    fontSize: 10,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: '#333333',
   },
   filterTabsContainer: {
     backgroundColor: 'white',
@@ -401,6 +580,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
+    marginBottom: 16,
   },
   retryButtonText: {
     color: 'white',

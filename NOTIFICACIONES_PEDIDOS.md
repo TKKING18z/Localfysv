@@ -18,4 +18,5 @@ Sincronización en la App: Asegúrate de que en OrderContext.tsx y NotificationS
 Payload: Configura un payload de notificación adecuado que incluya título, cuerpo, badge, sonido y los datos necesarios (como type, orderId, businessId) para que la app pueda manejar la notificación al recibirla o al hacer clic en ella.
 Logging: Incluye logs detallados en las Cloud Functions para poder diagnosticar problemas (ej: ID de pedido, usuarios a notificar, tokens encontrados, resultado del envío de FCM).
 Por favor, proporciona el código necesario para functions/index.js y las modificaciones pertinentes en OrderContext.tsx y NotificationService.ts para lograr esto de manera robusta."
-Espero que este prompt más estructurado, mencionando el error específico encontrado y sugiriendo precaución con la versión del SDK, ayude a obtener una solución funcional esta vez. ¡Mucho ánimo!
+ , analiza @index.ts de functions ahi es donde esta laa implementacion de las notificaciones pushs ups de mensajes, agarra eso de ejemplo porfavor 
+ analiza los archivos de chats, archivos de orders para que tengas una idea

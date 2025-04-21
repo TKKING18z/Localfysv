@@ -337,6 +337,15 @@ const MyBusinessesScreen: React.FC = () => {
     );
   }, [businesses]);
   
+  const handleViewReservations = useCallback((business: Business) => {
+    // Navigate to MyReservationsScreen with businessId and name
+    console.log('Viewing reservations for business:', business.id, business.name);
+    navigation.navigate('MyReservations', { 
+      businessId: business.id,
+      isBusinessView: true
+    });
+  }, [navigation]);
+  
   // Memoized render function for business items
   const renderBusinessItem = useCallback((item: Business) => {
     const businessAnalytics = analytics?.businessesAnalytics?.[item.id];
@@ -398,6 +407,13 @@ const MyBusinessesScreen: React.FC = () => {
           
           <TouchableOpacity 
             style={styles.actionButton}
+            onPress={() => handleViewReservations(item)}
+          >
+            <MaterialIcons name="event" size={20} color="#007AFF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.actionButton}
             onPress={() => handleEditBusiness(item)}
           >
             <MaterialIcons name="edit" size={20} color="#007AFF" />
@@ -412,7 +428,7 @@ const MyBusinessesScreen: React.FC = () => {
         </View>
       </View>
     );
-  }, [analytics, handleViewBusiness, handleEditBusiness, handleDeleteBusiness]);
+  }, [analytics, handleViewBusiness, handleEditBusiness, handleDeleteBusiness, handleViewReservations]);
   
   // Memoized empty state component
   const EmptyState = useMemo(() => (
