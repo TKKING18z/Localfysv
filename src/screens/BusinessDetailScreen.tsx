@@ -795,6 +795,7 @@ const BusinessDetailScreen: React.FC = () => {
     );
   }
 
+  // Renderizado optimizado de filtros usando arrays para múltiples elementos idénticos
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
@@ -824,23 +825,8 @@ const BusinessDetailScreen: React.FC = () => {
         distance={distance}
       />
 
-      <Animated.ScrollView 
-        showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        contentContainerStyle={styles.scrollContent}
-        overScrollMode="never"
-        bounces={true}
-        alwaysBounceVertical={true}
-        refreshControl={
-          <RefreshControl 
-            refreshing={refreshing} 
-            onRefresh={handleRefresh} 
-            tintColor="#007AFF" 
-            colors={["#007AFF"]} 
-          />
-        }
-      >
+      {/* Replace ScrollView with a View that contains each tab content */}
+      <View style={styles.mainContainer}>
         {/* Business Details */}
         <View style={styles.detailsContainer}>
           {/* Tabs */}
@@ -852,70 +838,146 @@ const BusinessDetailScreen: React.FC = () => {
             isTouristAttraction={isTouristAttraction}
           />
           
-          {/* Tab Content */}
+          {/* Tab Content - Each tab in its own container */}
           <View style={styles.tabContentContainer}>
             {activeTab === 'info' && (
-              <BusinessInfoTab
-                business={business}
-                handleCallBusiness={handleCallBusiness}
-                handleEmailBusiness={handleEmailBusiness}
-                navigation={navigation}
-              />
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                overScrollMode="never"
+                bounces={true}
+                alwaysBounceVertical={true}
+                refreshControl={
+                  <RefreshControl 
+                    refreshing={refreshing} 
+                    onRefresh={handleRefresh} 
+                    tintColor="#007AFF" 
+                    colors={["#007AFF"]} 
+                  />
+                }
+              >
+                <BusinessInfoTab
+                  business={business}
+                  handleCallBusiness={handleCallBusiness}
+                  handleEmailBusiness={handleEmailBusiness}
+                  navigation={navigation}
+                />
+              </ScrollView>
             )}
             
             {activeTab === 'gallery' && (
-              <BusinessGalleryTab images={business.images} />
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                overScrollMode="never"
+                bounces={true}
+                alwaysBounceVertical={true}
+                refreshControl={
+                  <RefreshControl 
+                    refreshing={refreshing} 
+                    onRefresh={handleRefresh} 
+                    tintColor="#007AFF" 
+                    colors={["#007AFF"]} 
+                  />
+                }
+              >
+                <BusinessGalleryTab images={business.images} />
+              </ScrollView>
             )}
             
             {activeTab === 'menu' && (
-              <BusinessMenuTab
-                menu={business.menu}
-                menuUrl={business.menuUrl}
-                isTouristAttraction={isTouristAttraction}
-                businessId={business.id}
-                businessName={business.name}
-              />
+              <View style={styles.menuTabContainer}>
+                <BusinessMenuTab
+                  menu={business.menu}
+                  menuUrl={business.menuUrl}
+                  isTouristAttraction={isTouristAttraction}
+                  businessId={business.id}
+                  businessName={business.name}
+                />
+              </View>
             )}
             
             {activeTab === 'promociones' && (
-              <BusinessPromotionsTab
-                promotions={promotions}
-                loadingPromotions={loadingPromotions}
-                isBusinessOwner={isBusinessOwner}
-                navigateToPromotions={navigateToPromotions}
-              />
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                overScrollMode="never"
+                bounces={true}
+                alwaysBounceVertical={true}
+                refreshControl={
+                  <RefreshControl 
+                    refreshing={refreshing} 
+                    onRefresh={handleRefresh} 
+                    tintColor="#007AFF" 
+                    colors={["#007AFF"]} 
+                  />
+                }
+              >
+                <BusinessPromotionsTab
+                  promotions={promotions}
+                  loadingPromotions={loadingPromotions}
+                  isBusinessOwner={isBusinessOwner}
+                  navigateToPromotions={navigateToPromotions}
+                />
+              </ScrollView>
             )}
             
             {activeTab === 'reservas' && (
-              <BusinessReservationsTab
-                isBusinessOwner={isBusinessOwner}
-                businessName={business.name}
-                navigateToReservations={navigateToReservations}
-              />
+              <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.scrollContent}
+                onScroll={handleScroll}
+                scrollEventThrottle={16}
+                overScrollMode="never"
+                bounces={true}
+                alwaysBounceVertical={true}
+                refreshControl={
+                  <RefreshControl 
+                    refreshing={refreshing} 
+                    onRefresh={handleRefresh} 
+                    tintColor="#007AFF" 
+                    colors={["#007AFF"]} 
+                  />
+                }
+              >
+                <BusinessReservationsTab
+                  isBusinessOwner={isBusinessOwner}
+                  businessName={business.name}
+                  navigateToReservations={navigateToReservations}
+                />
+              </ScrollView>
             )}
             
             {activeTab === 'reseñas' && (
-              <BusinessReviewsTab
-                businessId={businessId}
-                business={business}
-                reviews={reviews}
-                isBusinessOwner={isBusinessOwner}
-                currentUserId={user?.uid || ""}
-                loadingReviews={loadingReviews}
-                reviewActiveFilter={reviewActiveFilter}
-                reviewSortBy={reviewSortBy}
-                onShowReviewForm={() => setShowReviewForm(true)}
-                onReplyReview={handleReplyReview}
-                onReportReview={handleReportReview}
-                onEditReview={handleEditReview}
-                onDeleteReview={handleDeleteReview}
-                onFilterChange={setReviewActiveFilter}
-                onSortChange={setReviewSortBy}
-              />
+              <View style={styles.reviewsTabContainer}>
+                <BusinessReviewsTab
+                  businessId={businessId}
+                  business={business}
+                  reviews={reviews}
+                  isBusinessOwner={isBusinessOwner}
+                  currentUserId={user?.uid || ""}
+                  loadingReviews={loadingReviews}
+                  reviewActiveFilter={reviewActiveFilter}
+                  reviewSortBy={reviewSortBy}
+                  onShowReviewForm={() => setShowReviewForm(true)}
+                  onReplyReview={handleReplyReview}
+                  onReportReview={handleReportReview}
+                  onEditReview={handleEditReview}
+                  onDeleteReview={handleDeleteReview}
+                  onFilterChange={setReviewActiveFilter}
+                  onSortChange={setReviewSortBy}
+                />
+              </View>
             )}
           </View>
         </View>
-      </Animated.ScrollView>
+      </View>
       
       {/* Action Buttons */}
       <BusinessActionButtons
@@ -952,6 +1014,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F7FF',
+  },
+  mainContainer: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,
@@ -1016,6 +1081,13 @@ const styles = StyleSheet.create({
   tabContentContainer: {
     paddingHorizontal: 16,
     paddingTop: 4,
+    flex: 1,
+  },
+  reviewsTabContainer: {
+    flex: 1,
+  },
+  menuTabContainer: {
+    flex: 1,
   },
 });
 
