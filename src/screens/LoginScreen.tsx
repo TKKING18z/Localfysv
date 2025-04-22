@@ -36,7 +36,7 @@ const { width } = Dimensions.get('window');
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
     // Usar el hook de autenticación actualizado
-    const { login, isGoogleLoading, loading: authLoading, saveSessionData } = useAuth();
+    const { login, isGoogleLoading, loading: authLoading, saveSessionData, isNewUser } = useAuth();
     
     // Usar el hook de autenticación de Google
     const { request, response, promptAsync } = useGoogleAuth();
@@ -153,6 +153,8 @@ const LoginScreen: React.FC = () => {
             
             if (success) {
                 console.log("Login exitoso");
+                // No hacer navegación manual, dejar que AppNavigator maneje la navegación
+                // basado en el estado isNewUser
             }
         } catch (error: any) {
             console.log("Error durante el login:", error);
@@ -182,6 +184,8 @@ const LoginScreen: React.FC = () => {
             
             if (result.success && result.user) {
                 await saveSessionData(result.user, 'google');
+                // No hacer navegación manual, dejar que AppNavigator maneje la navegación
+                // basado en el estado isNewUser
             } else if (!result.success && result.error) {
                 if (result.error !== "Inicio de sesión con Google cancelado") {
                     Alert.alert("Error", result.error);

@@ -4,33 +4,95 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import { useAuth } from './AuthContext';
 import InAppNotification from '../components/InAppNotification';
+import notificationService, { NotificationData } from '../../services/NotificationService';
+import { useNavigation, NavigationState } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Define the shape of a notification
-export interface AppNotification {
+interface AppNotification extends NotificationData {
   id: string;
-  title: string;
-  message: string;
-  type: 'chat' | 'order_new' | 'order_status' | 'system' | 'promo';
-  data?: any;
   timestamp: Date;
 }
 
 // Define the context interface
 interface NotificationContextType {
-  showNotification: (notification: Omit<AppNotification, 'id' | 'timestamp'>) => void;
+  showNotification: (notification: NotificationData) => void;
   dismissNotification: () => void;
   clearAllNotifications: () => void;
+  markAllAsViewed: () => void;
+  isNotificationScreenActive: boolean;
+  setNotificationScreenActive: (active: boolean) => void;
 }
 
 // Create the context
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
+// Key for AsyncStorage
+const VIEWED_NOTIFICATIONS_KEY = 'localfy_viewed_notifications';
+
 // Context Provider component
 export const NotificationProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const { user } = useAuth();
-  const [currentNotification, setCurrentNotification] = useState<AppNotification | null>(null);
+  const [currentNotification, setCurrentNotification] = useState<NotificationData | null>(null);
+  const [showNotification, setShowNotification] = useState(false);
   const [notificationQueue, setNotificationQueue] = useState<AppNotification[]>([]);
   const [isAppActive, setIsAppActive] = useState(true);
+  const [isNavigationReady, setIsNavigationReady] = useState(false);
+  const [viewedNotifications, setViewedNotifications] = useState<string[]>([]);
+  const [isNotificationScreenActive, setNotificationScreenActive] = useState(false);
+  const [isInitialCooldown, setIsInitialCooldown] = useState(true);
+  
+  // Initial cooldown to prevent notifications from showing immediately on app start
+  useEffect(() => {
+    // Wait 3 seconds after app starts before showing any notifications
+    const cooldownTimer = setTimeout(() => {
+      setIsInitialCooldown(false);
+    }, 3000);
+    
+    return () => clearTimeout(cooldownTimer);
+  }, []);
+  
+  // Load viewed notifications from storage on initial load
+  useEffect(() => {
+    const loadViewedNotifications = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(VIEWED_NOTIFICATIONS_KEY);
+        if (stored) {
+          setViewedNotifications(JSON.parse(stored));
+        }
+      } catch (error) {
+        console.error('[NotificationContext] Error loading viewed notifications:', error);
+      }
+    };
+    
+    loadViewedNotifications();
+  }, [user?.uid]);
+  
+  // Save viewed notifications when they change
+  useEffect(() => {
+    const saveViewedNotifications = async () => {
+      try {
+        await AsyncStorage.setItem(VIEWED_NOTIFICATIONS_KEY, JSON.stringify(viewedNotifications));
+      } catch (error) {
+        console.error('[NotificationContext] Error saving viewed notifications:', error);
+      }
+    };
+    
+    if (viewedNotifications.length > 0) {
+      saveViewedNotifications();
+    }
+  }, [viewedNotifications]);
+  
+  // Check if navigation is available in this context - might not be during initial render
+  useEffect(() => {
+    // Wait until after component is mounted to set navigation ready
+    // This ensures NavigationContainer has a chance to initialize first
+    const checkNavigationReady = setTimeout(() => {
+      setIsNavigationReady(true);
+    }, 1000);
+    
+    return () => clearTimeout(checkNavigationReady);
+  }, []);
   
   // Handle app state changes
   useEffect(() => {
@@ -62,11 +124,19 @@ export const NotificationProvider: React.FC<{children: ReactNode}> = ({ children
       snapshot.docChanges().forEach(change => {
         if (change.type === 'added') {
           const notificationData = change.doc.data();
+          const notificationId = change.doc.id;
           
-          // Only show in-app notification if app is active and notification is new
-          if (isAppActive) {
+          // Only show in-app notification if:
+          // 1. App is active
+          // 2. Notification is new
+          // 3. User isn't currently on the notifications screen
+          // 4. Notification hasn't been viewed before
+          if (isAppActive && 
+              !isNotificationScreenActive && 
+              !viewedNotifications.includes(notificationId)) {
+            
             const newNotification: AppNotification = {
-              id: change.doc.id,
+              id: notificationId,
               title: notificationData.title || 'Nueva notificación',
               message: notificationData.message || '',
               type: notificationData.type || 'system',
@@ -84,11 +154,12 @@ export const NotificationProvider: React.FC<{children: ReactNode}> = ({ children
     });
     
     return () => unsubscribe();
-  }, [user, isAppActive]);
+  }, [user, isAppActive, isNotificationScreenActive, viewedNotifications]);
   
-  // Process notification queue
+  // Process notification queue - update to include the initial cooldown check
   useEffect(() => {
-    if (notificationQueue.length > 0 && !currentNotification) {
+    if (notificationQueue.length > 0 && !currentNotification && 
+        !isNotificationScreenActive && !isInitialCooldown) {
       // Get the next notification from queue
       const nextNotification = notificationQueue[0];
       
@@ -97,55 +168,133 @@ export const NotificationProvider: React.FC<{children: ReactNode}> = ({ children
       
       // Show it
       setCurrentNotification(nextNotification);
+      setShowNotification(true);
     }
-  }, [notificationQueue, currentNotification]);
+  }, [notificationQueue, currentNotification, isNotificationScreenActive, isInitialCooldown]);
   
-  // Show a notification programmatically
-  const showNotification = (notification: Omit<AppNotification, 'id' | 'timestamp'>) => {
-    const newNotification: AppNotification = {
-      ...notification,
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date()
+  // Listen for notifications from the service
+  useEffect(() => {
+    // Direct function to handle notifications from the service
+    const handleServiceNotification = (notification: NotificationData) => {
+      // Only show if not on notification screen and the notification has a unique ID
+      if (!isNotificationScreenActive && notification.id && !viewedNotifications.includes(notification.id)) {
+        setCurrentNotification(notification);
+        setShowNotification(true);
+      }
     };
-    
-    if (currentNotification) {
-      // Add to queue if there's already a notification showing
-      setNotificationQueue(prevQueue => [...prevQueue, newNotification]);
-    } else {
-      // Show immediately if no notification is currently displayed
-      setCurrentNotification(newNotification);
+
+    // Register the handler with the service
+    const removeListener = notificationService.onShowNotification(handleServiceNotification);
+
+    return () => {
+      removeListener();
+    };
+  }, [isNotificationScreenActive, viewedNotifications]);
+  
+  // Handle notification dismiss
+  const handleDismiss = () => {
+    if (currentNotification?.id) {
+      // Mark as viewed when dismissed
+      markAsViewed(currentNotification.id);
+    }
+    setShowNotification(false);
+    setCurrentNotification(null);
+  };
+  
+  // Method to show a notification
+  const showNotificationMethod = (notification: NotificationData) => {
+    if (!notification.id || !viewedNotifications.includes(notification.id)) {
+      notificationService.showNotification(notification);
     }
   };
   
   // Dismiss the current notification
   const dismissNotification = () => {
+    if (currentNotification?.id) {
+      markAsViewed(currentNotification.id);
+    }
     setCurrentNotification(null);
+    setShowNotification(false);
   };
   
   // Clear all notifications
   const clearAllNotifications = () => {
+    // Mark all notifications in queue as viewed
+    notificationQueue.forEach(notification => {
+      if (notification.id) {
+        markAsViewed(notification.id);
+      }
+    });
+    
+    if (currentNotification?.id) {
+      markAsViewed(currentNotification.id);
+    }
+    
     setCurrentNotification(null);
     setNotificationQueue([]);
+    setShowNotification(false);
+  };
+  
+  // Mark a notification as viewed
+  const markAsViewed = (notificationId: string) => {
+    if (!viewedNotifications.includes(notificationId)) {
+      setViewedNotifications(prev => [...prev, notificationId]);
+    }
+  };
+  
+  // Mark all unread notifications as viewed
+  const markAllAsViewed = async () => {
+    if (!user) return;
+    
+    try {
+      const db = firebase.firestore();
+      const batch = db.batch();
+      
+      // Get all unread notifications
+      const unreadQuery = await db.collection('user_notifications')
+        .where('userId', '==', user.uid)
+        .where('read', '==', false)
+        .get();
+      
+      // Mark all as read in Firestore
+      unreadQuery.docs.forEach(doc => {
+        batch.update(doc.ref, { read: true });
+        markAsViewed(doc.id);
+      });
+      
+      await batch.commit();
+      
+      // Clear current notifications
+      clearAllNotifications();
+    } catch (error) {
+      console.error('[NotificationContext] Error marking all as viewed:', error);
+    }
   };
   
   return (
     <NotificationContext.Provider 
       value={{
-        showNotification,
+        showNotification: showNotificationMethod,
         dismissNotification,
-        clearAllNotifications
+        clearAllNotifications,
+        markAllAsViewed,
+        isNotificationScreenActive,
+        setNotificationScreenActive
       }}
     >
       {children}
       
-      {/* Render the current notification if any */}
-      {currentNotification && (
+      {/* Only render notification when navigation is ready, there's a notification to show,
+          and the user is not on the notifications screen */}
+      {isNavigationReady && currentNotification && showNotification && !isNotificationScreenActive && (
         <InAppNotification
           title={currentNotification.title}
           message={currentNotification.message}
           type={currentNotification.type}
           data={currentNotification.data}
-          onDismiss={dismissNotification}
+          onDismiss={handleDismiss}
+          autoDismiss={currentNotification.autoDismiss ?? true}
+          duration={currentNotification.duration ?? 5000}
         />
       )}
     </NotificationContext.Provider>

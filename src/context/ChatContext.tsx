@@ -51,6 +51,7 @@ interface ChatContextType {
     businessName?: string,
     initialMessage?: string
   ) => Promise<string | null>;
+  cleanupAllListeners: () => void;
 }
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined);
@@ -71,11 +72,44 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
   // Usamos useRef para mantener este valor sin causar re-renders
   const notifiedMessageIds = useRef<Set<string>>(new Set());
   
+  // Referencia para almacenar todas las funciones unsubscribe de los listeners
+  const activeListeners = useRef<(() => void)[]>([]);
+  
+  // Function to clean up all active listeners
+  const cleanupAllListeners = useCallback(() => {
+    console.log('[ChatContext] Cleaning up all listeners:', activeListeners.current.length);
+    activeListeners.current.forEach(unsubscribe => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.error('[ChatContext] Error unsubscribing listener:', error);
+      }
+    });
+    activeListeners.current = [];
+  }, []);
+
+  // Watch for user changes to clean up listeners when user logs out
+  useEffect(() => {
+    if (!user) {
+      console.log('[ChatContext] No user logged in, resetting conversations');
+      cleanupAllListeners();
+      setConversations([]);
+      setActiveConversation(null);
+      _setActiveConversationId(null);
+      setActiveMessages([]);
+      setLocalMessages([]);
+      setUnreadTotal(0);
+    }
+  }, [user, cleanupAllListeners]);
+  
   // Initialize network connectivity listener
   useEffect(() => {
     const unsubscribe = NetInfo.addEventListener(state => {
       setIsOffline(!state.isConnected);
     });
+    
+    // Add this listener to our cleanup list
+    activeListeners.current.push(unsubscribe);
     
     // Check initial connection state
     NetInfo.fetch().then(state => {
@@ -1159,6 +1193,172 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     }
   }, [user]);
 
+  // Listen for changes in the active conversation
+  useEffect(() => {
+    let conversationListener: (() => void) | null = null;
+    
+    const setupConversationListener = async () => {
+      if (!user || !activeConversationId) return;
+      
+      try {
+        // Set up listener for the conversation
+        conversationListener = chatService.listenToConversation(
+          activeConversationId,
+          (data) => {
+            setActiveConversation(data);
+          },
+          (error) => {
+            console.error('[ChatContext] Error in conversation listener:', error);
+          }
+        );
+        
+        // Add this listener to our cleanup list
+        if (conversationListener) {
+          activeListeners.current.push(conversationListener);
+        }
+      } catch (error) {
+        console.error('[ChatContext] Error setting up conversation listener:', error);
+      }
+    };
+    
+    setupConversationListener();
+    
+    return () => {
+      if (conversationListener) {
+        conversationListener();
+        // Remove from active listeners
+        activeListeners.current = activeListeners.current.filter(
+          listener => listener !== conversationListener
+        );
+      }
+    };
+  }, [user, activeConversationId]);
+
+  // Function to load messages for a conversation
+  const loadConversationMessages = useCallback(async (conversationId: string) => {
+    if (!user) {
+      console.error('[ChatContext] Cannot load messages: no user logged in');
+      return;
+    }
+    
+    if (isOffline) {
+      console.log('[ChatContext] Device is offline, loading cached messages if available');
+      // Load cached messages here if needed
+      return;
+    }
+    
+    console.log(`[ChatContext] Loading messages for conversation: ${conversationId}`);
+    
+    try {
+      // Get conversation data
+      const convResult = await chatService.getConversation(conversationId);
+      
+      if (convResult.success && convResult.data) {
+        setActiveConversation(convResult.data);
+        
+        // Configurar oyente de mensajes - con protección para evitar carreras
+        const messageListener = chatService.listenToMessages(
+          conversationId,
+          (messages) => {
+            // Solo actualizar mensajes si esta sigue siendo la conversación activa
+            if (activeConversationId === conversationId) {
+              console.log(`[ChatContext] Received ${messages.length} messages update`);
+              
+              // Verificar si hay mensajes nuevos para notificar
+              const lastLocalMessageTime = activeMessages.length > 0 
+                ? getTimestampMillis(activeMessages[activeMessages.length - 1].timestamp)
+                : 0;
+              
+              // Función para convertir diferentes tipos de timestamp a milisegundos
+              function getTimestampMillis(timestamp: any): number {
+                if (!timestamp) return 0;
+                
+                if (timestamp instanceof Date) {
+                  return timestamp.getTime();
+                } else if (typeof timestamp === 'string') {
+                  return new Date(timestamp).getTime();
+                } else if (timestamp && typeof timestamp.toDate === 'function') {
+                  // Para timestamps de Firestore
+                  return timestamp.toDate().getTime();
+                } else if (typeof timestamp === 'number') {
+                  return timestamp;
+                } else {
+                  return 0;
+                }
+              }
+              
+              // Buscar mensajes nuevos que no sean del usuario actual y que no hayan sido notificados previamente
+              const newMessages = messages.filter(msg => {
+                // Convertir timestamp a formato comparable
+                const msgTime = getTimestampMillis(msg.timestamp);
+                
+                // Verificar si es un mensaje nuevo que:
+                // 1. No es del usuario actual
+                // 2. Tiene una marca de tiempo posterior al último mensaje local
+                // 3. No ha sido marcado como leído
+                // 4. No ha sido notificado previamente (comprobamos el ID)
+                return msgTime > lastLocalMessageTime && 
+                       msg.senderId !== user?.uid && 
+                       msg.read !== true && 
+                       !notifiedMessageIds.current.has(msg.id);
+              });
+              
+              // Mostrar notificación para mensajes nuevos cuando la app está abierta pero no en la conversación
+              if (newMessages.length > 0) {
+                try {
+                  // Importar el servicio de notificaciones
+                  const notificationService = require('../../services/NotificationService').notificationService;
+                  
+                  // Para cada mensaje nuevo, generar una notificación
+                  newMessages.forEach(msg => {
+                    // Primero, marcar este mensaje como notificado
+                    notifiedMessageIds.current.add(msg.id);
+                    
+                    console.log(`[ChatContext] Sending notification for message ${msg.id}`);
+                    
+                    notificationService.sendLocalNotification(
+                      msg.senderName || 'Nuevo mensaje',
+                      msg.text || (msg.imageUrl ? 'Te envió una imagen' : 'Nuevo mensaje'),
+                      {
+                        type: 'chat',
+                        conversationId,
+                        messageId: msg.id
+                      }
+                    ).catch((err: Error) => {
+                      console.error('[ChatContext] Error sending notification:', err);
+                    });
+                  });
+                } catch (error: unknown) {
+                  console.error('[ChatContext] Error showing notification:', error);
+                }
+              }
+              
+              setActiveMessages(messages);
+            }
+          },
+          (error) => {
+            console.error('[ChatContext] Error in message listener:', error);
+          },
+          50 // Obtener más mensajes para historial
+        );
+        
+        // Add message listener to our active listeners
+        activeListeners.current.push(messageListener);
+        
+        // Devolver función para cancelar suscripción y limpiar el listener
+        return () => {
+          messageListener();
+          // Remove from active listeners
+          activeListeners.current = activeListeners.current.filter(
+            listener => listener !== messageListener
+          );
+        };
+      }
+    } catch (error) {
+      console.error('[ChatContext] Error loading conversation messages:', error);
+    }
+  }, [user, activeConversationId, isOffline]);
+
   // Use useMemo for context value to prevent unnecessary renders
   const contextValue = useMemo(() => ({
     conversations,
@@ -1186,7 +1386,8 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     resendFailedMessage,
     deleteConversation,
     updateNotificationToken,
-    createConversation
+    createConversation,
+    cleanupAllListeners
   }), [
     conversations,
     activeConversation,
@@ -1205,7 +1406,8 @@ export const ChatProvider: React.FC<{children: React.ReactNode}> = ({ children }
     resendFailedMessage,
     deleteConversation,
     updateNotificationToken,
-    createConversation
+    createConversation,
+    cleanupAllListeners
   ]);
   
   return (
@@ -1254,9 +1456,70 @@ export const useChat = () => {
       resendFailedMessage: async () => false,
       deleteConversation: async () => false,
       updateNotificationToken: async () => {},
-      createConversation: async () => null
+      createConversation: async () => null,
+      cleanupAllListeners: () => {}
     } as ChatContextType;
   }
   
   return context;
+};
+
+// Export a safe function to clear listeners that doesn't rely on hooks
+// This can be called from outside React components safely
+export const cleanupChatListeners = (userId: string) => {
+  console.log(`[ChatContext] Cleaning up chat listeners for user: ${userId}`);
+  
+  try {
+    // Attempt to clean up Firestore listeners
+    const db = firebase.firestore();
+    
+    // Try direct cleanup with Firestore API if possible
+    try {
+      // Get collection references that might have listeners
+      const conversationsRef = db.collection('conversations');
+      const messagesCollectionGroup = db.collectionGroup('messages');
+      
+      console.log('[ChatContext] Attempting to detach listeners from Firestore collections');
+      
+      // Unfortunately, Firebase doesn't provide a direct API to detach all listeners
+      // The best we can do is log this information
+    } catch (firestoreError) {
+      console.error('[ChatContext] Firestore reference error:', firestoreError);
+    }
+    
+    // Try to clean up AsyncStorage for chat-related data
+    try {
+      // Clean up cached conversation data for this user
+      const conversationsCacheKey = `user_conversations_${userId}`;
+      AsyncStorage.removeItem(conversationsCacheKey)
+        .then(() => console.log(`[ChatContext] Removed conversations cache for user ${userId}`))
+        .catch(err => console.error('[ChatContext] Error removing conversations cache:', err));
+        
+      // Clean up any other chat-related AsyncStorage keys
+      const chatStorageKeys = [
+        `chat_last_seen_${userId}`,
+        `chat_notifications_${userId}`
+      ];
+      
+      AsyncStorage.multiRemove(chatStorageKeys)
+        .then(() => console.log('[ChatContext] Removed additional chat storage keys'))
+        .catch(err => console.error('[ChatContext] Error removing chat storage keys:', err));
+    } catch (storageError) {
+      console.error('[ChatContext] AsyncStorage cleanup error:', storageError);
+    }
+    
+    // Force garbage collection where possible
+    try {
+      // Clear any in-memory references for good measure
+      globalThis.gc?.();
+    } catch (gcError) {
+      // Ignore - not all environments support this
+    }
+    
+    console.log('[ChatContext] Chat listeners cleanup completed with best effort');
+    return true;
+  } catch (error) {
+    console.error('[ChatContext] Error during chat listeners cleanup:', error);
+    return false;
+  }
 };

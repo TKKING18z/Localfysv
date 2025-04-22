@@ -8,7 +8,7 @@ import {
   Platform,
   Dimensions
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, NavigationContainerRef } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { MaterialIcons, FontAwesome5 } from '@expo/vector-icons';
@@ -21,7 +21,7 @@ type NavigationProps = StackNavigationProp<RootStackParamList>;
 interface InAppNotificationProps {
   title: string;
   message: string;
-  type: 'chat' | 'order_new' | 'order_status' | 'system' | 'promo';
+  type: 'chat' | 'order_new' | 'order_status' | 'system' | 'promo' | 'reservation_new' | 'reservation_status';
   data?: any;
   onDismiss: () => void;
   autoDismiss?: boolean;
@@ -37,7 +37,14 @@ const InAppNotification: React.FC<InAppNotificationProps> = ({
   autoDismiss = true,
   duration = 5000
 }) => {
-  const navigation = useNavigation<NavigationProps>();
+  // Use try-catch when getting navigation to avoid errors
+  let navigation: NavigationProps | null = null;
+  try {
+    navigation = useNavigation<NavigationProps>();
+  } catch (e) {
+    console.log('Navigation not available in context:', e);
+  }
+
   const insets = useSafeAreaInsets();
   const translateY = useRef(new Animated.Value(-150)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -53,6 +60,10 @@ const InAppNotification: React.FC<InAppNotificationProps> = ({
         return <FontAwesome5 name="shopping-bag" size={18} color="#FFF" />;
       case 'order_status':
         return <MaterialIcons name="delivery-dining" size={22} color="#FFF" />;
+      case 'reservation_new':
+        return <MaterialIcons name="event-available" size={22} color="#FFF" />;
+      case 'reservation_status':
+        return <MaterialIcons name="event" size={22} color="#FFF" />;
       case 'system':
         return <MaterialIcons name="info" size={22} color="#FFF" />;
       case 'promo':
@@ -71,6 +82,10 @@ const InAppNotification: React.FC<InAppNotificationProps> = ({
         return '#FF2D55';
       case 'order_status':
         return '#5856D6';
+      case 'reservation_new':
+        return '#8E44AD'; // Purple for new reservations
+      case 'reservation_status':
+        return '#3498DB'; // Blue for reservation status updates
       case 'system':
         return '#FF9500';
       case 'promo':
@@ -84,29 +99,45 @@ const InAppNotification: React.FC<InAppNotificationProps> = ({
   const handlePress = () => {
     dismiss();
 
+    // Only attempt navigation if navigation object is available
+    if (!navigation) {
+      console.log('Navigation not available for notification press');
+      return;
+    }
+
     // Navigate based on notification type
-    switch (type) {
-      case 'chat':
-        if (data?.conversationId) {
-          navigation.navigate('Chat', { conversationId: data.conversationId });
-        }
-        break;
-      case 'order_new':
-      case 'order_status':
-        if (data?.orderId) {
-          navigation.navigate('OrderDetails', { orderId: data.orderId });
-        }
-        break;
-      case 'promo':
-        if (data?.businessId) {
-          navigation.navigate('BusinessDetail', { businessId: data.businessId });
-        }
-        break;
-      case 'system':
-        if (data?.screen) {
-          navigation.navigate(data.screen);
-        }
-        break;
+    try {
+      switch (type) {
+        case 'chat':
+          if (data?.conversationId) {
+            navigation.navigate('Chat', { conversationId: data.conversationId });
+          }
+          break;
+        case 'order_new':
+        case 'order_status':
+          if (data?.orderId) {
+            navigation.navigate('OrderDetails', { orderId: data.orderId });
+          }
+          break;
+        case 'reservation_new':
+        case 'reservation_status':
+          if (data?.reservationId) {
+            navigation.navigate('ReservationDetail', { reservationId: data.reservationId });
+          }
+          break;
+        case 'promo':
+          if (data?.businessId) {
+            navigation.navigate('BusinessDetail', { businessId: data.businessId });
+          }
+          break;
+        case 'system':
+          if (data?.screen) {
+            navigation.navigate(data.screen);
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Error navigating from notification:', error);
     }
   };
 

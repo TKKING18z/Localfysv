@@ -29,6 +29,7 @@ export function useReservations({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [lastLoaded, setLastLoaded] = useState<Date | null>(null);
 
   // Cargar reservaciones al iniciar
   const loadReservations = useCallback(async () => {
@@ -55,6 +56,7 @@ export function useReservations({
 
       if (result.success && result.data) {
         setReservations(result.data);
+        setLastLoaded(new Date());
       } else {
         setError(result.error?.message || 'Error al cargar reservaciones');
       }
@@ -196,5 +198,6 @@ export function useReservations({
     confirmReservation,
     completeReservation,
     getReservationsByDate,
+    lastLoaded,
   };
 }

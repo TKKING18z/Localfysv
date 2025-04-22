@@ -199,28 +199,78 @@ const ProfileScreen: React.FC = () => {
     setLogoutModalVisible(false);
     setLoading(true);
     try {
-      // 1. Asegurarse de limpiar cualquier almacenamiento persistente
-      await AsyncStorage.clear();
+      // Desactivar la bandera de montado para evitar actualizaciones de estado después de desmontar
+      isMountedRef.current = false;
       
-      // 2. Usar el método logout del contexto de autenticación
-      await logout();
+      // 1. Esperar a que cualquier operación pendiente termine
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      // 3. Navigate immediately without setTimeout to avoid state updates after unmount
-      navigation.dispatch(
-        CommonActions.reset({
-          index: 0,
-          routes: [
-            { name: 'Auth' }
-          ],
-        })
-      );
-      // No need to call setLoading(false) as component will unmount
+      // 2. Limpiar AsyncStorage de manera controlada (solo las claves necesarias)
+      // En lugar de limpiar todo, lo que podría afectar a otros componentes
+      const keysToRemove = [
+        'user_data',
+        'session_data',
+        'auth_persistence',
+        'favorites', 
+        'recent_searches'
+      ];
+      
+      try {
+        await AsyncStorage.multiRemove(keysToRemove);
+        console.log("[ProfileScreen] AsyncStorage keys removed successfully");
+      } catch (storageError) {
+        console.error("[ProfileScreen] Error removing AsyncStorage keys:", storageError);
+        // Continue logout process despite storage error
+      }
+      
+      // 3. Llamar al método logout del contexto de autenticación
+      // Este método ahora se encarga de limpiar listeners
+      try {
+        await logout();
+        console.log("[ProfileScreen] Logout successful from auth context");
+      } catch (logoutError) {
+        console.error("[ProfileScreen] Error during logout from auth context:", logoutError);
+        // Continue navigation despite logout error
+      }
+      
+      // 4. Navegar después de un corto retraso para asegurar que todas las operaciones se completaron
+      setTimeout(() => {
+        try {
+          // Usar NavigationContainer.resetRoot es más confiable que CommonActions.reset
+          // Y asegura que estamos navegando a una pantalla que definitivamente existe
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }]
+          });
+          console.log("[ProfileScreen] Navigation reset to Login screen");
+        } catch (navError) {
+          console.error("[ProfileScreen] Navigation error during logout:", navError);
+          // Attempt alternate navigation as fallback
+          try {
+            navigation.navigate('Login');
+          } catch (altNavError) {
+            console.error("[ProfileScreen] Alternate navigation failed:", altNavError);
+          }
+        }
+      }, 300); // Aumentar retraso para asegurar que todo se ha completado
+      
     } catch (error) {
-      console.error('Error logging out:', error);
-      Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
-      // Only update state if component is still mounted
+      console.error("[ProfileScreen] Error in main logout process:", error);
+      
+      // Solo mostrar alerta si todavía estamos montados
       if (isMountedRef.current) {
+        Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
         setLoading(false);
+      } else {
+        // Si no estamos montados, intentar navegar de todas formas
+        try {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Login' }]
+          });
+        } catch (finalNavError) {
+          console.error("[ProfileScreen] Final navigation attempt failed:", finalNavError);
+        }
       }
     }
   };
@@ -368,7 +418,7 @@ const ProfileScreen: React.FC = () => {
               }>
                 <FastImageView 
                   source={{ uri: profile.photoURL }}
-                  style={styles.avatar} 
+                  style={[styles.avatar, { backgroundColor: 'transparent' }]} 
                   showLoadingIndicator={true}
                   onError={() => console.log('Error loading profile image')}
                 />
@@ -592,6 +642,22 @@ const ProfileScreen: React.FC = () => {
           >
             <MaterialIcons name="receipt-long" size={24} color="#007AFF" />
             <Text style={styles.menuItemText}>Mis Pedidos</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+          
+          {/* Add Reservations Link */}
+          <TouchableOpacity 
+            style={styles.menuItem}
+            onPress={() => navigation.navigate('MyReservations', { 
+              isBusinessView: profile?.userType === 'Propietario' 
+            })}
+          >
+            <MaterialIcons name="event" size={24} color="#007AFF" />
+            <Text style={styles.menuItemText}>
+              {profile?.userType === 'Propietario'
+                ? 'Gestionar Reservaciones'
+                : 'Mis Reservaciones'}
+            </Text>
             <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
           </TouchableOpacity>
           

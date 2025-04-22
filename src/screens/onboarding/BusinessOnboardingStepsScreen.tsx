@@ -11,11 +11,14 @@ import {
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialIcons } from '@expo/vector-icons';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useBusinessOnboarding } from '../../context/BusinessOnboardingContext';
+import firebase from 'firebase/compat/app';
+import 'firebase/compat/firestore';
+import { firebaseService } from '../../services/firebaseService';
 
 // Step components
 import BasicInfoStep from './steps/BasicInfoStep';
@@ -25,15 +28,30 @@ import MenuManagementStep from './steps/MenuManagementStep';
 import BusinessOperationsStep from './steps/BusinessOperationsStep';
 import DigitalPresenceStep from './steps/DigitalPresenceStep';
 
+// Image type definition
+interface ImageFile {
+  uri: string;
+  [key: string]: any;
+}
+
 type BusinessOnboardingStepsScreenNavigationProp = StackNavigationProp<
   RootStackParamList, 
   'BusinessOnboardingSteps'
 >;
 
+type BusinessOnboardingStepsRouteProp = RouteProp<
+  RootStackParamList,
+  'BusinessOnboardingSteps'
+>;
+
 const BusinessOnboardingStepsScreen: React.FC = () => {
   const navigation = useNavigation<BusinessOnboardingStepsScreenNavigationProp>();
+  const route = useRoute<BusinessOnboardingStepsRouteProp>();
+  const { businessId, editMode } = route.params || {};
+  
   const { 
     formState, 
+    setField,
     currentStep, 
     totalSteps, 
     nextStep, 
@@ -49,6 +67,115 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
   } = useBusinessOnboarding();
   
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  
+  // Load existing business data if in edit mode
+  useEffect(() => {
+    const loadBusinessData = async () => {
+      if (editMode && businessId) {
+        setIsLoading(true);
+        try {
+          const businessDoc = await firebase.firestore()
+            .collection('businesses')
+            .doc(businessId)
+            .get();
+            
+          if (businessDoc.exists) {
+            const businessData = businessDoc.data();
+            
+            // Set form fields with existing data
+            if (businessData) {
+              // Basic info
+              setField('name', businessData.name || '');
+              setField('category', businessData.category || '');
+              setField('phone', businessData.phone || '');
+              setField('address', businessData.address || '');
+              setField('location', businessData.location || null);
+              
+              // Description
+              setField('description', businessData.description || '');
+              
+              // Images
+              if (businessData.images && businessData.images.length > 0) {
+                // Find main image
+                const mainImage = businessData.images.find((img: {isMain?: boolean}) => img.isMain);
+                if (mainImage) {
+                  setField('image', { uri: mainImage.url });
+                }
+                
+                // Set gallery images
+                const galleryImages = businessData.images
+                  .filter((img: {isMain?: boolean}) => !img.isMain)
+                  .map((img: {url: string}) => ({ uri: img.url }));
+                  
+                if (galleryImages.length > 0) {
+                  setField('galleryImages', galleryImages);
+                }
+              }
+              
+              // Menu
+              setField('menu', businessData.menu || []);
+              setField('menuUrl', businessData.menuUrl || '');
+              
+              // Business hours
+              setField('businessHours', businessData.businessHours || undefined);
+              
+              // Payment methods
+              setField('paymentMethods', businessData.paymentMethods || []);
+              
+              // Social links
+              setField('socialLinks', businessData.socialLinks || undefined);
+              
+              // Reservations
+              setField('acceptsReservations', 
+                businessData.acceptsReservations !== undefined ? 
+                businessData.acceptsReservations : true);
+                
+              // Promotions
+              setField('allowsPromotions',
+                businessData.allowsPromotions !== undefined ?
+                businessData.allowsPromotions : true);
+              
+              // Mark completed steps based on data
+              if (businessData.name && businessData.category && businessData.phone && businessData.location) {
+                markStepComplete('basicInfo');
+              }
+              
+              if (businessData.images && businessData.images.length > 0) {
+                markStepComplete('visualProfile');
+              }
+              
+              if (businessData.description) {
+                markStepComplete('valueProposition');
+              }
+              
+              if (businessData.menu?.length > 0 || businessData.menuUrl) {
+                markStepComplete('menuManagement');
+              }
+              
+              if (businessData.businessHours || businessData.paymentMethods?.length > 0) {
+                markStepComplete('businessOperations');
+              }
+              
+              if (businessData.socialLinks) {
+                markStepComplete('digitalPresence');
+              }
+            }
+          } else {
+            Alert.alert('Error', 'No se encontró el negocio para editar');
+            navigation.goBack();
+          }
+        } catch (error) {
+          console.error('Error loading business data:', error);
+          Alert.alert('Error', 'No se pudo cargar la información del negocio');
+        } finally {
+          setIsLoading(false);
+        }
+      }
+    };
+    
+    loadBusinessData();
+  }, [editMode, businessId, setField, markStepComplete]);
   
   // Handle back button
   const handleBack = () => {
@@ -312,23 +439,109 @@ const BusinessOnboardingStepsScreen: React.FC = () => {
   const handleFinish = async () => {
     setIsSubmitting(true);
     
-    const businessId = await finishOnboarding();
+    let businessResult;
+    
+    try {
+      if (editMode && businessId) {
+        // Update existing business
+        const businessData = {
+          name: formState.name,
+          description: formState.description,
+          category: formState.category,
+          ...(formState.address ? { address: formState.address } : {}),
+          ...(formState.phone ? { phone: formState.phone } : {}),
+          ...(formState.location ? { location: formState.location } : {}),
+          ...(formState.businessHours && Object.keys(formState.businessHours).length > 0 ? 
+              { businessHours: formState.businessHours } : {}),
+          ...(formState.paymentMethods && formState.paymentMethods.length > 0 ? 
+              { paymentMethods: formState.paymentMethods } : {}),
+          ...(formState.socialLinks && Object.keys(formState.socialLinks).length > 0 ? 
+              { socialLinks: formState.socialLinks } : {}),
+          ...(formState.menu && formState.menu.length > 0 ? { menu: formState.menu } : {}),
+          ...(formState.menuUrl ? { menuUrl: formState.menuUrl } : {}),
+          ...(formState.services ? { services: formState.services } : {}),
+          acceptsReservations: formState.acceptsReservations,
+          allowsPromotions: formState.allowsPromotions,
+        };
+        
+        // Update the business in Firestore
+        await firebase.firestore()
+          .collection('businesses')
+          .doc(businessId)
+          .update(businessData);
+        
+        // Handle image updates if needed
+        if (formState.image && typeof formState.image === 'object') {
+          const imageObj = formState.image as ImageFile;
+          // Check if it's a new image or existing URL
+          if (imageObj.uri && !imageObj.uri.startsWith('http')) {
+            // It's a new image, upload it
+            const imageResult = await firebaseService.businesses.uploadBusinessImage(
+              businessId,
+              imageObj.uri,
+              true // isMain
+            );
+            
+            if (!imageResult.success) {
+              throw new Error('Error al subir la imagen principal');
+            }
+          }
+        }
+        
+        // Handle gallery images
+        if (formState.galleryImages && Array.isArray(formState.galleryImages) && formState.galleryImages.length > 0) {
+          // Type guard to ensure we're working with the right type
+          const galleryImages = formState.galleryImages.filter(img => 
+            typeof img === 'object' && img !== null && 'uri' in img && 
+            typeof (img as any).uri === 'string' && !(img as any).uri.startsWith('http')
+          );
+          
+          // Upload new gallery images
+          for (const galleryImage of galleryImages) {
+            await firebaseService.businesses.uploadBusinessImage(
+              businessId,
+              (galleryImage as any).uri,
+              false // not main image
+            );
+          }
+        }
+        
+        businessResult = businessId;
+      } else {
+        // Create new business
+        businessResult = await finishOnboarding();
+      }
+    } catch (error) {
+      console.error('Error updating business:', error);
+      Alert.alert('Error', 'No se pudo actualizar el negocio');
+      setIsSubmitting(false);
+      return;
+    }
     
     setIsSubmitting(false);
     
-    if (businessId) {
+    if (businessResult) {
+      const successMessage = editMode 
+        ? "Tu negocio ha sido actualizado exitosamente." 
+        : "Tu negocio ha sido creado exitosamente.";
+        
       Alert.alert(
-        "¡Felicidades!",
-        "Tu negocio ha sido creado exitosamente.",
+        "¡Éxito!",
+        successMessage,
         [{ 
           text: "Ver mi negocio", 
-          onPress: () => navigation.navigate('BusinessDetail', { businessId, fromOnboarding: true }) 
+          onPress: () => navigation.navigate('BusinessDetail', { 
+            businessId: businessResult, 
+            fromOnboarding: !editMode 
+          }) 
         }]
       );
     } else {
       Alert.alert(
         "Error",
-        "No se pudo crear el negocio. Por favor, intenta de nuevo.",
+        editMode 
+          ? "No se pudo actualizar el negocio. Por favor, intenta de nuevo."
+          : "No se pudo crear el negocio. Por favor, intenta de nuevo.",
         [{ text: "OK" }]
       );
     }

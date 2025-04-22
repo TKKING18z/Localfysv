@@ -83,22 +83,24 @@ const BasicInfoSection: React.FC<BasicInfoSectionProps> = ({
           <Text style={styles.errorText}>{formState.validationErrors.category}</Text>
         )}
         {showSuggestions && (
-          <View style={styles.suggestionsContainer}>
-            <ScrollView 
-              style={styles.suggestionsList}
-              keyboardShouldPersistTaps="handled"
-              nestedScrollEnabled={true}
-            >
-              {suggestedCategories.map((suggestion, index) => (
-                <TouchableOpacity 
-                  key={index} 
-                  style={styles.suggestionItem}
-                  onPress={() => selectCategory(suggestion)}
-                >
-                  <Text style={styles.suggestionText}>{suggestion}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+          <View style={styles.suggestionsWrapper}>
+            <View style={styles.suggestionsContainer}>
+              <ScrollView 
+                style={styles.suggestionsList}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled={true}
+              >
+                {suggestedCategories.map((suggestion, index) => (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={styles.suggestionItem}
+                    onPress={() => selectCategory(suggestion)}
+                  >
+                    <Text style={styles.suggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
           </View>
         )}
       </View>
@@ -131,6 +133,7 @@ const styles = StyleSheet.create({
   },
   formGroup: {
     marginBottom: 20,
+    zIndex: 1,
   },
   label: {
     fontSize: 16,
@@ -161,36 +164,43 @@ const styles = StyleSheet.create({
     color: '#FF3B30',
     fontWeight: 'bold',
   },
+  suggestionsWrapper: {
+    position: 'relative',
+    zIndex: 100,
+  },
   suggestionsContainer: {
-    backgroundColor: 'white',
+    backgroundColor: '#FFFFFF',
     borderWidth: 1,
-    borderColor: '#E0E7FF',
+    borderColor: '#D1D9E6',
     borderBottomLeftRadius: 10,
     borderBottomRightRadius: 10,
-    borderTopWidth: 0,
+    overflow: 'hidden',
     maxHeight: 200,
     position: 'absolute',
-    top: '100%',
+    top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
-    elevation: 5,
+    zIndex: 100,
+    elevation: 8,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 5,
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
   },
   suggestionsList: {
     maxHeight: 200,
+    backgroundColor: '#FFFFFF',
   },
   suggestionItem: {
     padding: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F0F7FF',
+    borderBottomColor: '#EDF2F7',
+    backgroundColor: '#FFFFFF',
   },
   suggestionText: {
     fontSize: 16,
     color: '#2C3E50',
+    fontWeight: '500',
   },
   inputError: {
     borderWidth: 1,

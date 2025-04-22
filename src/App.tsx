@@ -21,10 +21,14 @@ import 'react-native-gesture-handler';
 import * as SplashScreen from 'expo-splash-screen';
 import { StripeProvider } from '@stripe/stripe-react-native';
 import Constants from 'expo-constants';
+import { enableScreens } from 'react-native-screens';
 import { initializeApp, finishInitialization } from './services/AppInitService';
 
-// Clave pública de Stripe en modo PRUEBA (sandbox)
-const STRIPE_PUBLISHABLE_KEY = 'pk_test_51RAPGb4eUIEuN4bhAQUTbCD3BaeC8rUOHz4ecJvZzqyiej8P7N8mCFeRpIvpJyWwltjo9L57YDZBjqjeLBvEkkt100FpoNKP3H';
+// Enable native screens implementation for better performance
+enableScreens();
+
+// Clave pública de Stripe en modo PRODUCCIÓN
+const STRIPE_PUBLISHABLE_KEY = 'pk_live_51RAPGWGP8yeC8Eoa0Q9uCljqPWu0XoN13tpQB9QM63v7vSE1BlT7SBHKKDgWAh7j3OQJRargIcP9rmfmZzqAvyBf004K3lFFMs';
 
 // Ignorar advertencias específicas que no podemos controlar
 LogBox.ignoreLogs([
@@ -40,17 +44,25 @@ SplashScreen.preventAutoHideAsync().catch(() => {
   /* revert to default behavior if something goes wrong */
 });
 
-// Custom hydration logic for app state
+// Enhanced hydration logic to include business cache status
 async function hydrateStore() {
-  // You can add state rehydration logic here
-  return true;
+  try {
+    // Check if we have cached business data
+    const hasBusinessCache = await AsyncStorage.getItem('businessCache') !== null;
+    
+    // App state rehydration logic here
+    return true;
+  } catch (error) {
+    console.warn('Error during store hydration:', error);
+    return true; // Continue app startup despite error
+  }
 }
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
 
-  // Initialize app
+  // Initialize app with optimized caching
   useEffect(() => {
     async function prepare() {
       try {
@@ -58,7 +70,7 @@ export default function App() {
         await initializeApp({
           prefetchImages: true,
           processPendingUploads: true,
-          clearCache: true,
+          clearCache: false, // Set to false to preserve our caches
           cacheExpirationDays: 7
         });
         
@@ -123,7 +135,9 @@ export default function App() {
                         <CartProvider>
                           <OrderProvider>
                             <PointsProvider>
-                              <AppNavigator />
+                              <NotificationProvider>
+                                <AppNavigator />
+                              </NotificationProvider>
                             </PointsProvider>
                           </OrderProvider>
                         </CartProvider>

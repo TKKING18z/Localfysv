@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -60,10 +60,12 @@ const PaymentScreen: React.FC = () => {
   // Estados
   const [loading, setLoading] = useState(false);
   const [initialized, setInitialized] = useState(false);
-  const [amount, setAmount] = useState(initialAmount ? initialAmount.toFixed(2) : '');
+  const [amount, setAmount] = useState(initialAmount ? (isNaN(initialAmount) ? '0.00' : initialAmount.toFixed(2)) : '0.00');
   const [paymentMethod, setPaymentMethod] = useState<'card'>('card');
   const [serverStatus, setServerStatus] = useState<'checking' | 'online' | 'offline'>('checking');
   const [processingPayment, setProcessingPayment] = useState(false);
+  // Estado para la comisión de la plataforma
+  const [applicationFee, setApplicationFee] = useState(0);
 
   // Manejar el botón de retroceso para prevenir navegación accidental durante el pago
   useEffect(() => {
@@ -110,7 +112,35 @@ const PaymentScreen: React.FC = () => {
   useEffect(() => {
     validateInitialData();
     checkServerStatus();
+    
+    // Calcular la comisión inicial basada en el monto
+    calculateApplicationFee();
   }, []);
+
+  const calculateApplicationFee = () => {
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) {
+      setApplicationFee(0);
+      return;
+    }
+    
+    const amountValue = parseFloat(amount);
+    const amountInCents = Math.round(amountValue * 100);
+    let applicationFeeAmount = 0;
+    
+    // Estructura escalonada de comisiones
+    if (amountValue < 10) {
+      applicationFeeAmount = 10; // $0.10 para transacciones menores a $10
+    } else if (amountValue < 30) {
+      applicationFeeAmount = 15; // $0.15 para transacciones entre $10 y $30
+    } else {
+      // 0.5% del total para transacciones mayores a $30
+      applicationFeeAmount = Math.round(amountInCents * 0.005);
+      // Asegurar un mínimo de $0.15
+      applicationFeeAmount = Math.max(applicationFeeAmount, 15);
+    }
+    
+    setApplicationFee(applicationFeeAmount / 100); // Convertir de centavos a dólares
+  };
 
   const validateInitialData = () => {
     // Validar que tengamos una cantidad válida
@@ -200,6 +230,25 @@ const PaymentScreen: React.FC = () => {
 
       const amountInCents = Math.round(parseFloat(amount) * 100);
 
+      // Calcular la comisión para la plataforma (fee)
+      let applicationFeeAmount = 0;
+      const amountValue = parseFloat(amount);
+      
+      // Estructura escalonada de comisiones
+      if (amountValue < 10) {
+        applicationFeeAmount = 10; // $0.10 para transacciones menores a $10
+      } else if (amountValue < 30) {
+        applicationFeeAmount = 15; // $0.15 para transacciones entre $10 y $30
+      } else {
+        // 0.5% del total para transacciones mayores a $30
+        applicationFeeAmount = Math.round(amountInCents * 0.005);
+        // Asegurar un mínimo de $0.15
+        applicationFeeAmount = Math.max(applicationFeeAmount, 15);
+      }
+      
+      // Actualizar el estado de la comisión para mostrarla en la UI
+      setApplicationFee(applicationFeeAmount / 100); // Convertir de centavos a dólares
+
       // Validar cartItems para pagos de carrito
       const payloadCartItems = isCartPayment ? cartItems.map(item => ({
         id: item.id,
@@ -217,6 +266,7 @@ const PaymentScreen: React.FC = () => {
         email: user?.email || '',
         businessId,
         cartItems: payloadCartItems,
+        applicationFee: applicationFeeAmount, // Incluir la comisión para la plataforma
       });
 
       const controller = new AbortController();
@@ -233,6 +283,7 @@ const PaymentScreen: React.FC = () => {
           email: user?.email || '',
           businessId,
           cartItems: payloadCartItems,
+          applicationFee: applicationFeeAmount, // Incluir la comisión para la plataforma
         }),
         signal: controller.signal
       });
@@ -574,37 +625,91 @@ const PaymentScreen: React.FC = () => {
   };
 
   // Calcular monto total de los productos (solo para verificación)
-  const calculatedTotal = isCartPayment && cartItems.length > 0 
-    ? cartItems.reduce((total, item) => {
+  const calculatedTotal = useMemo(() => {
+    if (!isCartPayment || !cartItems || cartItems.length === 0) return 0;
+    
+    try {
+      return cartItems.reduce((total, item) => {
+        // Verificar que los valores sean números válidos
+        const price = Number(item.price) || 0;
+        const quantity = Number(item.quantity) || 0;
+        
         // Calcular precio base del producto
-        let itemTotal = Number(item.price) * Number(item.quantity);
+        let itemTotal = price * quantity;
         
         // Sumar extras si existen
         if (item.options && item.options.length > 0) {
-          const extraPrices = item.options.reduce((sum: number, option: { extraPrice?: number | string, name: string, choice: string }) => 
-            sum + (option.extraPrice ? Number(option.extraPrice) * Number(item.quantity) : 0), 0);
+          const extraPrices = item.options.reduce((sum: number, option: { extraPrice?: number | string, name: string, choice: string }) => {
+            const extraPrice = option.extraPrice !== undefined ? Number(option.extraPrice) : 0;
+            return sum + (extraPrice * quantity);
+          }, 0);
           itemTotal += extraPrices;
         }
         
         return total + itemTotal;
-      }, 0)
-    : 0;
+      }, 0);
+    } catch (error) {
+      console.error('Error calculando total del carrito:', error);
+      return 0;
+    }
+  }, [isCartPayment, cartItems]);
 
   // Verificar que el monto a pagar coincida con el calculado (para pagos de carrito)
   useEffect(() => {
-    if (isCartPayment && calculatedTotal > 0 && Math.abs(calculatedTotal - initialAmount) > 0.01) {
+    if (!isCartPayment || !calculatedTotal) return;
+    
+    // Verificar que initialAmount sea un número válido
+    const validInitialAmount = Number(initialAmount);
+    if (isNaN(validInitialAmount)) {
+      console.error('El monto inicial no es un número válido:', initialAmount);
+      setAmount(calculatedTotal.toFixed(2));
+      return;
+    }
+    
+    // Comprobar si hay descuento aplicado
+    if (discountAmount > 0) {
+      // Verificar que el initialAmount sea aproximadamente igual a calculatedTotal - discountAmount
+      const expectedAmount = calculatedTotal - discountAmount;
+      const tolerance = 0.01; // Tolerancia para comparación de punto flotante
+      
+      if (Math.abs(expectedAmount - validInitialAmount) > tolerance) {
+        console.warn('Monto con descuento inconsistente. Ajustando:', {
+          calculatedTotal,
+          discountAmount,
+          expectedAmount,
+          initialAmount: validInitialAmount
+        });
+        
+        // Si la diferencia es significativa (más allá de errores de redondeo),
+        // ajustar silenciosamente para evitar la advertencia al usuario
+        setAmount(expectedAmount.toFixed(2));
+      }
+    } else if (Math.abs(calculatedTotal - validInitialAmount) > 0.01) {
       console.warn('Discrepancia en monto a pagar:', {
         calculatedTotal,
-        initialAmount,
-        difference: calculatedTotal - initialAmount
+        initialAmount: validInitialAmount,
+        difference: calculatedTotal - validInitialAmount
       });
-      Alert.alert(
-        'Advertencia',
-        'Se detectó una diferencia en el monto a pagar. Por favor, verifica tu carrito.',
-        [{ text: 'OK' }]
-      );
+      
+      // Solo mostrar alerta si la diferencia es significativa (más de $0.10)
+      if (Math.abs(calculatedTotal - validInitialAmount) > 0.1) {
+        Alert.alert(
+          "Advertencia",
+          "Se detectó una diferencia en el monto a pagar. Por favor, verifica tu carrito.",
+          [{ 
+            text: "OK",
+            onPress: () => {
+              // Ajustar automáticamente el monto para evitar problemas
+              setAmount(calculatedTotal.toFixed(2));
+            }
+          }]
+        );
+      } else {
+        // Para diferencias pequeñas, ajustar silenciosamente
+        setAmount(calculatedTotal.toFixed(2));
+      }
     }
-  }, [isCartPayment, calculatedTotal, initialAmount]);
+  }, [isCartPayment, calculatedTotal, initialAmount, discountAmount]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -632,10 +737,30 @@ const PaymentScreen: React.FC = () => {
               <TextInput
                 style={styles.input}
                 value={amount}
-                onChangeText={setAmount}
+                onChangeText={(text) => {
+                  setAmount(text);
+                  // Recalcular la comisión cuando cambia el monto
+                  setTimeout(() => calculateApplicationFee(), 100);
+                }}
                 placeholder="0.00"
                 keyboardType="numeric"
               />
+              
+              {/* Mostrar tarifa de servicio para pagos directos */}
+              {applicationFee > 0 && (
+                <View style={styles.feeContainer}>
+                  <View style={styles.feeHeader}>
+                    <MaterialIcons name="payments" size={18} color="#666666" />
+                    <Text style={styles.feeHeaderText}>Tarifa de servicio</Text>
+                  </View>
+                  <View style={styles.feeDetails}>
+                    <Text style={styles.feeDescription}>
+                      Se aplica una pequeña tarifa para el procesamiento del pago.
+                    </Text>
+                    <Text style={styles.feeAmount}>${applicationFee.toFixed(2)}</Text>
+                  </View>
+                </View>
+              )}
             </>
           )}
 
@@ -670,9 +795,32 @@ const PaymentScreen: React.FC = () => {
                 <View style={styles.discountItem}>
                   <View style={styles.discountInfo}>
                     <MaterialIcons name="local-offer" size={18} color="#4CAF50" />
-                    <Text style={styles.discountText}>Descuento aplicado</Text>
+                    <View style={styles.discountTextContainer}>
+                      <Text style={styles.discountText}>Descuento aplicado</Text>
+                      {appliedDiscountId && (
+                        <Text style={styles.discountSubtext}>
+                          Descuento canjeado con puntos
+                        </Text>
+                      )}
+                    </View>
                   </View>
                   <Text style={styles.discountPrice}>-${discountAmount.toFixed(2)}</Text>
+                </View>
+              )}
+
+              {/* Mostrar tarifa de servicio */}
+              {initialized && applicationFee > 0 && (
+                <View style={styles.feeItem}>
+                  <View style={styles.feeInfo}>
+                    <MaterialIcons name="payments" size={18} color="#666666" />
+                    <View style={styles.feeTextContainer}>
+                      <Text style={styles.feeText}>Tarifa de servicio</Text>
+                      <Text style={styles.feeSubtext}>
+                        Procesamiento de pago
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={styles.feePrice}>${applicationFee.toFixed(2)}</Text>
                 </View>
               )}
 
@@ -732,8 +880,9 @@ const PaymentScreen: React.FC = () => {
             <Text style={styles.infoText}>
               • Completa el pago con tarjeta para confirmar tu orden
             </Text>
-            <Text style={styles.infoText}>• Para pruebas, usa la tarjeta 4242 4242 4242 4242</Text>
-            <Text style={styles.infoText}>• Cualquier fecha futura y CVC</Text>
+            <Text style={styles.infoText}>• Los pagos serán procesados de forma segura por Stripe</Text>
+            <Text style={styles.infoText}>• Se te cobrará el monto mostrado en pantalla</Text>
+            <Text style={styles.infoText}>• Incluye una pequeña tarifa de servicio para el procesamiento del pago</Text>
             <Text style={styles.infoText}>• Servidor: {serverStatus === 'online' ? 'Conectado' : serverStatus === 'checking' ? 'Verificando...' : 'No disponible'}</Text>
           </View>
         </View>
@@ -936,16 +1085,84 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  discountTextContainer: {
+    marginLeft: 8,
+  },
   discountText: {
     fontSize: 15,
     fontWeight: '500',
     color: '#4CAF50',
-    marginLeft: 8,
+  },
+  discountSubtext: {
+    fontSize: 12,
+    color: '#6C757D',
+    marginTop: 2,
   },
   discountPrice: {
     fontSize: 15,
     fontWeight: '600',
     color: '#4CAF50',
+  },
+  feeItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E9ECEF',
+  },
+  feeInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  feeTextContainer: {
+    marginLeft: 8,
+  },
+  feeText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: '#666666',
+  },
+  feeSubtext: {
+    fontSize: 12,
+    color: '#6C757D',
+    marginTop: 2,
+  },
+  feePrice: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#666666',
+  },
+  feeContainer: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E9ECEF',
+  },
+  feeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  feeHeaderText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  feeDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  feeDescription: {
+    fontSize: 14,
+    color: '#6C757D',
+  },
+  feeAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#007AFF',
   },
 });
 

@@ -49,8 +49,10 @@ interface AuthContextType {
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
-  saveSessionData: (firebaseUser: firebase.User, authMethod: 'email' | 'google') => Promise<void>;
+  saveSessionData: (firebaseUser: firebase.User, authMethod: 'email' | 'google') => Promise<SessionData | null>;
   restoreSession: () => Promise<SessionData | null>;
+  isNewUser: boolean;
+  setIsNewUser: (value: boolean) => void;
 }
 
 // Crear el contexto
@@ -69,24 +71,31 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [user, setUser] = useState<firebase.User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isNewUser, setIsNewUser] = useState(false);
   
   // Función para guardar los datos de sesión
   const saveSessionData = async (firebaseUser: firebase.User, authMethod: 'email' | 'google') => {
-    const sessionData: SessionData = {
-      uid: firebaseUser.uid,
-      email: firebaseUser.email,
-      displayName: firebaseUser.displayName,
-      photoURL: firebaseUser.photoURL,
-      lastLogin: new Date().toISOString(),
-      authMethod
-    };
-
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.SESSION_DATA, JSON.stringify(sessionData));
-      console.log('Session data saved successfully');
+      // Check if user is new before saving session
+      await checkIfUserIsNew(firebaseUser.uid);
+      
+      // Original code for saving session data
+      const userData: SessionData = {
+        uid: firebaseUser.uid,
+        email: firebaseUser.email || '',
+        displayName: firebaseUser.displayName || '',
+        photoURL: firebaseUser.photoURL || '',
+        lastLogin: new Date().toISOString(),
+        authMethod,
+      };
+      await AsyncStorage.setItem(STORAGE_KEYS.SESSION_DATA, JSON.stringify(userData));
+      console.log("Saved session for:", userData.email);
+      return userData;
     } catch (error) {
       console.error('Error saving session data:', error);
+      return null;
     }
   };
 
@@ -230,6 +239,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     try {
       setIsLoading(true);
       
+      // Este usuario es definitivamente nuevo, así que marcarlo como tal inmediatamente
+      setIsNewUser(true);
+      
       // Crear usuario en Firebase Auth
       const userCredential = await firebase.auth().createUserWithEmailAndPassword(email, password);
       
@@ -250,6 +262,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
             authProvider: 'email'
           });
+        
+        console.log('[AuthContext] Usuario registrado correctamente, marcado como nuevo');
         
         return { 
           success: true, 
@@ -274,33 +288,115 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
 
   // Función para cerrar sesión
   const logout = async (): Promise<void> => {
+    console.log('[AuthContext] Starting logout process');
+    
     try {
+      // 1. Primero desactivar cualquier indicador de usuario nuevo para evitar problemas de navegación
+      setIsNewUser(false);
+      
+      // 2. Preparar una bandera para saber si la limpieza funcionó correctamente
+      let cleanupSuccessful = true;
+      
+      // 3. Si hay un usuario, intentar limpiar recursos asociados
       if (user) {
         try {
-          const notificationService: NotificationService | undefined = require('../../services/NotificationService').notificationService;
-          if (notificationService) {
-            const tokenResult = await notificationService.registerForPushNotifications();
-            if (tokenResult.success && tokenResult.data?.token) {
-              await notificationService.removeTokenFromFirestore(user.uid, tokenResult.data.token);
+          console.log('[AuthContext] Cleaning up resources for user:', user.uid);
+          
+          // Intentar limpiar listeners de Chat de forma segura
+          try {
+            // Usar la función estática exportada que no depende de hooks
+            const chatModule = require('./ChatContext');
+            
+            if (chatModule && typeof chatModule.cleanupChatListeners === 'function') {
+              console.log('[AuthContext] Calling chat cleanup function');
+              chatModule.cleanupChatListeners(user.uid);
+            } else {
+              console.log('[AuthContext] Chat cleanup function not available');
             }
+          } catch (chatError) {
+            console.error('[AuthContext] Error during chat cleanup:', chatError);
+            // No fallar todo el proceso de logout por este error
+            cleanupSuccessful = false;
           }
-        } catch (notificationError: unknown) {
-          console.error('Error removing notification token:', notificationError);
+          
+          // Limpiar token de notificaciones si es posible
+          try {
+            let notificationService;
+            
+            try {
+              notificationService = require('../../services/NotificationService').notificationService;
+            } catch (importError) {
+              console.error('[AuthContext] Could not import notification service:', importError);
+            }
+            
+            if (notificationService) {
+              console.log('[AuthContext] Cleaning up notification tokens');
+              
+              try {
+                const tokenResult = await notificationService.registerForPushNotifications();
+                if (tokenResult.success && tokenResult.data?.token) {
+                  await notificationService.removeTokenFromFirestore(user.uid, tokenResult.data.token);
+                }
+              } catch (tokenError) {
+                console.error('[AuthContext] Error removing notification token:', tokenError);
+                // No fallar todo el proceso por este error
+                cleanupSuccessful = false;
+              }
+            }
+          } catch (notificationError) {
+            console.error('[AuthContext] Error in notification cleanup:', notificationError);
+            cleanupSuccessful = false;
+          }
+        } catch (resourceError) {
+          console.error('[AuthContext] Error cleaning up user resources:', resourceError);
+          cleanupSuccessful = false;
         }
       }
       
-      // Limpiar datos de sesión antes de cerrar sesión
-      await AsyncStorage.multiRemove([
-        STORAGE_KEYS.USER_DATA,
-        STORAGE_KEYS.AUTH_PERSISTENCE,
-        STORAGE_KEYS.SESSION_DATA
-      ]);
+      // 4. Limpiar AsyncStorage
+      try {
+        console.log('[AuthContext] Cleaning AsyncStorage data');
+        await AsyncStorage.multiRemove([
+          STORAGE_KEYS.USER_DATA,
+          STORAGE_KEYS.AUTH_PERSISTENCE,
+          STORAGE_KEYS.SESSION_DATA
+        ]);
+      } catch (storageError) {
+        console.error('[AuthContext] Error clearing storage:', storageError);
+        cleanupSuccessful = false;
+      }
       
+      // 5. Un pequeño retraso antes de cerrar sesión para evitar problemas de sincronización
+      await new Promise(resolve => setTimeout(resolve, 200));
+      
+      // 6. Cerrar sesión en Firebase sin importar si hubo errores en la limpieza
+      console.log('[AuthContext] Signing out from Firebase');
       await firebase.auth().signOut();
-      console.log('Logout successful');
+      
+      // Si todo funcionó correctamente, actualizar el log
+      if (cleanupSuccessful) {
+        console.log('[AuthContext] Logout completed successfully with all cleanups');
+      } else {
+        console.log('[AuthContext] Logout completed with some cleanup errors');
+      }
+      
+      // 7. Limpiar el estado local después del logout completo
+      setTimeout(() => {
+        // No usar setUser directamente aquí - Firebase.onAuthStateChanged se encargará de esto
+        console.log('[AuthContext] Local state cleanup complete');
+      }, 100);
+      
     } catch (error: any) {
-      console.error('Logout error:', error.message);
-      Alert.alert('Error al cerrar sesión', error.message);
+      console.error('[AuthContext] Critical error during logout:', error);
+      
+      // Intentar cerrar sesión a pesar de errores
+      try {
+        await firebase.auth().signOut();
+        console.log('[AuthContext] Emergency signout successful');
+      } catch (finalError) {
+        console.error('[AuthContext] Even emergency signout failed:', finalError);
+        throw new Error(`No se pudo cerrar sesión: ${error.message}`);
+      }
     }
   };
 
@@ -354,6 +450,31 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
+  // Mejorar la función checkIfUserIsNew
+  const checkIfUserIsNew = async (userId: string) => {
+    try {
+      console.log('[AuthContext] Verificando si el usuario es nuevo:', userId);
+      const firstLoginKey = `@first_login_${userId}`;
+      const isFirstLogin = await AsyncStorage.getItem(firstLoginKey);
+      
+      if (!isFirstLogin) {
+        // Usuario está ingresando por primera vez
+        console.log('[AuthContext] Es primera vez del usuario, marcando como nuevo');
+        await AsyncStorage.setItem(firstLoginKey, 'true');
+        setIsNewUser(true);
+        return true;
+      } else {
+        console.log('[AuthContext] Usuario ya ha ingresado antes, no es nuevo');
+        setIsNewUser(false);
+        return false;
+      }
+    } catch (error) {
+      console.error('[AuthContext] Error al verificar si el usuario es nuevo:', error);
+      setIsNewUser(false);
+      return false;
+    }
+  };
+
   // Valores del contexto
   const value = {
     user,
@@ -366,7 +487,9 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     resetPassword,
     updateProfile,
     saveSessionData,
-    restoreSession
+    restoreSession,
+    isNewUser,
+    setIsNewUser
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

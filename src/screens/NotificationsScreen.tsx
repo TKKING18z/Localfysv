@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -22,6 +22,8 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import { useAuth } from '../context/AuthContext';
 import { Order, OrderStatus } from '../context/OrderContext';
+import { useReservations, ReservationFilter } from '../../hooks/useReservations';
+import { useNotifications } from '../context/NotificationContext';
 
 type NavigationProps = StackNavigationProp<RootStackParamList>;
 
@@ -31,7 +33,7 @@ interface NotificationItem {
   message: string;
   timestamp: Date;
   read: boolean;
-  type: 'chat' | 'system' | 'promo' | 'order_new' | 'order_status';
+  type: 'chat' | 'system' | 'promo' | 'order_new' | 'order_status' | 'reservation_new' | 'reservation_status';
   data?: any;
 }
 
@@ -40,11 +42,85 @@ const NotificationsScreen: React.FC = () => {
   const { conversations, unreadTotal, refreshConversations } = useChat();
   const { userOrders, businessOrders, loadUserOrders, loadBusinessOrders } = useOrders();
   const { user } = useAuth();
+  const { markAllAsViewed, setNotificationScreenActive } = useNotifications();
   
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [businessIds, setBusinessIds] = useState<string[]>([]);
+  
+  // Refs to prevent duplicate operations
+  const isScreenFocusedRef = useRef(false);
+  const hasInitiallyMarkedAsViewedRef = useRef(false);
+  const isMountedRef = useRef(true);
+  
+  // Use the reservations hook
+  const { reservations: userReservations, refresh: refreshUserReservations } = useReservations({
+    userId: user?.uid,
+    initialFilter: ReservationFilter.ALL
+  });
+  
+  const { reservations: businessReservations, refresh: refreshBusinessReservations } = useReservations({
+    businessId: businessIds[0], // We'll update this when businessIds change
+    initialFilter: ReservationFilter.ALL
+  });
+
+  // Set up navigation focus/blur listeners instead of useFocusEffect to avoid render loops
+  useEffect(() => {
+    if (!isMountedRef.current) return;
+    
+    // Focus listener
+    const unsubscribeFocus = navigation.addListener('focus', () => {
+      if (isScreenFocusedRef.current) return;
+      
+      isScreenFocusedRef.current = true;
+      setNotificationScreenActive(true);
+      
+      // Only mark as viewed if we haven't done it already and the screen is mounted
+      if (!hasInitiallyMarkedAsViewedRef.current && isMountedRef.current) {
+        hasInitiallyMarkedAsViewedRef.current = true;
+        
+        // Use a small timeout to ensure we're not doing this too early in the render cycle
+        const markTimer = setTimeout(() => {
+          if (isMountedRef.current) {
+            // Simply call markAllAsViewed without any chaining
+            // This function is async but we don't need to await its result
+            try {
+              markAllAsViewed();
+            } catch (error) {
+              console.error('[NotificationsScreen] Error marking notifications as viewed:', error);
+            }
+          }
+        }, 300);
+        
+        return () => clearTimeout(markTimer);
+      }
+    });
+    
+    // Blur listener
+    const unsubscribeBlur = navigation.addListener('blur', () => {
+      isScreenFocusedRef.current = false;
+      setNotificationScreenActive(false);
+    });
+    
+    return () => {
+      unsubscribeFocus();
+      unsubscribeBlur();
+    };
+  }, [navigation, setNotificationScreenActive, markAllAsViewed]);
+  
+  // Initial setup
+  useEffect(() => {
+    // Set cleanup function
+    return () => {
+      isMountedRef.current = false;
+      
+      // Make sure we set screen as inactive when unmounting
+      if (isScreenFocusedRef.current) {
+        setNotificationScreenActive(false);
+      }
+    };
+  }, []);
 
   // Get user's businesses to check if they're owners
   useEffect(() => {
@@ -243,6 +319,132 @@ const NotificationsScreen: React.FC = () => {
     return notifications;
   }, [userOrders, businessOrders, user]);
 
+  // Generate notifications from reservations
+  const generateNotificationsFromReservations = useCallback(() => {
+    if (!user) return [];
+    
+    const notifications: NotificationItem[] = [];
+    
+    // Add user's reservations (as a customer)
+    if (userReservations && userReservations.length > 0) {
+      userReservations.forEach(reservation => {
+        // Only show recent reservations (last 14 days)
+        const reservationDate = convertTimestamp(reservation.date);
+        const now = new Date();
+        const diffDays = Math.floor((now.getTime() - reservationDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays <= 14) {
+          let title = '';
+          let message = '';
+          
+          switch (reservation.status) {
+            case 'pending':
+              title = 'Reserva Pendiente';
+              message = `Tu reserva en ${reservation.businessName} para el ${formatReservationDate(reservationDate)} a las ${reservation.time} está pendiente de confirmación.`;
+              break;
+            case 'confirmed':
+              title = 'Reserva Confirmada';
+              message = `¡Tu reserva en ${reservation.businessName} para el ${formatReservationDate(reservationDate)} a las ${reservation.time} ha sido confirmada!`;
+              break;
+            case 'completed':
+              title = 'Reserva Completada';
+              message = `Gracias por tu visita a ${reservation.businessName}. Esperamos que hayas disfrutado de tu experiencia.`;
+              break;
+            case 'canceled':
+              title = 'Reserva Cancelada';
+              message = `Tu reserva en ${reservation.businessName} para el ${formatReservationDate(reservationDate)} a las ${reservation.time} ha sido cancelada.`;
+              break;
+            default:
+              title = 'Actualización de Reserva';
+              message = `Tu reserva en ${reservation.businessName} ha sido actualizada.`;
+          }
+          
+          notifications.push({
+            id: `reservation_status_${reservation.id}`,
+            title,
+            message,
+            timestamp: convertTimestamp(reservation.createdAt || reservation.date),
+            read: false,
+            type: 'reservation_status',
+            data: { 
+              reservationId: reservation.id,
+              status: reservation.status,
+              businessId: reservation.businessId || '',
+              businessName: reservation.businessName || '',
+              date: reservation.date,
+              time: reservation.time
+            }
+          });
+        }
+      });
+    }
+    
+    // Add business reservations (for business owners/managers)
+    if (businessReservations && businessReservations.length > 0) {
+      businessReservations.forEach(reservation => {
+        // Only show recent reservations (last 14 days)
+        const reservationDate = convertTimestamp(reservation.date);
+        const now = new Date();
+        const diffDays = Math.floor((now.getTime() - reservationDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (diffDays <= 14) {
+          let title = '';
+          let message = '';
+          
+          // New reservations and status changes are important for business owners
+          if (reservation.status === 'pending') {
+            title = 'Nueva Reserva';
+            message = `${reservation.userName} ha realizado una reserva para ${reservation.partySize} personas el ${formatReservationDate(reservationDate)} a las ${reservation.time}.`;
+          } else if (reservation.status === 'canceled') {
+            title = 'Reserva Cancelada';
+            message = `${reservation.userName} ha cancelado su reserva para ${reservation.partySize} personas el ${formatReservationDate(reservationDate)} a las ${reservation.time}.`;
+          } else {
+            // For other statuses, skip (less relevant for business owners)
+            return;
+          }
+          
+          notifications.push({
+            id: `reservation_business_${reservation.id}`,
+            title,
+            message,
+            timestamp: convertTimestamp(reservation.createdAt || reservation.date),
+            read: false,
+            type: 'reservation_new',
+            data: { 
+              reservationId: reservation.id,
+              status: reservation.status,
+              businessId: reservation.businessId || '',
+              businessName: reservation.businessName || '',
+              date: reservation.date,
+              time: reservation.time,
+              partySize: reservation.partySize
+            }
+          });
+        }
+      });
+    }
+    
+    return notifications;
+  }, [userReservations, businessReservations, user]);
+
+  // Format reservation date
+  const formatReservationDate = (date: Date) => {
+    if (!date) return '';
+    
+    const options: Intl.DateTimeFormatOptions = { 
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    };
+    
+    try {
+      return date.toLocaleDateString('es-ES', options);
+    } catch (error) {
+      return date.toLocaleDateString();
+    }
+  };
+
   // Helper to truncate text
   const truncateText = (text: string, maxLength: number) => {
     if (!text) return '';
@@ -269,19 +471,14 @@ const NotificationsScreen: React.FC = () => {
   
   // Load notifications when component mounts
   useEffect(() => {
+    if (!isMountedRef.current) return;
     loadNotifications();
-  }, [conversations, userOrders, businessOrders]);
+  }, [conversations, userOrders, businessOrders, userReservations, businessReservations]);
   
-  // Refresh data when screen gets focus
-  useFocusEffect(
-    useCallback(() => {
-      refreshNotifications();
-      return () => {};
-    }, [])
-  );
-
   // Load notifications
   const loadNotifications = () => {
+    if (!isMountedRef.current) return;
+    
     setLoading(true);
     
     try {
@@ -291,6 +488,9 @@ const NotificationsScreen: React.FC = () => {
       // Get order notifications
       const orderNotifications = generateNotificationsFromOrders();
       
+      // Get reservation notifications
+      const reservationNotifications = generateNotificationsFromReservations();
+      
       // Here you could add other types of notifications (system, promos, etc.)
       // const systemNotifications = [...];
       // const promoNotifications = [...];
@@ -299,6 +499,7 @@ const NotificationsScreen: React.FC = () => {
       const allNotifications = [
         ...chatNotifications,
         ...orderNotifications,
+        ...reservationNotifications,
         // ...systemNotifications,
         // ...promoNotifications
       ];
@@ -306,16 +507,22 @@ const NotificationsScreen: React.FC = () => {
       // Sort notifications by timestamp (newest first)
       allNotifications.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
       
-      setNotifications(allNotifications);
+      if (isMountedRef.current) {
+        setNotifications(allNotifications);
+      }
     } catch (error) {
       console.error('[NotificationsScreen] Error loading notifications:', error);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   };
   
   // Pull-to-refresh handler
   const refreshNotifications = async () => {
+    if (!isMountedRef.current) return;
+    
     setRefreshing(true);
     
     try {
@@ -327,9 +534,15 @@ const NotificationsScreen: React.FC = () => {
       
       // Refresh business orders if user has businesses
       if (businessIds.length > 0) {
-        for (const businessId of businessIds) {
-          await loadBusinessOrders(businessId);
-        }
+        const promises = businessIds.map(businessId => loadBusinessOrders(businessId));
+        await Promise.all(promises);
+      }
+      
+      // Refresh reservations
+      await refreshUserReservations();
+      
+      if (businessIds.length > 0) {
+        await refreshBusinessReservations();
       }
       
       // Refresh notifications
@@ -337,7 +550,9 @@ const NotificationsScreen: React.FC = () => {
     } catch (error) {
       console.error('[NotificationsScreen] Error refreshing notifications:', error);
     } finally {
-      setRefreshing(false);
+      if (isMountedRef.current) {
+        setRefreshing(false);
+      }
     }
   };
   
@@ -363,6 +578,16 @@ const NotificationsScreen: React.FC = () => {
           });
         }
         break;
+      
+      case 'reservation_new':
+      case 'reservation_status':
+        // Navigate to reservation details
+        if (notification.data?.reservationId) {
+          navigation.navigate('ReservationDetail', {
+            reservationId: notification.data.reservationId
+          });
+        }
+        break;
         
       case 'promo':
         // Navigate to promotion
@@ -380,8 +605,6 @@ const NotificationsScreen: React.FC = () => {
         }
         break;
     }
-    
-    // Here you could mark the notification as read in Firestore
   };
   
   // Format date for display
@@ -420,6 +643,10 @@ const NotificationsScreen: React.FC = () => {
         return <FontAwesome5 name="shopping-bag" size={20} color="#FF2D55" />;
       case 'order_status':
         return <MaterialIcons name="delivery-dining" size={24} color="#5856D6" />;
+      case 'reservation_new':
+        return <MaterialIcons name="event-available" size={24} color="#8E44AD" />;
+      case 'reservation_status':
+        return <MaterialIcons name="event" size={24} color="#3498DB" />;
       default:
         return <MaterialIcons name="notifications" size={24} color="#8E8E93" />;
     }
@@ -437,7 +664,9 @@ const NotificationsScreen: React.FC = () => {
       <View style={[
         styles.notificationIcon,
         item.type === 'order_new' && styles.orderNewIcon,
-        item.type === 'order_status' && styles.orderStatusIcon
+        item.type === 'order_status' && styles.orderStatusIcon,
+        item.type === 'reservation_new' && styles.reservationNewIcon,
+        item.type === 'reservation_status' && styles.reservationStatusIcon
       ]}>
         {getNotificationIcon(item.type)}
       </View>
@@ -617,6 +846,12 @@ const styles = StyleSheet.create({
   },
   orderStatusIcon: {
     backgroundColor: '#EEEEFF',
+  },
+  reservationNewIcon: {
+    backgroundColor: '#F0E6FF', // Light purple
+  },
+  reservationStatusIcon: {
+    backgroundColor: '#E6F3FF', // Light blue
   },
   notificationContent: {
     flex: 1,

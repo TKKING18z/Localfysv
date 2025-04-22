@@ -1280,3 +1280,902 @@ export const sendOrderStatusNotification = onDocumentUpdated("orders/{orderId}",
     return null;
   }
 });
+
+/**
+ * Function that sends notification when a new reservation is created
+ */
+export const sendNewReservationNotification = onDocumentCreated("reservations/{reservationId}", async (event) => {
+  const snapshot = event.data;
+  if (!snapshot) {
+    logger.error("No hay datos en el evento");
+    return null;
+  }
+
+  const reservationData = snapshot.data();
+  const { reservationId } = event.params;
+
+  if (!reservationData) {
+    logger.error("Reserva sin datos válidos", { reservationId });
+    return null;
+  }
+
+  try {
+    logger.log("Nueva reserva detectada", { 
+      reservationId, 
+      businessId: reservationData.businessId,
+      userId: reservationData.userId
+    });
+
+    // Extract needed data from the reservation
+    const { businessId, businessName, userId, userName, date, time, partySize, status } = reservationData;
+
+    if (!businessId || !userId) {
+      logger.error("Reserva sin businessId o userId", { reservationId });
+      return null;
+    }
+
+    // Format the date for the notification
+    let formattedDate = "fecha no disponible";
+    if (date) {
+      try {
+        const dateObj = date.toDate ? date.toDate() : new Date(date);
+        formattedDate = dateObj.toLocaleDateString('es-ES', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+      } catch (dateError) {
+        logger.warn("Error formateando fecha de reserva", { dateError });
+        formattedDate = "fecha pendiente";
+      }
+    }
+
+    // Different notification content for business owner vs customer
+    const businessNotificationTitle = "Nueva Reserva";
+    const businessNotificationBody = `${userName} ha realizado una reserva para ${partySize} personas el ${formattedDate} a las ${time}`;
+    
+    const customerNotificationTitle = "Reserva Recibida";
+    const customerNotificationBody = `Tu reserva en ${businessName} para el ${formattedDate} a las ${time} ha sido registrada y está pendiente de confirmación`;
+
+    // 1. Find business owner and admins to notify
+    const businessDoc = await admin.firestore().collection("businesses").doc(businessId).get();
+    
+    if (!businessDoc.exists) {
+      logger.error("El negocio no existe", { businessId });
+      return null;
+    }
+    
+    const businessData = businessDoc.data();
+    const businessOwnerIds: string[] = [];
+    
+    if (businessData?.ownerId) {
+      businessOwnerIds.push(businessData.ownerId);
+    }
+    
+    // Also check for business_permissions collection for admins/managers
+    try {
+      const permissionsSnapshot = await admin.firestore()
+        .collection("business_permissions")
+        .where("businessId", "==", businessId)
+        .where("role", "in", ["owner", "admin", "manager"])
+        .get();
+      
+      permissionsSnapshot.forEach(doc => {
+        const permissionData = doc.data();
+        if (permissionData.userId && !businessOwnerIds.includes(permissionData.userId)) {
+          businessOwnerIds.push(permissionData.userId);
+        }
+      });
+    } catch (permissionsError) {
+      logger.warn("Error obteniendo permisos de negocio", { permissionsError });
+      // Continue with just the owner
+    }
+    
+    if (businessOwnerIds.length === 0) {
+      logger.warn("No se encontraron dueños/administradores para notificar", { businessId });
+    } else {
+      logger.log(`Notificando a ${businessOwnerIds.length} dueños/administradores del negocio`, { businessId });
+    }
+
+    // 2. Prepare to collect notification tokens
+    const batch = admin.firestore().batch();
+    
+    // Separated tokens for business owners and customer
+    const ownerFcmTokens: string[] = [];
+    const ownerExpoTokens: string[] = [];
+    const customerFcmTokens: string[] = [];
+    const customerExpoTokens: string[] = [];
+    
+    const results = {
+      businessOwnersUpdated: 0,
+      customerUpdated: 0,
+      fcmSent: 0,
+      fcmFailed: 0,
+      expoSent: 0,
+      expoFailed: 0
+    };
+
+    // 3. Get and update business owners/admins (increment badge count)
+    for (const ownerId of businessOwnerIds) {
+      try {
+        const ownerDoc = await admin.firestore().collection("users").doc(ownerId).get();
+        
+        if (!ownerDoc.exists) {
+          logger.warn(`El usuario dueño/admin ${ownerId} no existe`);
+          continue;
+        }
+        
+        const ownerData = ownerDoc.data();
+        const currentBadgeCount = ownerData?.badgeCount || 0;
+        const newBadgeCount = currentBadgeCount + 1;
+        
+        // Update badge count
+        batch.update(ownerDoc.ref, { 
+          badgeCount: newBadgeCount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        results.businessOwnersUpdated++;
+        
+        // Collect notification tokens
+        if (ownerData?.notificationToken) {
+          if (ownerData.notificationToken.startsWith('ExponentPushToken[')) {
+            ownerExpoTokens.push(ownerData.notificationToken);
+          } else {
+            ownerFcmTokens.push(ownerData.notificationToken);
+          }
+        }
+        
+        // Check for additional device tokens
+        if (ownerData?.devices && Array.isArray(ownerData.devices)) {
+          ownerData.devices.forEach(device => {
+            if (device?.token) {
+              if (device.token.startsWith('ExponentPushToken[')) {
+                if (!ownerExpoTokens.includes(device.token)) {
+                  ownerExpoTokens.push(device.token);
+                }
+              } else {
+                if (!ownerFcmTokens.includes(device.token)) {
+                  ownerFcmTokens.push(device.token);
+                }
+              }
+            }
+          });
+        }
+      } catch (ownerError) {
+        logger.error(`Error procesando dueño/admin ${ownerId}`, { ownerError });
+      }
+    }
+
+    // 4. Get and update customer (increment badge count)
+    try {
+      const customerDoc = await admin.firestore().collection("users").doc(userId).get();
+      
+      if (customerDoc.exists) {
+        const customerData = customerDoc.data();
+        const currentBadgeCount = customerData?.badgeCount || 0;
+        const newBadgeCount = currentBadgeCount + 1;
+        
+        // Update badge count
+        batch.update(customerDoc.ref, { 
+          badgeCount: newBadgeCount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        results.customerUpdated = 1;
+        
+        // Collect customer notification tokens
+        if (customerData?.notificationToken) {
+          if (customerData.notificationToken.startsWith('ExponentPushToken[')) {
+            customerExpoTokens.push(customerData.notificationToken);
+          } else {
+            customerFcmTokens.push(customerData.notificationToken);
+          }
+        }
+        
+        // Check for additional device tokens
+        if (customerData?.devices && Array.isArray(customerData.devices)) {
+          customerData.devices.forEach(device => {
+            if (device?.token) {
+              if (device.token.startsWith('ExponentPushToken[')) {
+                if (!customerExpoTokens.includes(device.token)) {
+                  customerExpoTokens.push(device.token);
+                }
+              } else {
+                if (!customerFcmTokens.includes(device.token)) {
+                  customerFcmTokens.push(device.token);
+                }
+              }
+            }
+          });
+        }
+      } else {
+        logger.warn(`El usuario cliente ${userId} no existe`);
+      }
+    } catch (customerError) {
+      logger.error(`Error procesando cliente ${userId}`, { customerError });
+    }
+
+    // 5. Commit badge count updates
+    try {
+      await batch.commit();
+      logger.log("Actualizaciones de badge count aplicadas", { 
+        businessOwnersUpdated: results.businessOwnersUpdated,
+        customerUpdated: results.customerUpdated 
+      });
+    } catch (batchError) {
+      logger.error("Error al confirmar el batch de actualización de badges:", batchError);
+      // Continue with sending notifications if possible
+    }
+
+    // 6. Send FCM notifications
+    // 6.1 Send to business owners
+    if (ownerFcmTokens.length > 0) {
+      try {
+        const businessPayload: admin.messaging.MulticastMessage = {
+          data: {
+            type: "reservation_new",
+            reservationId,
+            businessId,
+            userId,
+            status
+          },
+          tokens: ownerFcmTokens,
+          notification: {
+            title: businessNotificationTitle,
+            body: businessNotificationBody
+          },
+          android: {
+            priority: "high"
+          },
+          apns: {
+            payload: {
+              aps: {
+                badge: 1,
+                sound: "default"
+              }
+            }
+          }
+        };
+        
+        const businessResponse = await admin.messaging().sendEachForMulticast(businessPayload);
+        results.fcmSent += businessResponse.successCount;
+        results.fcmFailed += businessResponse.failureCount;
+        
+        logger.log(`Notificaciones FCM enviadas a dueños/admins - Éxitos: ${businessResponse.successCount}, Fallos: ${businessResponse.failureCount}`);
+      } catch (fcmError) {
+        logger.error("Error al enviar notificaciones FCM a dueños/admins", { fcmError });
+      }
+    }
+    
+    // 6.2 Send to customer
+    if (customerFcmTokens.length > 0) {
+      try {
+        const customerPayload: admin.messaging.MulticastMessage = {
+          data: {
+            type: "reservation_new",
+            reservationId,
+            businessId,
+            userId,
+            status
+          },
+          tokens: customerFcmTokens,
+          notification: {
+            title: customerNotificationTitle,
+            body: customerNotificationBody
+          },
+          android: {
+            priority: "high"
+          },
+          apns: {
+            payload: {
+              aps: {
+                badge: 1,
+                sound: "default"
+              }
+            }
+          }
+        };
+        
+        const customerResponse = await admin.messaging().sendEachForMulticast(customerPayload);
+        results.fcmSent += customerResponse.successCount;
+        results.fcmFailed += customerResponse.failureCount;
+        
+        logger.log(`Notificaciones FCM enviadas a cliente - Éxitos: ${customerResponse.successCount}, Fallos: ${customerResponse.failureCount}`);
+      } catch (fcmError) {
+        logger.error("Error al enviar notificaciones FCM a cliente", { fcmError });
+      }
+    }
+
+    // 7. Send Expo notifications
+    // 7.1 Send to business owners
+    if (ownerExpoTokens.length > 0) {
+      try {
+        // Filter valid Expo tokens
+        const validOwnerExpoTokens = ownerExpoTokens.filter(token => Expo.isExpoPushToken(token));
+        
+        if (validOwnerExpoTokens.length > 0) {
+          // Create Expo messages
+          const ownerExpoMessages: ExpoPushMessage[] = validOwnerExpoTokens.map(token => ({
+            to: token,
+            sound: 'default',
+            title: businessNotificationTitle,
+            body: businessNotificationBody,
+            badge: 1,
+            priority: 'high',
+            channelId: 'reservations',
+            _displayInForeground: true,
+            data: {
+              type: "reservation_new",
+              reservationId,
+              businessId,
+              userId,
+              status,
+              experienceId: '@username/app-slug', // Replace with your app's experienceId
+              scopeKey: '@username/app-slug', // Same as experienceId
+            },
+          }));
+          
+          // Create chunks of messages (recommended by Expo)
+          const ownerChunks = expo.chunkPushNotifications(ownerExpoMessages);
+          
+          // Send each chunk
+          for (const chunk of ownerChunks) {
+            try {
+              const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+              
+              // Count successes and failures
+              ticketChunk.forEach((ticket: ExpoPushTicket) => {
+                if (ticket.status === 'ok') {
+                  results.expoSent++;
+                } else {
+                  results.expoFailed++;
+                  logger.warn(`Error enviando notificación Expo: ${ticket.message}`);
+                }
+              });
+            } catch (chunkError) {
+              logger.error("Error al enviar chunk de notificaciones Expo a dueños/admins:", chunkError);
+              results.expoFailed += chunk.length;
+            }
+          }
+          
+          logger.log(`Notificaciones Expo enviadas a dueños/admins - Éxitos: ${results.expoSent}, Fallos: ${results.expoFailed}`);
+        }
+      } catch (expoError) {
+        logger.error("Error al enviar notificaciones Expo a dueños/admins:", expoError);
+      }
+    }
+    
+    // 7.2 Send to customer
+    if (customerExpoTokens.length > 0) {
+      try {
+        // Filter valid Expo tokens
+        const validCustomerExpoTokens = customerExpoTokens.filter(token => Expo.isExpoPushToken(token));
+        
+        if (validCustomerExpoTokens.length > 0) {
+          // Create Expo messages
+          const customerExpoMessages: ExpoPushMessage[] = validCustomerExpoTokens.map(token => ({
+            to: token,
+            sound: 'default',
+            title: customerNotificationTitle,
+            body: customerNotificationBody,
+            badge: 1,
+            priority: 'high',
+            channelId: 'reservations',
+            _displayInForeground: true,
+            data: {
+              type: "reservation_new",
+              reservationId,
+              businessId,
+              userId,
+              status,
+              experienceId: '@username/app-slug', // Replace with your app's experienceId
+              scopeKey: '@username/app-slug', // Same as experienceId
+            },
+          }));
+          
+          // Create chunks of messages (recommended by Expo)
+          const customerChunks = expo.chunkPushNotifications(customerExpoMessages);
+          
+          // Send each chunk
+          for (const chunk of customerChunks) {
+            try {
+              const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+              
+              // Count successes and failures
+              ticketChunk.forEach((ticket: ExpoPushTicket) => {
+                if (ticket.status === 'ok') {
+                  results.expoSent++;
+                } else {
+                  results.expoFailed++;
+                  logger.warn(`Error enviando notificación Expo: ${ticket.message}`);
+                }
+              });
+            } catch (chunkError) {
+              logger.error("Error al enviar chunk de notificaciones Expo a cliente:", chunkError);
+              results.expoFailed += chunk.length;
+            }
+          }
+          
+          logger.log(`Notificaciones Expo enviadas a cliente - Éxitos: ${results.expoSent}, Fallos: ${results.expoFailed}`);
+        }
+      } catch (expoError) {
+        logger.error("Error al enviar notificaciones Expo a cliente:", expoError);
+      }
+    }
+
+    // 8. Return results
+    logger.log("Procesamiento de notificación de nueva reserva completado", { results });
+    return results;
+  } catch (error) {
+    logger.error("Error general en sendNewReservationNotification", { error });
+    return null;
+  }
+});
+
+/**
+ * Function that sends notification when a reservation status is updated
+ */
+export const sendReservationStatusUpdateNotification = onDocumentUpdated("reservations/{reservationId}", async (event) => {
+  const beforeSnapshot = event.data?.before;
+  const afterSnapshot = event.data?.after;
+  
+  if (!beforeSnapshot || !afterSnapshot) {
+    logger.error("No hay datos en el evento de actualización");
+    return null;
+  }
+  
+  const beforeData = beforeSnapshot.data();
+  const afterData = afterSnapshot.data();
+  const { reservationId } = event.params;
+  
+  if (!beforeData || !afterData) {
+    logger.error("Datos faltantes en actualización de reserva", { reservationId });
+    return null;
+  }
+  
+  // Check if status has changed
+  if (beforeData.status === afterData.status) {
+    logger.log("El estado de la reserva no cambió, omitiendo notificación", { 
+      reservationId, 
+      status: afterData.status 
+    });
+    return null;
+  }
+  
+  try {
+    logger.log("Cambio de estado de reserva detectado", { 
+      reservationId, 
+      oldStatus: beforeData.status,
+      newStatus: afterData.status
+    });
+    
+    // Extract needed data
+    const { businessId, businessName, userId, userName, date, time, partySize, status } = afterData;
+    
+    if (!businessId || !userId) {
+      logger.error("Reserva sin businessId o userId", { reservationId });
+      return null;
+    }
+    
+    // Format the date for the notification
+    let formattedDate = "fecha no disponible";
+    if (date) {
+      try {
+        const dateObj = date.toDate ? date.toDate() : new Date(date);
+        formattedDate = dateObj.toLocaleDateString('es-ES', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+      } catch (dateError) {
+        logger.warn("Error formateando fecha de reserva", { dateError });
+        formattedDate = "fecha pendiente";
+      }
+    }
+    
+    // Different messages based on the new status
+    let customerNotificationTitle = "Actualización de Reserva";
+    let customerNotificationBody = "";
+    
+    switch (status) {
+      case "confirmed":
+        customerNotificationTitle = "Reserva Confirmada";
+        customerNotificationBody = `¡Tu reserva en ${businessName} para el ${formattedDate} a las ${time} ha sido confirmada!`;
+        break;
+      case "canceled":
+        customerNotificationTitle = "Reserva Cancelada";
+        customerNotificationBody = `Tu reserva en ${businessName} para el ${formattedDate} a las ${time} ha sido cancelada.`;
+        break;
+      case "completed":
+        customerNotificationTitle = "Reserva Completada";
+        customerNotificationBody = `¡Gracias por visitarnos! Tu reserva en ${businessName} ha sido marcada como completada.`;
+        break;
+      default:
+        customerNotificationTitle = "Actualización de Reserva";
+        customerNotificationBody = `El estado de tu reserva en ${businessName} para el ${formattedDate} a las ${time} ha cambiado a "${status}".`;
+    }
+    
+    // Also notify business owner if customer cancels
+    let shouldNotifyBusiness = false;
+    let businessNotificationTitle = "";
+    let businessNotificationBody = "";
+    
+    if (status === "canceled" && afterData.canceledBy === "customer") {
+      shouldNotifyBusiness = true;
+      businessNotificationTitle = "Reserva Cancelada por Cliente";
+      businessNotificationBody = `${userName} ha cancelado su reserva para ${partySize} personas el ${formattedDate} a las ${time}.`;
+    }
+    
+    // Prepare tokens and batch update
+    const customerFcmTokens: string[] = [];
+    const customerExpoTokens: string[] = [];
+    const ownerFcmTokens: string[] = [];
+    const ownerExpoTokens: string[] = [];
+    const batch = admin.firestore().batch();
+    
+    const results = {
+      customerUpdated: 0,
+      businessUpdated: 0,
+      fcmSent: 0,
+      fcmFailed: 0,
+      expoSent: 0,
+      expoFailed: 0
+    };
+    
+    // Get and update customer for notification
+    try {
+      const customerDoc = await admin.firestore().collection("users").doc(userId).get();
+      
+      if (customerDoc.exists) {
+        const customerData = customerDoc.data();
+        const currentBadgeCount = customerData?.badgeCount || 0;
+        const newBadgeCount = currentBadgeCount + 1;
+        
+        // Update badge count
+        batch.update(customerDoc.ref, { 
+          badgeCount: newBadgeCount,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        
+        results.customerUpdated = 1;
+        
+        // Collect customer notification tokens
+        if (customerData?.notificationToken) {
+          if (customerData.notificationToken.startsWith('ExponentPushToken[')) {
+            customerExpoTokens.push(customerData.notificationToken);
+          } else {
+            customerFcmTokens.push(customerData.notificationToken);
+          }
+        }
+        
+        // Check for additional device tokens
+        if (customerData?.devices && Array.isArray(customerData.devices)) {
+          customerData.devices.forEach(device => {
+            if (device?.token) {
+              if (device.token.startsWith('ExponentPushToken[')) {
+                if (!customerExpoTokens.includes(device.token)) {
+                  customerExpoTokens.push(device.token);
+                }
+              } else {
+                if (!customerFcmTokens.includes(device.token)) {
+                  customerFcmTokens.push(device.token);
+                }
+              }
+            }
+          });
+        }
+      } else {
+        logger.warn(`El usuario ${userId} no existe`);
+      }
+    } catch (customerError) {
+      logger.error(`Error procesando cliente ${userId}:`, customerError);
+    }
+    
+    // If we need to notify business owner too
+    const businessOwnerIds: string[] = [];
+    if (shouldNotifyBusiness) {
+      // Get business owner ID
+      try {
+        const businessDoc = await admin.firestore().collection("businesses").doc(businessId).get();
+        
+        if (businessDoc.exists) {
+          const businessData = businessDoc.data();
+          if (businessData?.ownerId) {
+            businessOwnerIds.push(businessData.ownerId);
+          }
+          
+          // Also check for business_permissions collection for admins/managers
+          try {
+            const permissionsSnapshot = await admin.firestore()
+              .collection("business_permissions")
+              .where("businessId", "==", businessId)
+              .where("role", "in", ["owner", "admin", "manager"])
+              .get();
+            
+            permissionsSnapshot.forEach(doc => {
+              const permissionData = doc.data();
+              if (permissionData.userId && !businessOwnerIds.includes(permissionData.userId)) {
+                businessOwnerIds.push(permissionData.userId);
+              }
+            });
+          } catch (permissionsError) {
+            logger.warn("Error obteniendo permisos de negocio", { permissionsError });
+            // Continue with just the owner
+          }
+          
+          // Get and update owners/admins
+          for (const ownerId of businessOwnerIds) {
+            try {
+              const ownerDoc = await admin.firestore().collection("users").doc(ownerId).get();
+              
+              if (!ownerDoc.exists) {
+                logger.warn(`El usuario dueño/admin ${ownerId} no existe`);
+                continue;
+              }
+              
+              const ownerData = ownerDoc.data();
+              const currentBadgeCount = ownerData?.badgeCount || 0;
+              const newBadgeCount = currentBadgeCount + 1;
+              
+              // Update badge count
+              batch.update(ownerDoc.ref, { 
+                badgeCount: newBadgeCount,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+              });
+              
+              results.businessUpdated++;
+              
+              // Collect notification tokens
+              if (ownerData?.notificationToken) {
+                if (ownerData.notificationToken.startsWith('ExponentPushToken[')) {
+                  ownerExpoTokens.push(ownerData.notificationToken);
+                } else {
+                  ownerFcmTokens.push(ownerData.notificationToken);
+                }
+              }
+              
+              // Check for additional device tokens
+              if (ownerData?.devices && Array.isArray(ownerData.devices)) {
+                ownerData.devices.forEach(device => {
+                  if (device?.token) {
+                    if (device.token.startsWith('ExponentPushToken[')) {
+                      if (!ownerExpoTokens.includes(device.token)) {
+                        ownerExpoTokens.push(device.token);
+                      }
+                    } else {
+                      if (!ownerFcmTokens.includes(device.token)) {
+                        ownerFcmTokens.push(device.token);
+                      }
+                    }
+                  }
+                });
+              }
+            } catch (ownerError) {
+              logger.error(`Error procesando dueño/admin ${ownerId}:`, ownerError);
+            }
+          }
+        } else {
+          logger.warn(`El negocio ${businessId} no existe`);
+        }
+      } catch (businessError) {
+        logger.error(`Error obteniendo información del negocio ${businessId}:`, businessError);
+      }
+    }
+    
+    // Commit badge count updates
+    try {
+      await batch.commit();
+      logger.log("Actualizaciones de badge count aplicadas", { 
+        customerUpdated: results.customerUpdated,
+        businessUpdated: results.businessUpdated
+      });
+    } catch (batchError) {
+      logger.error("Error al confirmar el batch de actualización de badges:", batchError);
+      // Continue with sending notifications if possible
+    }
+    
+    // Send FCM notifications to customer
+    if (customerFcmTokens.length > 0) {
+      try {
+        const customerPayload: admin.messaging.MulticastMessage = {
+          data: {
+            type: "reservation_status",
+            reservationId,
+            businessId,
+            userId,
+            status
+          },
+          tokens: customerFcmTokens,
+          notification: {
+            title: customerNotificationTitle,
+            body: customerNotificationBody
+          },
+          android: {
+            priority: "high"
+          },
+          apns: {
+            payload: {
+              aps: {
+                badge: 1,
+                sound: "default"
+              }
+            }
+          }
+        };
+        
+        const customerResponse = await admin.messaging().sendEachForMulticast(customerPayload);
+        results.fcmSent += customerResponse.successCount;
+        results.fcmFailed += customerResponse.failureCount;
+        
+        logger.log(`Notificaciones FCM enviadas a cliente - Éxitos: ${customerResponse.successCount}, Fallos: ${customerResponse.failureCount}`);
+      } catch (fcmError) {
+        logger.error("Error al enviar notificaciones FCM a cliente:", fcmError);
+      }
+    }
+    
+    // Send FCM notifications to business owners if needed
+    if (shouldNotifyBusiness && ownerFcmTokens.length > 0) {
+      try {
+        const businessPayload: admin.messaging.MulticastMessage = {
+          data: {
+            type: "reservation_status",
+            reservationId,
+            businessId,
+            userId,
+            status
+          },
+          tokens: ownerFcmTokens,
+          notification: {
+            title: businessNotificationTitle,
+            body: businessNotificationBody
+          },
+          android: {
+            priority: "high"
+          },
+          apns: {
+            payload: {
+              aps: {
+                badge: 1,
+                sound: "default"
+              }
+            }
+          }
+        };
+        
+        const businessResponse = await admin.messaging().sendEachForMulticast(businessPayload);
+        results.fcmSent += businessResponse.successCount;
+        results.fcmFailed += businessResponse.failureCount;
+        
+        logger.log(`Notificaciones FCM enviadas a dueños/admins - Éxitos: ${businessResponse.successCount}, Fallos: ${businessResponse.failureCount}`);
+      } catch (fcmError) {
+        logger.error("Error al enviar notificaciones FCM a dueños/admins:", fcmError);
+      }
+    }
+    
+    // Send Expo notifications to customer
+    if (customerExpoTokens.length > 0) {
+      try {
+        // Filter valid Expo tokens
+        const validCustomerExpoTokens = customerExpoTokens.filter(token => Expo.isExpoPushToken(token));
+        
+        if (validCustomerExpoTokens.length > 0) {
+          // Create Expo messages
+          const customerExpoMessages: ExpoPushMessage[] = validCustomerExpoTokens.map(token => ({
+            to: token,
+            sound: 'default',
+            title: customerNotificationTitle,
+            body: customerNotificationBody,
+            badge: 1,
+            priority: 'high',
+            channelId: 'reservations',
+            _displayInForeground: true,
+            data: {
+              type: "reservation_status",
+              reservationId,
+              businessId,
+              userId,
+              status,
+              experienceId: '@username/app-slug', // Replace with your app's experienceId
+              scopeKey: '@username/app-slug', // Same as experienceId
+            },
+          }));
+          
+          // Create chunks of messages (recommended by Expo)
+          const customerChunks = expo.chunkPushNotifications(customerExpoMessages);
+          
+          // Send each chunk
+          for (const chunk of customerChunks) {
+            try {
+              const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+              
+              // Count successes and failures
+              ticketChunk.forEach((ticket: ExpoPushTicket) => {
+                if (ticket.status === 'ok') {
+                  results.expoSent++;
+                } else {
+                  results.expoFailed++;
+                  logger.warn(`Error enviando notificación Expo: ${ticket.message}`);
+                }
+              });
+            } catch (chunkError) {
+              logger.error("Error al enviar chunk de notificaciones Expo a cliente:", chunkError);
+              results.expoFailed += chunk.length;
+            }
+          }
+          
+          logger.log(`Notificaciones Expo enviadas a cliente - Éxitos: ${results.expoSent}, Fallos: ${results.expoFailed}`);
+        }
+      } catch (expoError) {
+        logger.error("Error al enviar notificaciones Expo a cliente:", expoError);
+      }
+    }
+    
+    // Send Expo notifications to business owners if needed
+    if (shouldNotifyBusiness && ownerExpoTokens.length > 0) {
+      try {
+        // Filter valid Expo tokens
+        const validOwnerExpoTokens = ownerExpoTokens.filter(token => Expo.isExpoPushToken(token));
+        
+        if (validOwnerExpoTokens.length > 0) {
+          // Create Expo messages
+          const ownerExpoMessages: ExpoPushMessage[] = validOwnerExpoTokens.map(token => ({
+            to: token,
+            sound: 'default',
+            title: businessNotificationTitle,
+            body: businessNotificationBody,
+            badge: 1,
+            priority: 'high',
+            channelId: 'reservations',
+            _displayInForeground: true,
+            data: {
+              type: "reservation_status",
+              reservationId,
+              businessId,
+              userId,
+              status,
+              experienceId: '@username/app-slug', // Replace with your app's experienceId
+              scopeKey: '@username/app-slug', // Same as experienceId
+            },
+          }));
+          
+          // Create chunks of messages (recommended by Expo)
+          const ownerChunks = expo.chunkPushNotifications(ownerExpoMessages);
+          
+          // Send each chunk
+          for (const chunk of ownerChunks) {
+            try {
+              const ticketChunk = await expo.sendPushNotificationsAsync(chunk);
+              
+              // Count successes and failures
+              ticketChunk.forEach((ticket: ExpoPushTicket) => {
+                if (ticket.status === 'ok') {
+                  results.expoSent++;
+                } else {
+                  results.expoFailed++;
+                  logger.warn(`Error enviando notificación Expo: ${ticket.message}`);
+                }
+              });
+            } catch (chunkError) {
+              logger.error("Error al enviar chunk de notificaciones Expo a dueños/admins:", chunkError);
+              results.expoFailed += chunk.length;
+            }
+          }
+          
+          logger.log(`Notificaciones Expo enviadas a dueños/admins - Éxitos: ${results.expoSent}, Fallos: ${results.expoFailed}`);
+        }
+      } catch (expoError) {
+        logger.error("Error al enviar notificaciones Expo a dueños/admins:", expoError);
+      }
+    }
+    
+    // Return results
+    logger.log("Procesamiento de notificación de cambio de estado de reserva completado", { results });
+    return results;
+  } catch (error) {
+    logger.error("Error general en sendReservationStatusUpdateNotification", { error });
+    return null;
+  }
+});

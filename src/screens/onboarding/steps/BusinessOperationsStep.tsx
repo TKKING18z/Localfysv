@@ -6,7 +6,8 @@ import {
   Switch,
   TouchableOpacity,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  Alert
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useBusinessOnboarding } from '../../../context/BusinessOnboardingContext';
@@ -168,9 +169,33 @@ const BusinessOperationsStep: React.FC = () => {
   // Handle toggling services
   const toggleService = useCallback((service: keyof typeof services) => {
     setServices(prevServices => {
-      return { ...prevServices, [service]: !prevServices[service] };
+      const newValue = !prevServices[service];
+      
+      // Show payment process alert when online orders is turned on
+      if (service === 'onlineOrders' && newValue === true) {
+        Alert.alert(
+          'Procesamiento de pagos',
+          'Localfy gestiona los pagos para tus pedidos en línea de manera segura y eficiente.',
+          [
+            {
+              text: 'Ver cómo funciona',
+              onPress: () => {
+                // Navigate to the payment info screen
+                navigation.navigate('BusinessPaymentInfo');
+              },
+              style: 'default',
+            },
+            {
+              text: 'OK',
+              style: 'cancel',
+            }
+          ]
+        );
+      }
+      
+      return { ...prevServices, [service]: newValue };
     });
-  }, []);
+  }, [navigation]);
   
   // Use effect to update form state when services change
   useEffect(() => {

@@ -472,16 +472,56 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
     pointsCost: number, 
     rewardName: string
   ): Promise<boolean> => {
-    if (!user) return false;
+    if (!user) {
+      console.error('No hay usuario autenticado');
+      setError('Inicia sesión para canjear puntos');
+      return false;
+    }
     
     setLoading(true);
     setError(null);
     
     try {
+      console.log(`Iniciando canje: ID=${rewardId}, Costo=${pointsCost}, Nombre=${rewardName}`);
+      console.log(`Puntos actuales del usuario: ${totalPoints}`);
+      
       // Check if user has enough points
       if (totalPoints < pointsCost) {
+        console.error(`Puntos insuficientes: ${totalPoints} < ${pointsCost}`);
         setError('No tienes suficientes puntos para este premio');
         return false;
+      }
+      
+      // Variable para almacenar los datos del premio
+      let rewardData: PointsReward = {
+        id: rewardId,
+        name: rewardName,
+        description: `Premio canjeado por ${pointsCost} puntos`,
+        pointsCost: pointsCost,
+        isActive: true
+      };
+      
+      // Get the reward details if it exists in the database
+      try {
+        const rewardDoc = await db.collection('rewards').doc(rewardId).get();
+        
+        if (rewardDoc.exists) {
+          console.log('Premio encontrado en la base de datos');
+          rewardData = { 
+            ...rewardData, 
+            ...rewardDoc.data() as PointsReward 
+          };
+        } else {
+          // Si es un premio de muestra, no mostrar error, sólo continuar con los datos que tenemos
+          if (rewardId.startsWith('sample-')) {
+            console.log('Premio de muestra, no existe en la base de datos pero continuamos');
+          } else {
+            console.warn(`Premio no encontrado en la base de datos: ${rewardId}`);
+          }
+        }
+      } catch (error) {
+        // Si hay un error al buscar el premio, lo registramos pero continuamos con el canje
+        console.error('Error al buscar el premio en la base de datos:', error);
       }
       
       // Create transaction in Firestore using a batch
@@ -498,6 +538,7 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
       };
       
       batch.set(transactionRef, transactionData);
+      console.log('Transacción de canje creada');
       
       // Update points summary
       const summaryRef = db.collection('pointsSummary').doc(user.uid);
@@ -505,6 +546,7 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
         totalPoints: firebase.firestore.FieldValue.increment(-pointsCost),
         updatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
+      console.log('Actualización de resumen de puntos preparada');
       
       // Create redemption record
       const redemptionRef = db.collection('redemptions').doc();
@@ -517,9 +559,53 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
         status: 'pending', // pending, completed, canceled
         createdAt: firebase.firestore.Timestamp.now()
       });
+      console.log('Registro de canje creado');
+      
+      // Create an active redemption (discount) record
+      // Set expiry to 30 days from now
+      const expiryDate = new Date();
+      expiryDate.setDate(expiryDate.getDate() + 30);
+      
+      // Determine discount type and amount from the reward data
+      const userRedemptionRef = db.collection('userRedemptions').doc();
+      const userRedemptionData: Omit<ActiveRedemption, 'id'> = {
+        name: rewardName,
+        description: rewardData.description || `Descuento canjeado con ${pointsCost} puntos`,
+        isUsed: false,
+        expiryDate: firebase.firestore.Timestamp.fromDate(expiryDate)
+      };
+      
+      // Add appropriate discount properties based on reward point cost
+      if (pointsCost < 100) {
+        // Small discount: $2 fixed amount
+        userRedemptionData.discountAmount = 2;
+      } else if (pointsCost < 200) {
+        // Medium discount: $5 fixed amount
+        userRedemptionData.discountAmount = 5;
+      } else if (pointsCost < 500) {
+        // Large discount: $10 fixed amount
+        userRedemptionData.discountAmount = 10;
+      } else {
+        // Premium discount: 15% percentage
+        userRedemptionData.discountPercent = 15;
+      }
+      
+      // Optional: add business-specific information if this discount is for a specific business
+      if (rewardData.businessId) {
+        userRedemptionData.businessId = rewardData.businessId;
+      }
+      
+      batch.set(userRedemptionRef, {
+        ...userRedemptionData,
+        userId: user.uid,
+        createdAt: firebase.firestore.Timestamp.now()
+      });
+      console.log('Descuento activo creado');
       
       // Commit the batch
+      console.log('Ejecutando transacción en la base de datos...');
       await batch.commit();
+      console.log('¡Transacción completada con éxito!');
       
       // Update local state
       setTotalPoints(prev => prev - pointsCost);
@@ -529,11 +615,37 @@ export const PointsProvider: React.FC<{children: React.ReactNode}> = ({ children
       };
       setTransactions(prev => [newTransaction, ...prev]);
       
-      console.log(`Redeemed ${pointsCost} points for ${rewardName}`);
+      // Refresh the active redemptions list
+      await getActiveRedemptions();
+      
+      console.log(`Canje exitoso: ${pointsCost} puntos por ${rewardName}`);
       return true;
     } catch (err: any) {
-      console.error('Error redeeming points:', err);
-      setError(err.message || 'Failed to redeem points');
+      console.error('Error detallado al canjear puntos:', err);
+      // Guardar información detallada sobre el error
+      let errorDetails;
+      try {
+        errorDetails = JSON.stringify(err);
+      } catch (e) {
+        errorDetails = `Error no serializable: ${err.message || err}`;
+      }
+      console.error(`Detalles del error: ${errorDetails}`);
+      
+      // Mensaje de error más preciso para el usuario
+      let errorMessage = 'Error al canjear puntos';
+      
+      // Analizar mensaje específico basado en tipo de error
+      if (err.code === 'permission-denied') {
+        errorMessage = 'No tienes permiso para realizar esta acción';
+      } else if (err.code === 'not-found') {
+        errorMessage = 'El premio solicitado no existe';
+      } else if (err.code === 'resource-exhausted') {
+        errorMessage = 'Servicio temporalmente no disponible. Intenta más tarde';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
+      setError(errorMessage);
       return false;
     } finally {
       setLoading(false);

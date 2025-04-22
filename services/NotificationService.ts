@@ -4,6 +4,31 @@ import Constants from 'expo-constants';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import 'firebase/compat/functions';
+import { EventEmitter } from 'events';
+
+// Define notification types
+export type NotificationType = 
+  | 'chat' 
+  | 'order_new' 
+  | 'order_status' 
+  | 'system' 
+  | 'promo' 
+  | 'reservation_new' 
+  | 'reservation_status';
+
+// Notification data interface
+export interface NotificationData {
+  title: string;
+  message: string;
+  type: NotificationType;
+  data?: any;
+  duration?: number;
+  autoDismiss?: boolean;
+  id?: string;
+}
+
+// Create an event emitter for notifications
+const notificationEmitter = new EventEmitter();
 
 // Tipo de respuesta estándar para todos los servicios
 export interface NotificationResult<T = any> {
@@ -16,7 +41,7 @@ export interface NotificationResult<T = any> {
 }
 
 // Configurar el comportamiento de notificaciones
-export const configureNotifications = async () => {
+export const configureNotifications = async (): Promise<NotificationResult> => {
   // Configurar cómo deberían aparecer las notificaciones cuando la app está en primer plano
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -106,7 +131,7 @@ export const registerForPushNotifications = async (): Promise<NotificationResult
         // No lanzamos error para permitir desarrollo/pruebas sin EAS projectId
       }
       expoPushToken = await Notifications.getExpoPushTokenAsync({
-        projectId: projectId,
+        projectId,
       });
       console.log('[NotificationService] Expo Push token:', expoPushToken.data);
     } catch (error: any) {
@@ -412,8 +437,65 @@ export const getLastNotificationResponse = async (): Promise<Notifications.Notif
   }
 };
 
-// Exportar el servicio completo (eliminando sendChatNotification)
+// In-app notification functions (from the smaller file)
+export const showNotification = (notification: NotificationData): void => {
+  notificationEmitter.emit('show-notification', notification);
+};
+
+export const onShowNotification = (callback: (notification: NotificationData) => void): () => void => {
+  notificationEmitter.on('show-notification', callback);
+  return () => {
+    notificationEmitter.off('show-notification', callback);
+  };
+};
+
+export const showReservationCreatedNotification = (reservationId: string, businessName: string): void => {
+  showNotification({
+    title: 'Reserva Recibida',
+    message: `Tu reserva en ${businessName} ha sido registrada. El negocio ha sido notificado y te avisaremos cuando la confirmen.`,
+    type: 'reservation_new',
+    data: { reservationId },
+    duration: 5000,
+    autoDismiss: true
+  });
+};
+
+export const showReservationStatusNotification = (
+  reservationId: string, 
+  businessName: string, 
+  status: 'confirmed' | 'canceled' | 'completed'
+): void => {
+  let title = 'Actualización de Reserva';
+  let message = `Tu reserva en ${businessName} ha sido actualizada.`;
+
+  switch (status) {
+    case 'confirmed':
+      title = 'Reserva Confirmada';
+      message = `¡Tu reserva en ${businessName} ha sido confirmada!`;
+      break;
+    case 'canceled':
+      title = 'Reserva Cancelada';
+      message = `Tu reserva en ${businessName} ha sido cancelada.`;
+      break;
+    case 'completed':
+      title = 'Reserva Completada';
+      message = `Gracias por tu visita a ${businessName}. Esperamos que hayas disfrutado de tu experiencia.`;
+      break;
+  }
+
+  showNotification({
+    title,
+    message,
+    type: 'reservation_status',
+    data: { reservationId },
+    duration: 5000,
+    autoDismiss: true
+  });
+};
+
+// Exportar el servicio completo
 export const notificationService = {
+  // Push notification methods
   configureNotifications,
   requestNotificationPermissions,
   registerForPushNotifications,
@@ -425,6 +507,12 @@ export const notificationService = {
   resetBadgeCount,
   registerNotificationHandlers,
   getLastNotificationResponse,
+  
+  // In-app notification methods
+  showNotification,
+  onShowNotification,
+  showReservationCreatedNotification,
+  showReservationStatusNotification,
 };
 
 export default notificationService;

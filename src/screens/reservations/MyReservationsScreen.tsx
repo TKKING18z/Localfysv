@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,11 @@ import {
   ActivityIndicator,
   Alert,
   StatusBar,
-  Platform
+  Platform,
+  ScrollView
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { useNavigation, RouteProp, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, RouteProp, useRoute } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../context/AuthContext';
@@ -44,21 +45,27 @@ const MyReservationsScreen: React.FC = () => {
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [activeFilterTab, setActiveFilterTab] = useState<ReservationFilter>(ReservationFilter.ACTIVE);
   const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date());
-
+  const [businessesWithReservations, setBusinessesWithReservations] = useState<Array<{id: string, name: string}>>([]);
+  
+  // Refs to track component state
+  const isMounted = useRef(true);
+  const initialLoadDone = useRef(false);
+  const refreshTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
   // Si hay un businessId específico en los params, lo usamos
   const businessId = route.params?.businessId;
 
   // Fetch business name if we have a business ID
   useEffect(() => {
     const fetchBusinessName = async () => {
-      if (businessId) {
+      if (businessId && isMounted.current) {
         try {
           const businessDoc = await firebase.firestore()
             .collection('businesses')
             .doc(businessId)
             .get();
           
-          if (businessDoc.exists) {
+          if (businessDoc.exists && isMounted.current) {
             const business = businessDoc.data();
             if (business && business.name) {
               setBusinessName(business.name);
@@ -92,32 +99,90 @@ const MyReservationsScreen: React.FC = () => {
     initialFilter: ReservationFilter.ACTIVE
   });
 
-  // Refresh when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      console.log('[MyReservationsScreen] Screen focused, refreshing data');
-      if (!refreshing && !loading) {
-        refresh();
-      }
-      return () => {
-        // Cleanup if needed
-      };
-    }, [refresh, refreshing, loading])
-  );
-
-  // Also refresh when user changes
+  // Only load data once when component mounts
   useEffect(() => {
-    if (user?.uid) {
-      console.log('[MyReservationsScreen] User changed, refreshing data');
+    if (!initialLoadDone.current && isMounted.current && !loading && !refreshing) {
+      console.log('[MyReservationsScreen] Initial data load');
       refresh();
+      initialLoadDone.current = true;
     }
-  }, [user?.uid, refresh]);
+  }, [refresh, loading, refreshing]);
 
-  // Refresh when isBusinessView changes
+  // Setup component mount/unmount
   useEffect(() => {
-    console.log('[MyReservationsScreen] Business view changed to:', isBusinessView);
-    refresh();
-  }, [isBusinessView, refresh]);
+    isMounted.current = true;
+    
+    return () => {
+      isMounted.current = false;
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Fetch businesses where user has reservations
+  useEffect(() => {
+    const fetchBusinessesWithReservations = async () => {
+      if (!user?.uid || isBusinessView || !isMounted.current) return;
+      
+      try {
+        console.log('[MyReservationsScreen] Fetching businesses with reservations for user:', user.uid);
+        const reservationsSnapshot = await firebase.firestore()
+          .collection('reservations')
+          .where('userId', '==', user.uid)
+          .where('status', 'in', ['pending', 'confirmed', 'active'])
+          .get();
+        
+        console.log('[MyReservationsScreen] Found', reservationsSnapshot.size, 'reservations');
+        
+        const businessIds = new Set<string>();
+        reservationsSnapshot.docs.forEach(doc => {
+          const data = doc.data();
+          if (data.businessId) {
+            businessIds.add(data.businessId);
+            console.log('[MyReservationsScreen] Added business ID:', data.businessId);
+          }
+        });
+        
+        const businesses: Array<{id: string, name: string}> = [];
+        for (const businessId of businessIds) {
+          const businessDoc = await firebase.firestore()
+            .collection('businesses')
+            .doc(businessId)
+            .get();
+          
+          if (businessDoc.exists) {
+            const data = businessDoc.data();
+            if (data) {
+              businesses.push({
+                id: businessId,
+                name: data.name || 'Negocio sin nombre'
+              });
+              console.log('[MyReservationsScreen] Added business:', data.name);
+            }
+          }
+        }
+        
+        if (isMounted.current) {
+          console.log('[MyReservationsScreen] Setting businesses with reservations:', businesses.length);
+          setBusinessesWithReservations(businesses);
+          
+          // Remove alert logic completely
+        }
+      } catch (error) {
+        console.error('[MyReservationsScreen] Error fetching businesses with reservations:', error);
+        // Remove error alert
+      }
+    };
+    
+    fetchBusinessesWithReservations();
+    
+    return () => {
+      if (refreshTimeoutRef.current) {
+        clearTimeout(refreshTimeoutRef.current);
+      }
+    };
+  }, [user?.uid, isBusinessView, businessId, navigation]);
 
   // Filtros disponibles
   const filterOptions: FilterOption[] = [
@@ -156,8 +221,27 @@ const MyReservationsScreen: React.FC = () => {
     } else {
       // Otherwise toggle between personal/business view
       setIsBusinessView(!isBusinessView);
+      // Reset initial load flag to trigger a refresh with the new view
+      initialLoadDone.current = false;
     }
   }, [navigation, isBusinessView, businessId]);
+
+  // Show businesses with reservations - modified to not show alerts
+  const showBusinessesAlert = useCallback(() => {
+    if (businessesWithReservations.length === 0) {
+      // Navigate directly to home screen instead of showing alert
+      // navigation.navigate('MainTabs', { screen: 'Home' });
+      return;
+    }
+    
+    // If there are businesses, navigate to the first one instead of showing alert
+    if (businessesWithReservations.length > 0) {
+      navigation.navigate('MyReservations', { 
+        businessId: businessesWithReservations[0].id,
+        isBusinessView: false 
+      });
+    }
+  }, [businessesWithReservations, navigation]);
 
   // Manejador para cancelar reserva
   const handleCancelReservation = useCallback(async (reservationId: string) => {
@@ -276,6 +360,23 @@ const MyReservationsScreen: React.FC = () => {
         <Text style={styles.retryButtonText}>Actualizar</Text>
       </TouchableOpacity>
       
+      {!isBusinessView && businessesWithReservations.length > 0 && (
+        <TouchableOpacity
+          style={styles.businessesButton}
+          onPress={showBusinessesAlert}
+        >
+          <LinearGradient
+            colors={['#007AFF', '#0055FF']}
+            style={styles.businessesButtonGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+          >
+            <MaterialIcons name="business" size={18} color="white" />
+            <Text style={styles.businessesButtonText}>Ver Negocios con Reservaciones</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
+      
       {!isBusinessView && (
         <TouchableOpacity
           style={styles.exploreButton}
@@ -326,20 +427,8 @@ const MyReservationsScreen: React.FC = () => {
 
   // Debug info for development
   const renderDebugInfo = () => {
-    if (process.env.NODE_ENV !== 'development') return null;
-    
-    return (
-      <View style={styles.debugContainer}>
-        <Text style={styles.debugText}>
-          userId: {user?.uid ? user.uid.substring(0, 8) + '...' : 'none'}{'\n'}
-          businessId: {businessId ? businessId.substring(0, 8) + '...' : 'none'}{'\n'}
-          businessName: {businessName || 'N/A'}{'\n'}
-          isBusinessView: {isBusinessView ? 'true' : 'false'}{'\n'}
-          filter: {filter}{'\n'}
-          count: {reservations.length}
-        </Text>
-      </View>
-    );
+    // Return null to hide debug info completely
+    return null;
   };
 
   return (
@@ -370,6 +459,15 @@ const MyReservationsScreen: React.FC = () => {
             />
           </TouchableOpacity>
           
+          {!isBusinessView && businessesWithReservations.length > 0 && (
+            <TouchableOpacity
+              style={styles.businessesButton}
+              onPress={showBusinessesAlert}
+            >
+              <MaterialIcons name="business" size={24} color="#007AFF" />
+            </TouchableOpacity>
+          )}
+          
           <TouchableOpacity 
             style={styles.switchViewButton}
             onPress={handleChangeBusiness}
@@ -381,6 +479,45 @@ const MyReservationsScreen: React.FC = () => {
             />
           </TouchableOpacity>
         </View>
+      </View>
+      
+      {/* New reservation type selector */}
+      <View style={styles.viewTypeContainer}>
+        <TouchableOpacity 
+          style={[
+            styles.viewTypeButton, 
+            !isBusinessView && styles.activeViewTypeButton
+          ]}
+          onPress={() => {
+            if (isBusinessView) {
+              setIsBusinessView(false);
+              initialLoadDone.current = false;
+            }
+          }}
+        >
+          <Text style={[
+            styles.viewTypeButtonText,
+            !isBusinessView && styles.activeViewTypeButtonText
+          ]}>Mis Reservaciones</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[
+            styles.viewTypeButton, 
+            isBusinessView && styles.activeViewTypeButton
+          ]}
+          onPress={() => {
+            if (!isBusinessView) {
+              setIsBusinessView(true);
+              initialLoadDone.current = false;
+            }
+          }}
+        >
+          <Text style={[
+            styles.viewTypeButtonText,
+            isBusinessView && styles.activeViewTypeButtonText
+          ]}>Reservaciones Recibidas</Text>
+        </TouchableOpacity>
       </View>
       
       {/* Filter tabs */}
@@ -479,6 +616,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   refreshButton: {
+    padding: 8,
+    marginRight: 8,
+  },
+  businessesButton: {
     padding: 8,
     marginRight: 8,
   },
@@ -613,9 +754,22 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: 'center',
   },
+  businessesButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  businessesButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+    marginLeft: 8,
+  },
   exploreButton: {
     borderRadius: 12,
     overflow: 'hidden',
+    marginTop: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -633,6 +787,48 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     marginLeft: 8,
+  },
+  viewTypeContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#EEEEEE',
+  },
+  viewTypeButton: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    minWidth: '45%',
+    alignItems: 'center',
+    backgroundColor: '#F5F7FF',
+    borderWidth: 1,
+    borderColor: '#E5E5E5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  activeViewTypeButton: {
+    backgroundColor: '#007AFF',
+    borderColor: '#007AFF',
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  viewTypeButtonText: {
+    color: '#666666',
+    fontWeight: 'bold',
+    fontSize: 15,
+    textAlign: 'center',
+  },
+  activeViewTypeButtonText: {
+    color: '#FFFFFF',
   },
 });
 

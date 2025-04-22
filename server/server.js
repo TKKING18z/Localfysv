@@ -8,6 +8,32 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 3000;
 
+// Helper para calcular la comisión de la plataforma
+function calculateApplicationFee(amountInCents) {
+  // Asegurarnos de que el monto es un número válido
+  if (!amountInCents || isNaN(amountInCents) || amountInCents <= 0) {
+    return 0;
+  }
+  
+  // Convertir centavos a dólares para los umbrales
+  const amountInDollars = amountInCents / 100;
+  let applicationFeeInCents = 0;
+  
+  // Estructura escalonada de comisiones
+  if (amountInDollars < 10) {
+    applicationFeeInCents = 10; // $0.10 para transacciones menores a $10
+  } else if (amountInDollars < 30) {
+    applicationFeeInCents = 15; // $0.15 para transacciones entre $10 y $30
+  } else {
+    // 0.5% del total para transacciones mayores a $30
+    applicationFeeInCents = Math.round(amountInCents * 0.005);
+    // Asegurar un mínimo de $0.15
+    applicationFeeInCents = Math.max(applicationFeeInCents, 15);
+  }
+  
+  return applicationFeeInCents;
+}
+
 // Middleware global
 app.use(cors());
 // IMPORTANTE: NO usar express.json() globalmente, ya que afecta al webhook
@@ -28,14 +54,31 @@ app.get('/', (req, res) => {
 // Ruta para crear un PaymentIntent
 app.post('/create-payment-intent', async (req, res) => {
   try {
-    const { amount, currency, email, businessId, cartItems } = req.body;
+    const { amount, currency, email, businessId, cartItems, applicationFee } = req.body;
     
     // Validaciones
     if (!amount || isNaN(amount) || amount <= 0) {
       return res.status(400).json({ error: 'Monto inválido' });
     }
     
+    // Validar que la comisión sea un número positivo si está presente
+    if (applicationFee !== undefined && (isNaN(applicationFee) || applicationFee < 0)) {
+      return res.status(400).json({ error: 'Comisión inválida' });
+    }
+    
     console.log(`Creando PaymentIntent para: $${amount/100} ${currency || 'usd'}`);
+    
+    // Determinar la comisión a aplicar
+    let finalApplicationFee = applicationFee;
+    
+    // Si no se especifica una comisión, calcularla automáticamente
+    if (finalApplicationFee === undefined) {
+      finalApplicationFee = calculateApplicationFee(amount);
+    }
+    
+    if (finalApplicationFee > 0) {
+      console.log(`Con comisión de plataforma: $${finalApplicationFee/100}`);
+    }
     
     // Intentar crear un cliente si tenemos un email
     let customerId;
@@ -59,8 +102,8 @@ app.post('/create-payment-intent', async (req, res) => {
       }
     }
     
-    // Crear el PaymentIntent
-    const paymentIntent = await stripe.paymentIntents.create({
+    // Preparar los parámetros para el PaymentIntent
+    const paymentIntentParams = {
       amount,
       currency: currency || 'usd',
       receipt_email: email,
@@ -74,7 +117,21 @@ app.post('/create-payment-intent', async (req, res) => {
         }))) : ''
       },
       ...(customerId && { customer: customerId })
-    });
+    };
+    
+    // Agregar la comisión de la aplicación si está presente
+    // Nota: Esto requiere que estés usando Stripe Connect con cuentas conectadas
+    if (finalApplicationFee && businessId) {
+      paymentIntentParams.application_fee_amount = finalApplicationFee;
+      
+      // Si estás usando Stripe Connect, debes especificar la cuenta de destino
+      paymentIntentParams.transfer_data = {
+        destination: businessId, // Este debería ser el ID de la cuenta conectada del negocio
+      };
+    }
+
+    // Crear el PaymentIntent con los parámetros preparados
+    const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
     // Crear un Ephemeral Key para el cliente si tenemos un ID de cliente
     let ephemeralKey;
@@ -223,6 +280,59 @@ app.get('/orders/:orderId', async (req, res) => {
   }
 });
 
+// Ruta para calcular la comisión de la plataforma para un monto dado
+app.get('/calculate-fee', (req, res) => {
+  try {
+    const { amount } = req.query;
+    
+    // Validar el monto
+    if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
+      return res.status(400).json({ error: 'Monto inválido. Debe ser un número positivo.' });
+    }
+    
+    // Convertir el monto a centavos para el cálculo
+    const amountInCents = Math.round(parseFloat(amount) * 100);
+    
+    // Calcular la comisión
+    const feeInCents = calculateApplicationFee(amountInCents);
+    
+    // Devolver el resultado
+    res.json({
+      success: true,
+      originalAmount: parseFloat(amount),
+      fee: feeInCents / 100,
+      feePercentage: (feeInCents / amountInCents) * 100
+    });
+  } catch (error) {
+    console.error('Error al calcular comisión:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Ruta para obtener la estructura de comisiones
+app.get('/fee-structure', (req, res) => {
+  // Esta es la estructura de comisiones que usamos en la app
+  const feeStructure = {
+    smallTransaction: {
+      threshold: 10.00, // Umbral en dólares
+      fixedFee: 0.10,   // Comisión fija en dólares
+    },
+    mediumTransaction: {
+      threshold: 30.00, // Umbral en dólares
+      fixedFee: 0.15,   // Comisión fija en dólares
+    },
+    largeTransaction: {
+      percentageFee: 0.5, // Comisión porcentual
+      minimumFee: 0.15,   // Comisión mínima en dólares
+    }
+  };
+  
+  res.json({
+    success: true,
+    feeStructure
+  });
+});
+
 // Webhook para recibir eventos de Stripe
 // IMPORTANTE: Usar express.raw para webhooks de Stripe
 app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
@@ -256,6 +366,11 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
         // Extraer metadatos del pago
         const businessId = paymentIntent.metadata.businessId;
         const cartItemsJson = paymentIntent.metadata.cartItems;
+        
+        // Log de comisión si existe
+        if (paymentIntent.application_fee_amount) {
+          console.log(`💼 Comisión de la plataforma: $${paymentIntent.application_fee_amount/100}`);
+        }
         
         // Actualizar el estado de la orden a 'paid' si podemos identificarla
         // En una implementación real, aquí buscarías la orden asociada al pago 

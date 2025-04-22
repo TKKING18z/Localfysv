@@ -71,6 +71,9 @@ export const CartScreen: React.FC = () => {
   const [finalTotal, setFinalTotal] = useState(totalPrice);
   const [discountModalVisible, setDiscountModalVisible] = useState(false);
 
+  // Add state to track all available discounts
+  const [availableDiscounts, setAvailableDiscounts] = useState<ActiveRedemption[]>([]);
+
   // Memoize businessName to avoid recalculations
   const businessName = useMemo(() => 
     cart.businessName || (cart.items.length > 0 && cart.items[0].businessName) || 'Localfy',
@@ -105,13 +108,22 @@ export const CartScreen: React.FC = () => {
         
         // Wrap discount checks in try-catch to prevent crashes
         try {
-          if (redemptions.length > 0 && hasAvailableDiscount()) {
-            const discount = getAvailableDiscount();
-            setActiveDiscount(discount);
-            
-            // Calculate discount if available
-            if (discount) {
-              calculateDiscount(discount);
+          // Store all available discounts
+          setAvailableDiscounts(redemptions || []);
+          
+          if (redemptions.length > 0) {
+            // If we already have an active discount, keep it
+            if (activeDiscount) {
+              calculateDiscount(activeDiscount);
+            } else if (hasAvailableDiscount()) {
+              // Otherwise get the best available one
+              const discount = getAvailableDiscount();
+              setActiveDiscount(discount);
+              
+              // Calculate discount if available
+              if (discount) {
+                calculateDiscount(discount);
+              }
             }
           } else {
             setActiveDiscount(null);
@@ -134,61 +146,84 @@ export const CartScreen: React.FC = () => {
   useEffect(() => {
     // Asegurarse de que el descuento no supere el precio total
     const safeDiscountAmount = Math.min(discountAmount, totalPrice);
-    setFinalTotal(Math.max(0, totalPrice - safeDiscountAmount));
+    const newFinalTotal = Math.max(0, totalPrice - safeDiscountAmount);
+    
+    // Validar que el resultado sea un número
+    if (!isNaN(newFinalTotal)) {
+      setFinalTotal(newFinalTotal);
+    } else {
+      console.error('Error calculando precio final:', { totalPrice, discountAmount });
+      setFinalTotal(totalPrice); // En caso de error, usar el total sin descuento
+    }
   }, [totalPrice, discountAmount]);
 
   // Calcular el monto del descuento basado en el tipo de descuento - memoized
   const calculateDiscount = useCallback((discount: ActiveRedemption) => {
     if (!discount) return;
 
-    if (discount.discountAmount !== undefined) {
-      // Descuento de monto fijo
-      setDiscountAmount(discount.discountAmount);
-    } else if (discount.discountPercent !== undefined) {
-      // Descuento porcentual
-      const amount = (totalPrice * discount.discountPercent) / 100;
-      setDiscountAmount(amount);
-    } else {
+    try {
+      if (discount.discountAmount !== undefined) {
+        // Descuento de monto fijo
+        setDiscountAmount(Number(discount.discountAmount) || 0);
+      } else if (discount.discountPercent !== undefined) {
+        // Descuento porcentual
+        const amount = (totalPrice * Number(discount.discountPercent) / 100) || 0;
+        setDiscountAmount(amount);
+      } else {
+        setDiscountAmount(0);
+      }
+    } catch (error) {
+      console.error('Error calculando descuento:', error);
       setDiscountAmount(0);
     }
   }, [totalPrice]);
 
-  // Función para remover un descuento activo - memoized
-  const removeDiscount = useCallback(() => {
-    setActiveDiscount(null);
-    setDiscountAmount(0);
-  }, []);
-
-  // Función para mostrar el modal de confirmación de uso de descuento - memoized
-  const showDiscountConfirmation = useCallback(() => {
-    if (!activeDiscount) return;
+  // Function to show discount selection modal
+  const showDiscountSelectionModal = useCallback(() => {
+    // Only show modal if we have discounts to choose from
+    if (availableDiscounts && availableDiscounts.length > 0) {
+      setDiscountModalVisible(true);
+    } else {
+      Alert.alert(
+        'No hay descuentos disponibles',
+        'Actualmente no tienes descuentos disponibles. Puedes canjear puntos por descuentos en la pantalla de Puntos.',
+        [{ text: 'Entendido' }]
+      );
+    }
+  }, [availableDiscounts]);
+  
+  // Function to select a discount
+  const selectDiscount = useCallback((discount: ActiveRedemption) => {
+    setActiveDiscount(discount);
+    calculateDiscount(discount);
+    setDiscountModalVisible(false);
     
+    // Show confirmation to user
     let discountDescription = '';
-    if (activeDiscount.discountAmount) {
-      discountDescription = `$${activeDiscount.discountAmount.toFixed(2)}`;
-    } else if (activeDiscount.discountPercent) {
-      discountDescription = `${activeDiscount.discountPercent}%`;
+    if (discount.discountAmount) {
+      discountDescription = `$${discount.discountAmount.toFixed(2)}`;
+    } else if (discount.discountPercent) {
+      discountDescription = `${discount.discountPercent}%`;
     }
     
     Alert.alert(
-      'Usar descuento',
-      `¿Quieres aplicar tu descuento de ${discountDescription} a esta compra?`,
-      [
-        { text: 'No usar', style: 'cancel' },
-        { 
-          text: 'Aplicar descuento', 
-          style: 'default',
-          onPress: () => {
-            // El descuento ya está aplicado en el cálculo, solo confirmar
-            Alert.alert(
-              'Descuento aplicado',
-              `Tu descuento de ${discountDescription} ha sido aplicado al total de tu compra.`
-            );
-          }
-        }
-      ]
+      'Descuento aplicado',
+      `Se ha aplicado un descuento de ${discountDescription} a tu compra.`,
+      [{ text: 'OK' }]
     );
-  }, [activeDiscount]);
+  }, [calculateDiscount]);
+  
+  // Function to remove a discount
+  const removeDiscount = useCallback(() => {
+    setActiveDiscount(null);
+    setDiscountAmount(0);
+    
+    Alert.alert(
+      'Descuento eliminado',
+      'El descuento ha sido eliminado de tu compra.',
+      [{ text: 'OK' }]
+    );
+  }, []);
 
   // Handle selected location from MapScreen - memoized
   useEffect(() => {
@@ -445,17 +480,20 @@ export const CartScreen: React.FC = () => {
                 })) : []
               }));
               
+              // Asegurar que el precio final es un número válido
+              const validFinalTotal = isNaN(finalTotal) || finalTotal < 0 ? 0 : finalTotal;
+              
               navigation.navigate('Payment', {
                 businessId: cart.businessId || '',
                 businessName: businessName,
-                amount: finalTotal, // Pasar el precio final después del descuento
+                amount: validFinalTotal, // Asegurar que es un número válido
                 cartItems: sanitizedCartItems,
                 isCartPayment: true,
                 deliveryAddress: cart.deliveryAddress,
                 deliveryNotes: cart.deliveryNotes,
                 // Añadir información para los puntos
                 shouldAwardPoints: !!user,
-                pointsToAward: Math.floor(finalTotal * 2),
+                pointsToAward: Math.floor(validFinalTotal * 2),
                 // Información sobre el descuento aplicado
                 appliedDiscountId: activeDiscount?.id,
                 discountAmount: discountAmount
@@ -647,27 +685,44 @@ export const CartScreen: React.FC = () => {
                 
                 {/* Botón para aplicar/ver descuentos disponibles */}
                 {user && (
-                  <TouchableOpacity 
-                    style={styles.discountButton}
-                    onPress={showDiscountConfirmation}
-                    disabled={!activeDiscount}
-                  >
-                    <MaterialIcons 
-                      name={activeDiscount ? "confirmation-number" : "confirmation-number"} 
-                      size={18} 
-                      color={activeDiscount ? "#4CAF50" : "#BBBBBB"} 
-                    />
-                    <Text 
-                      style={[
-                        styles.discountButtonText,
-                        {color: activeDiscount ? "#4CAF50" : "#BBBBBB"}
-                      ]}
-                    >
-                      {activeDiscount 
-                        ? `Descuento aplicado: ${activeDiscount.name}` 
-                        : "No tienes descuentos disponibles"}
-                    </Text>
-                  </TouchableOpacity>
+                  <View style={styles.discountSection}>
+                    <Text style={styles.discountSectionTitle}>Descuentos</Text>
+                    
+                    {activeDiscount ? (
+                      <View style={styles.activeDiscountContainer}>
+                        <View style={styles.activeDiscountInfo}>
+                          <MaterialIcons name="local-offer" size={18} color="#4CAF50" />
+                          <View style={styles.activeDiscountTextContainer}>
+                            <Text style={styles.activeDiscountName}>{activeDiscount.name}</Text>
+                            <Text style={styles.activeDiscountDescription}>
+                              {activeDiscount.description || 
+                                (activeDiscount.discountAmount 
+                                  ? `Descuento de $${activeDiscount.discountAmount.toFixed(2)}` 
+                                  : `Descuento del ${activeDiscount.discountPercent}%`)}
+                            </Text>
+                          </View>
+                        </View>
+                        <TouchableOpacity 
+                          style={styles.removeDiscountButton}
+                          onPress={removeDiscount}
+                        >
+                          <MaterialIcons name="close" size={18} color="#FF3B30" />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <TouchableOpacity 
+                        style={styles.discountButton}
+                        onPress={showDiscountSelectionModal}
+                      >
+                        <MaterialIcons name="local-offer" size={18} color="#007AFF" />
+                        <Text style={styles.discountButtonText}>
+                          {availableDiscounts.length > 0 
+                            ? "Seleccionar un descuento" 
+                            : "No tienes descuentos disponibles"}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 )}
                 
                 {/* Sección de Dirección de Entrega */}
@@ -863,6 +918,9 @@ export const CartScreen: React.FC = () => {
                     <Text style={styles.paymentMethodDescription}>
                       Paga con tu tarjeta a través de Stripe
                     </Text>
+                    <Text style={styles.paymentMethodNote}>
+                      Incluye una pequeña tarifa de servicio para el procesamiento del pago
+                    </Text>
                   </View>
                   <MaterialIcons name="arrow-forward-ios" size={16} color="#999" />
                 </TouchableOpacity>
@@ -891,6 +949,75 @@ export const CartScreen: React.FC = () => {
                   onPress={() => setPaymentModalVisible(false)}
                 >
                   <Text style={styles.modalButtonSecondaryText}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Modal de selección de descuentos */}
+        <Modal
+          animationType="slide"
+          transparent={true}
+          visible={discountModalVisible}
+          onRequestClose={() => setDiscountModalVisible(false)}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { maxHeight: 500 }]}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Tus Descuentos</Text>
+                <TouchableOpacity onPress={() => setDiscountModalVisible(false)}>
+                  <MaterialIcons name="close" size={24} color="#333" />
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.discountsList}>
+                {availableDiscounts.length > 0 ? (
+                  availableDiscounts.map((discount, index) => (
+                    <TouchableOpacity 
+                      key={discount.id || index}
+                      style={styles.discountItem}
+                      onPress={() => selectDiscount(discount)}
+                    >
+                      <MaterialIcons name="local-offer" size={24} color="#4CAF50" />
+                      <View style={styles.discountItemInfo}>
+                        <Text style={styles.discountItemName}>{discount.name}</Text>
+                        <Text style={styles.discountItemDescription}>
+                          {discount.description || 
+                            (discount.discountAmount 
+                              ? `Descuento de $${discount.discountAmount.toFixed(2)}` 
+                              : `Descuento del ${discount.discountPercent}%`)}
+                        </Text>
+                        {discount.expiryDate && (
+                          <Text style={styles.discountItemExpiry}>
+                            Expira: {discount.expiryDate.toDate ? 
+                              new Date(discount.expiryDate.toDate()).toLocaleDateString() : 
+                              'Fecha desconocida'}
+                          </Text>
+                        )}
+                      </View>
+                      <MaterialIcons name="arrow-forward-ios" size={16} color="#999" />
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.noDiscountsContainer}>
+                    <MaterialIcons name="error-outline" size={48} color="#CCCCCC" />
+                    <Text style={styles.noDiscountsText}>
+                      No tienes descuentos disponibles
+                    </Text>
+                    <Text style={styles.noDiscountsSubText}>
+                      Canjea tus puntos por descuentos en la sección de Puntos
+                    </Text>
+                  </View>
+                )}
+              </ScrollView>
+
+              <View style={styles.modalFooter}>
+                <TouchableOpacity 
+                  style={styles.modalButtonSecondary}
+                  onPress={() => setDiscountModalVisible(false)}
+                >
+                  <Text style={styles.modalButtonSecondaryText}>Cerrar</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -1315,6 +1442,12 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 2,
   },
+  paymentMethodNote: {
+    fontSize: 12,
+    color: '#999',
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
   // Estilos para la sección de dirección de entrega
   deliverySection: {
     marginTop: 16,
@@ -1369,19 +1502,107 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#4CAF50',
   },
+  discountSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  discountSectionTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#666',
+    marginBottom: 8,
+  },
+  activeDiscountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    backgroundColor: '#F5FFF5',
+  },
+  activeDiscountInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  activeDiscountTextContainer: {
+    marginLeft: 12,
+  },
+  activeDiscountName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  activeDiscountDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  removeDiscountButton: {
+    padding: 4,
+  },
   discountButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 10,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: '#F8F9FA',
+    padding: 12,
     borderWidth: 1,
-    borderColor: '#E9ECEF',
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    backgroundColor: '#FAFAFA',
   },
   discountButtonText: {
     marginLeft: 8,
     fontSize: 14,
+    color: '#007AFF',
+  },
+  discountsList: {
+    maxHeight: SCREEN_HEIGHT * 0.6,
+  },
+  discountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 12,
+    marginBottom: 12,
+    backgroundColor: '#FAFAFA',
+  },
+  discountItemInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  discountItemName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+  },
+  discountItemDescription: {
+    fontSize: 14,
+    color: '#666',
+  },
+  discountItemExpiry: {
+    fontSize: 12,
+    color: '#999',
+  },
+  noDiscountsContainer: {
+    padding: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  noDiscountsText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 20,
+  },
+  noDiscountsSubText: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 12,
+    textAlign: 'center',
   },
 });
 

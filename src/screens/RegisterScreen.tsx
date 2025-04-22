@@ -35,7 +35,7 @@ const RegisterScreen: React.FC = () => {
   const navigation = useNavigation<RegisterScreenNavigationProp>();
   
   // Change to use signUp instead of register
-  const { signUp, isLoading, saveSessionData } = useAuth();
+  const { signUp, isLoading, saveSessionData, setIsNewUser } = useAuth();
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -130,18 +130,19 @@ const RegisterScreen: React.FC = () => {
       if (result.success && result.user) {
         await saveSessionData(result.user, 'email');
         
+        // Forzar isNewUser a true para asegurar que se muestre la pantalla de bienvenida
+        setIsNewUser(true);
+        
         Alert.alert('Éxito', 'Cuenta creada correctamente', [
           { 
             text: 'OK', 
             onPress: () => {
-              navigation.dispatch(
-                CommonActions.reset({
-                  index: 0,
-                  routes: [
-                    { name: 'MainTabs' }
-                  ],
-                })
-              );
+              // Instead of navigating directly to MainTabs, reset the navigation stack
+              // This will let AppNavigator handle the proper routing based on auth state
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Welcome' }],
+              });
             }
           }
         ]);

@@ -1,8 +1,8 @@
-import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, ReactNode, useCallback, useRef } from 'react';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { Platform, InteractionManager } from 'react-native';
 
 // Interfaces para los nuevos tipos de datos
 export interface BusinessHours {
@@ -94,10 +94,19 @@ interface BusinessContextType {
   resetPagination: () => void;
   observeBusinesses: (businessIds: string[]) => () => void;
   dataReady: boolean;
+  isCacheValid: () => boolean;
+  lastCacheUpdate: number;
 }
 
 // Create context
 const BusinessContext = createContext<BusinessContextType | undefined>(undefined);
+
+// Add an interface for the cached data structure
+interface CachedBusinessData {
+  businesses: Business[];
+  categories: string[];
+  lastUpdated: number;
+}
 
 // Create provider component
 export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -122,6 +131,104 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   
   // Tamaño de página para paginación
   const PAGE_SIZE = 20;
+  
+  // Add caching mechanism with timestamp
+  const [lastCacheUpdate, setLastCacheUpdate] = useState<number>(0);
+  const CACHE_VALIDITY_PERIOD = 5 * 60 * 1000; // 5 minutes
+  
+  // Flag to track if we're currently loading from cache
+  const isLoadingFromCacheRef = useRef<boolean>(false);
+  
+  // Optimize loading from AsyncStorage
+  const loadFromCache = useCallback(async (): Promise<boolean> => {
+    if (isLoadingFromCacheRef.current) return false;
+    
+    isLoadingFromCacheRef.current = true;
+    try {
+      const cachedData = await AsyncStorage.getItem('businessCache');
+      if (cachedData) {
+        const parsedData = JSON.parse(cachedData) as CachedBusinessData;
+        
+        // Validate and normalize cache data
+        if (parsedData && 
+            parsedData.businesses && 
+            Array.isArray(parsedData.businesses) && 
+            parsedData.lastUpdated) {
+              
+          // Check if cache is still valid
+          const now = Date.now();
+          const cacheAge = now - parsedData.lastUpdated;
+          
+          // Set last cache update
+          setLastCacheUpdate(parsedData.lastUpdated);
+          
+          // If cache is fresh enough, use it
+          if (cacheAge < CACHE_VALIDITY_PERIOD) {
+            console.log(`Using cached business data (${Math.round(cacheAge/1000)}s old)`);
+            
+            // Process in a non-blocking way
+            await safeStateUpdate(() => {
+              setBusinesses(parsedData.businesses);
+              setFilteredBusinesses(
+                selectedCategory 
+                ? parsedData.businesses.filter(b => b.category === selectedCategory)
+                : parsedData.businesses
+              );
+              setCategories(parsedData.categories || []);
+              setDataReady(true);
+              setLoading(false);
+            }, 200);
+            
+            return true;
+          } else {
+            console.log(`Cache expired (${Math.round(cacheAge/60000)}min old), fetching fresh data`);
+          }
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Error loading from cache:', error);
+      return false;
+    } finally {
+      isLoadingFromCacheRef.current = false;
+    }
+  }, [selectedCategory, CACHE_VALIDITY_PERIOD]);
+  
+  // Save current data to cache
+  const saveToCache = useCallback(async (data: Business[], cats: string[]) => {
+    try {
+      const now = Date.now();
+      const cacheData: CachedBusinessData = {
+        businesses: data,
+        categories: cats,
+        lastUpdated: now
+      };
+      
+      // Update state
+      setLastCacheUpdate(now);
+      
+      // Save to AsyncStorage in background
+      InteractionManager.runAfterInteractions(async () => {
+        try {
+          await AsyncStorage.setItem('businessCache', JSON.stringify(cacheData));
+          console.log('Business data cached successfully');
+        } catch (err) {
+          console.error('Error saving to cache:', err);
+        }
+      });
+    } catch (err) {
+      console.error('Error preparing cache data:', err);
+    }
+  }, []);
+  
+  // Check if cache is still valid
+  const isCacheValid = useCallback(() => {
+    if (lastCacheUpdate === 0) return false;
+    
+    const now = Date.now();
+    const cacheAge = now - lastCacheUpdate;
+    return cacheAge < CACHE_VALIDITY_PERIOD;
+  }, [lastCacheUpdate, CACHE_VALIDITY_PERIOD]);
   
   // Load favorites from AsyncStorage
   useEffect(() => {
@@ -244,8 +351,30 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     });
   };
   
-  // Función optimizada para cargar negocios con paginación
+  // Modify fetchBusinesses to use cache when available
   const fetchBusinesses = async () => {
+    // First check if we have valid cached data and use that first
+    if (businesses.length > 0 && isCacheValid()) {
+      console.log('Using in-memory business data (already loaded)');
+      // Just make sure data is marked as ready
+      if (!dataReady) {
+        await safeStateUpdate(() => {
+          setDataReady(true);
+          setLoading(false);
+        });
+      }
+      return;
+    }
+    
+    // Try loading from persistent cache if no valid memory cache
+    if (businesses.length === 0) {
+      const loadedFromCache = await loadFromCache();
+      if (loadedFromCache) {
+        return;
+      }
+    }
+    
+    // If we're here, we need to fetch fresh data
     await safeStateUpdate(() => {
       setLoading(true);
       setError(null);
@@ -320,6 +449,9 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         );
         setCategories(Array.from(categoriesSet));
       }, 200);
+      
+      // Cache the data in the background
+      saveToCache(businessesList, Array.from(categoriesSet));
       
       // Then update UI-affecting state with additional delay
       await safeStateUpdate(() => {
@@ -561,19 +693,29 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     }
   };
   
-  // Initial data load
+  // Initial data load with cache optimization
   useEffect(() => {
     console.log('Initial data load in BusinessContext');
     
-    // En iOS, esperar un poco más antes de cargar datos iniciales
-    // para asegurar que todos los componentes nativos estén inicializados
-    const initialLoadDelay = Platform.OS === 'ios' ? 500 : 0;
+    // Try to load from cache first, then fetch fresh data if needed
+    const initializeData = async () => {
+      const loadedFromCache = await loadFromCache();
+      
+      // If cache loading failed or data is old, fetch from server
+      if (!loadedFromCache) {
+        // En iOS, esperar un poco más antes de cargar datos iniciales
+        // para asegurar que todos los componentes nativos estén inicializados
+        const initialLoadDelay = Platform.OS === 'ios' ? 500 : 0;
+        
+        const timer = setTimeout(() => {
+          fetchBusinesses();
+        }, initialLoadDelay);
+        
+        return () => clearTimeout(timer);
+      }
+    };
     
-    const timer = setTimeout(() => {
-      fetchBusinesses();
-    }, initialLoadDelay);
-    
-    return () => clearTimeout(timer);
+    initializeData();
   }, []);
   
   // Filter businesses when category changes
@@ -628,7 +770,9 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     hasMoreBusinesses,
     resetPagination,
     observeBusinesses,
-    dataReady
+    dataReady,
+    isCacheValid,
+    lastCacheUpdate
   };
   
   return (

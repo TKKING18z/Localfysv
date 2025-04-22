@@ -21,7 +21,7 @@ interface FastImageViewProps {
 const FastImageView: React.FC<FastImageViewProps> = ({
   source,
   style,
-  placeholderColor = '#E1E1E1',
+  placeholderColor = 'transparent',
   showLoadingIndicator = false,
   resizeMode = 'cover',
   contentFit,
@@ -101,7 +101,7 @@ const FastImageView: React.FC<FastImageViewProps> = ({
   // Si tenemos que usar una imagen de respaldo o hay un error
   if (!isValidSource || hasError) {
     return (
-      <View style={[styles.container, containerStyle, { backgroundColor: placeholderColor }]}>
+      <View style={[styles.container, containerStyle, { backgroundColor: 'transparent' }]}>
         {defaultSource ? (
           <RNImage
             source={defaultSource}
@@ -111,7 +111,7 @@ const FastImageView: React.FC<FastImageViewProps> = ({
         ) : fallbackComponent ? (
           fallbackComponent
         ) : (
-          <View style={[styles.placeholderContainer, { backgroundColor: placeholderColor }]}>
+          <View style={[styles.placeholderContainer, { backgroundColor: 'transparent' }]}>
             <Text style={styles.placeholderText}>!</Text>
           </View>
         )}
@@ -121,7 +121,7 @@ const FastImageView: React.FC<FastImageViewProps> = ({
 
   // Renderizar expo-image con manejo de errores
   return (
-    <View style={[styles.container, containerStyle, { backgroundColor: placeholderColor }]}>
+    <View style={[styles.container, containerStyle, { backgroundColor: 'transparent' }]}>
       {isLoading && showLoadingIndicator && (
         <ActivityIndicator 
           style={[styles.loader, StyleSheet.absoluteFill]}
@@ -168,6 +168,7 @@ const styles = StyleSheet.create({
     height: '100%',
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: 'transparent',
   },
   placeholderText: {
     fontSize: 24,

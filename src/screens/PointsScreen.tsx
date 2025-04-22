@@ -12,7 +12,10 @@ import {
   Alert,
   SafeAreaView,
   useWindowDimensions,
-  Share
+  Share,
+  Modal,
+  Animated,
+  Linking
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -25,6 +28,15 @@ import { es } from 'date-fns/locale';
 
 // Definir el tipo de navegación
 type NavigationProps = StackNavigationProp<RootStackParamList>;
+
+// Extender el tipo PointsReward con propiedades adicionales para la comunicación con negocios
+interface ExtendedPointsReward extends PointsReward {
+  businessContactEmail?: string;
+  businessContactPhone?: string;
+  requiresBusinessNotification?: boolean;
+  isPhysicalReward?: boolean;
+  businessName?: string;
+}
 
 const PointsScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
@@ -44,7 +56,12 @@ const PointsScreen: React.FC = () => {
   
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'history' | 'rewards'>('history');
-  const [selectedReward, setSelectedReward] = useState<PointsReward | null>(null);
+  const [selectedReward, setSelectedReward] = useState<ExtendedPointsReward | null>(null);
+  const [successModalVisible, setSuccessModalVisible] = useState(false);
+  const [redeemedReward, setRedeemedReward] = useState<ExtendedPointsReward | null>(null);
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const scaleAnim = React.useRef(new Animated.Value(0.8)).current;
+  const [isProcessing, setIsProcessing] = useState(false);
   
   // Cargar datos cuando la pantalla obtiene el foco
   useFocusEffect(
@@ -82,12 +99,73 @@ const PointsScreen: React.FC = () => {
     }
   };
   
-  // Handle redemption
-  const handleRedeem = (reward: PointsReward) => {
+  // Agregar una función para notificar al negocio sobre descuentos canjeados
+  const notifyBusinessAboutDiscount = useCallback(async (reward: ExtendedPointsReward) => {
+    try {
+      // Verificar si hay información de contacto del negocio en la recompensa
+      const businessContact = reward.businessContactEmail || 'support@localfy.com';
+      const businessPhone = reward.businessContactPhone;
+      
+      // Mostrar opciones para comunicarse con el negocio
+      Alert.alert(
+        "Notificar al negocio",
+        "¿Quieres notificar al negocio sobre este descuento canjeado?",
+        [
+          {
+            text: "Cancelar",
+            style: "cancel"
+          },
+          {
+            text: "Enviar email",
+            onPress: async () => {
+              const subject = encodeURIComponent(`Descuento canjeado: ${reward.name}`);
+              const body = encodeURIComponent(
+                `Hola,\n\nHe canjeado un descuento en la app Localfy.\n\n` +
+                `Detalles del descuento:\n` +
+                `- Nombre: ${reward.name}\n` +
+                `- Descripción: ${reward.description || "N/A"}\n` +
+                `- ID del descuento: ${reward.id}\n\n` +
+                `Mi usuario: ${user?.email || "No disponible"}\n\n` +
+                `Saludos,\n${user?.displayName || "Usuario de Localfy"}`
+              );
+              
+              const emailUrl = `mailto:${businessContact}?subject=${subject}&body=${body}`;
+              
+              const canOpen = await Linking.canOpenURL(emailUrl);
+              if (canOpen) {
+                await Linking.openURL(emailUrl);
+              } else {
+                Alert.alert("Error", "No se puede abrir la aplicación de correo.");
+              }
+            }
+          },
+          businessPhone ? {
+            text: "Llamar",
+            onPress: async () => {
+              const phoneUrl = `tel:${businessPhone}`;
+              const canOpen = await Linking.canOpenURL(phoneUrl);
+              if (canOpen) {
+                await Linking.openURL(phoneUrl);
+              } else {
+                Alert.alert("Error", "No se puede realizar la llamada.");
+              }
+            }
+          } : undefined,
+        ].filter(Boolean) as any[]
+      );
+    } catch (error) {
+      console.error('Error al notificar al negocio:', error);
+    }
+  }, [user]);
+  
+  // Actualizar handleRedeem para incluir la notificación al negocio
+  const handleRedeem = (reward: ExtendedPointsReward) => {
+    console.log(`Intentando canjear: ${JSON.stringify(reward)}`);
     setSelectedReward(reward);
     
     // Check if user has enough points
     if (totalPoints < reward.pointsCost) {
+      console.warn(`Puntos insuficientes: ${totalPoints} < ${reward.pointsCost}`);
       Alert.alert(
         'Puntos insuficientes',
         `Necesitas ${reward.pointsCost} puntos para canjear este premio. Te faltan ${reward.pointsCost - totalPoints} puntos.`,
@@ -109,28 +187,114 @@ const PointsScreen: React.FC = () => {
         {
           text: 'Canjear',
           onPress: async () => {
+            console.log('Iniciando proceso de canje...');
             setRefreshing(true);
+            setIsProcessing(true);
+            
             try {
+              console.log(`Llamando a redeemPoints(${reward.id}, ${reward.pointsCost}, "${reward.name}")`);
+              // Attempt to redeem the points
               const success = await redeemPoints(reward.id, reward.pointsCost, reward.name);
+              console.log(`Resultado del canje: ${success ? 'ÉXITO' : 'ERROR'}`);
+              
               if (success) {
+                // Show success animation
+                showSuccessAnimation(reward);
+                
+                // Determinar si el descuento necesita notificación al negocio
+                const needsBusinessNotification = reward.requiresBusinessNotification || 
+                                                reward.isPhysicalReward || 
+                                                reward.businessName;
+                
+                // Mensaje con información adicional sobre la notificación al negocio
+                const businessNotificationMsg = needsBusinessNotification ? 
+                  "\n\n¿Quieres notificar al negocio sobre tu descuento canjeado? Puedes hacerlo después seleccionando 'Notificar al negocio'." : "";
+                
+                // Show success message with details about how to use discount
                 Alert.alert(
                   '¡Canje exitoso!',
-                  `Has canjeado ${reward.pointsCost} puntos por ${reward.name}. Te contactaremos pronto para entregarte tu premio.`,
+                  `Has canjeado ${reward.pointsCost} puntos por ${reward.name}.\n\nTu descuento está disponible y puedes usarlo en tu próxima compra seleccionándolo en la pantalla del carrito.${businessNotificationMsg}`,
+                  [
+                    needsBusinessNotification ? { 
+                      text: 'Notificar al negocio',
+                      onPress: () => notifyBusinessAboutDiscount(reward)
+                    } : undefined,
+                    { 
+                      text: 'Ver mis descuentos',
+                      onPress: () => {
+                        // Navigate to cart to see discounts if desired
+                        navigation.navigate('Cart', {});
+                      }
+                    },
+                    {
+                      text: 'OK',
+                      style: 'default'
+                    }
+                  ].filter(Boolean) as any[]
+                );
+                
+                // Refresh points to update the UI
+                console.log('Actualizando puntos en la interfaz...');
+                await refreshPoints();
+                console.log(`Puntos actualizados: ${totalPoints}`);
+              } else {
+                // Handle the case where redeemPoints returned false
+                console.error('redeemPoints devolvió false');
+                Alert.alert(
+                  'Error en el canje',
+                  'No se pudo completar el canje. Verifica que tengas suficientes puntos e intenta nuevamente.',
                   [{ text: 'OK' }]
                 );
-                refreshPoints();
               }
             } catch (error) {
-              console.error('Error redeeming points:', error);
-              Alert.alert('Error', 'No se pudo completar el canje. Inténtalo nuevamente.');
+              console.error('Error al canjear puntos:', error);
+              console.error('Detalles del error:', JSON.stringify(error));
+              
+              // Show error message
+              Alert.alert(
+                'Error',
+                'Ocurrió un error durante el canje. Intenta nuevamente o contacta a soporte.',
+                [{ text: 'OK' }]
+              );
             } finally {
               setRefreshing(false);
+              setIsProcessing(false);
               setSelectedReward(null);
             }
           }
         }
       ]
     );
+  };
+  
+  // Función para mostrar la animación cuando un premio es canjeado exitosamente
+  const showSuccessAnimation = (reward: ExtendedPointsReward) => {
+    setRedeemedReward(reward);
+    setSuccessModalVisible(true);
+    
+    // Resetear las animaciones
+    fadeAnim.setValue(0);
+    scaleAnim.setValue(0.8);
+    
+    // Animar la aparición
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 7,
+        tension: 40,
+        useNativeDriver: true
+      })
+    ]).start();
+    
+    // Cerrar el modal después de 2.5 segundos
+    setTimeout(() => {
+      setSuccessModalVisible(false);
+    }, 2500);
   };
   
   // Get correct icon for transaction type
@@ -178,27 +342,31 @@ const PointsScreen: React.FC = () => {
   };
   
   // Sample rewards for testing until we have actual rewards in Firestore
-  const sampleRewards: PointsReward[] = [
+  const sampleRewards: ExtendedPointsReward[] = [
     {
       id: 'sample-reward-1',
-      name: 'Descuento de $5',
-      description: 'Obtén un descuento de $5 en tu próxima compra',
+      name: 'Descuento de $2',
+      description: 'Obtén un descuento de $2 en tu próxima compra',
       pointsCost: 50,
-      isActive: true
+      isActive: true,
+      businessContactEmail: 'support@localfy.com'
     },
     {
       id: 'sample-reward-2',
       name: 'Envío gratis',
       description: 'Envío gratis en tu próximo pedido',
-      pointsCost: 100,
-      isActive: true
+      pointsCost: 125,
+      isActive: true,
+      businessName: 'Localfy Express'
     },
     {
       id: 'sample-reward-3',
       name: 'Producto gratis',
-      description: 'Recibe un producto gratis en tu próxima visita (hasta $10)',
-      pointsCost: 200,
-      isActive: true
+      description: 'Recibe un producto gratis en tu próxima compra (valor hasta $5)',
+      pointsCost: 225,
+      isActive: true,
+      businessContactPhone: '+1234567890',
+      requiresBusinessNotification: true
     },
     {
       id: 'sample-reward-4',
@@ -209,16 +377,31 @@ const PointsScreen: React.FC = () => {
     },
     {
       id: 'sample-reward-5',
-      name: 'Tarjeta de regalo de $50',
-      description: 'Recibe una tarjeta de regalo de $50 para usar en cualquier establecimiento',
-      pointsCost: 500,
+      name: 'Tarjeta de regalo de $15',
+      description: 'Recibe una tarjeta de regalo de $15 para usar en cualquier establecimiento',
+      pointsCost: 600,
       isActive: true,
-      imageUrl: 'https://via.placeholder.com/100'
+      imageUrl: 'https://via.placeholder.com/100',
+      isPhysicalReward: true
     }
   ];
   
   // Use sample rewards if no rewards from context
-  const displayRewards = rewards.length > 0 ? rewards : sampleRewards;
+  const displayRewards = rewards.length > 0 ? rewards.map(reward => reward as ExtendedPointsReward) : sampleRewards;
+  
+  // Indicador de carga global para canje
+  const ProcessingIndicator = () => {
+    if (!isProcessing) return null;
+    
+    return (
+      <View style={styles.processingOverlay}>
+        <View style={styles.processingContainer}>
+          <ActivityIndicator size="large" color="#FFFFFF" />
+          <Text style={styles.processingText}>Procesando canje...</Text>
+        </View>
+      </View>
+    );
+  };
   
   return (
     <SafeAreaView style={styles.container}>
@@ -270,15 +453,12 @@ const PointsScreen: React.FC = () => {
               <Text style={styles.earnPointsValue}>3 puntos</Text>
               <Text style={styles.earnPointsLabel}>Por reseña</Text>
             </View>
-            <View style={styles.earnPointsItem}>
+          </View>
+          <View style={styles.centerItemContainer}>
+            <View style={styles.earnPointsCentered}>
               <MaterialIcons name="share" size={24} color="#34C759" />
               <Text style={styles.earnPointsValue}>2 puntos</Text>
               <Text style={styles.earnPointsLabel}>Por compartir</Text>
-            </View>
-            <View style={styles.earnPointsItem}>
-              <MaterialIcons name="place" size={24} color="#5856D6" />
-              <Text style={styles.earnPointsValue}>1 punto</Text>
-              <Text style={styles.earnPointsLabel}>Por cada 5 negocios visitados</Text>
             </View>
           </View>
           <TouchableOpacity 
@@ -414,9 +594,56 @@ const PointsScreen: React.FC = () => {
           </View>
         )}
         
+        {/* Support Button */}
+        <TouchableOpacity 
+          style={styles.supportButton}
+          onPress={() => navigation.navigate('Support')}
+        >
+          <MaterialIcons name="help-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.supportButtonText}>¿Problemas con tus puntos?</Text>
+        </TouchableOpacity>
+        
         {/* Extra padding at bottom for better scrolling */}
         <View style={styles.bottomPadding} />
       </ScrollView>
+      
+      {/* Success Modal Animation */}
+      <Modal
+        transparent={true}
+        visible={successModalVisible}
+        animationType="fade"
+        onRequestClose={() => setSuccessModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <Animated.View 
+            style={[
+              styles.successModal,
+              {
+                opacity: fadeAnim,
+                transform: [{ scale: scaleAnim }]
+              }
+            ]}
+          >
+            <View style={styles.successIconContainer}>
+              <MaterialIcons name="check-circle" size={60} color="#4CAF50" />
+            </View>
+            <Text style={styles.successTitle}>¡Premio Canjeado!</Text>
+            {redeemedReward && (
+              <Text style={styles.successDescription}>
+                Has canjeado <Text style={{fontWeight: 'bold'}}>{redeemedReward.pointsCost} puntos</Text> por:
+              </Text>
+            )}
+            {redeemedReward && (
+              <Text style={styles.rewardName}>{redeemedReward.name}</Text>
+            )}
+            <Text style={styles.successNote}>
+              Disponible en tu carrito de compras
+            </Text>
+          </Animated.View>
+        </View>
+      </Modal>
+      
+      <ProcessingIndicator />
     </SafeAreaView>
   );
 };
@@ -504,7 +731,7 @@ const styles = StyleSheet.create({
   earnPointsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    justifyContent: 'space-evenly',
     marginBottom: 20,
   },
   earnPointsItem: {
@@ -674,9 +901,11 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   rewardName: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
-    color: '#333333',
+    color: '#007AFF',
+    marginBottom: 12,
+    textAlign: 'center',
   },
   rewardDescription: {
     fontSize: 14,
@@ -711,6 +940,97 @@ const styles = StyleSheet.create({
   },
   bottomPadding: {
     height: 20,
+  },
+  
+  // Support button styles
+  supportButton: {
+    backgroundColor: '#007AFF',
+    borderRadius: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    marginHorizontal: 16,
+    marginTop: 16,
+  },
+  supportButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  centerItemContainer: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  earnPointsCentered: {
+    width: '48%',
+    backgroundColor: '#F5F7FF',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successModal: {
+    backgroundColor: 'white',
+    borderRadius: 20,
+    padding: 24,
+    width: '80%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  successIconContainer: {
+    marginBottom: 16,
+  },
+  successTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 12,
+  },
+  successDescription: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  successNote: {
+    fontSize: 14,
+    color: '#4CAF50',
+    marginTop: 8,
+  },
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  processingContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderRadius: 10,
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  processingText: {
+    color: 'white',
+    marginTop: 10,
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
 

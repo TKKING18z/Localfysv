@@ -13,6 +13,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { Reservation } from '../../../models/reservationTypes';
 import firebase from 'firebase/compat/app';
+import notificationService from '../../../services/NotificationService';
 
 interface ReservationDetailModalProps {
   reservation: Reservation | null;
@@ -22,6 +23,7 @@ interface ReservationDetailModalProps {
   onConfirmReservation?: (reservationId: string) => Promise<boolean>;
   onCompleteReservation?: (reservationId: string) => Promise<boolean>;
   isBusinessView?: boolean;
+  onStatusChange?: (status: string) => void;
 }
 
 const ReservationDetailModal: React.FC<ReservationDetailModalProps> = ({
@@ -31,7 +33,8 @@ const ReservationDetailModal: React.FC<ReservationDetailModalProps> = ({
   onCancelReservation,
   onConfirmReservation,
   onCompleteReservation,
-  isBusinessView = false
+  isBusinessView = false,
+  onStatusChange
 }) => {
   const [loading, setLoading] = useState(false);
 
@@ -133,7 +136,13 @@ const ReservationDetailModal: React.FC<ReservationDetailModalProps> = ({
               const success = await onCancelReservation(reservation.id);
               
               if (success) {
-                Alert.alert('Éxito', 'Reserva cancelada correctamente');
+                // Show cancellation notification to business
+                notificationService.showReservationStatusNotification(
+                  reservation.id,
+                  reservation.businessName,
+                  'canceled'
+                );
+                onStatusChange && onStatusChange('canceled');
                 onClose();
               } else {
                 throw new Error('No se pudo cancelar la reserva');
@@ -167,7 +176,13 @@ const ReservationDetailModal: React.FC<ReservationDetailModalProps> = ({
               const success = await onConfirmReservation(reservation.id);
               
               if (success) {
-                Alert.alert('Éxito', 'Reserva confirmada correctamente');
+                // Show confirmation notification to business
+                notificationService.showReservationStatusNotification(
+                  reservation.id,
+                  reservation.businessName,
+                  'confirmed'
+                );
+                onStatusChange && onStatusChange('confirmed');
                 onClose();
               } else {
                 throw new Error('No se pudo confirmar la reserva');
@@ -201,7 +216,13 @@ const ReservationDetailModal: React.FC<ReservationDetailModalProps> = ({
               const success = await onCompleteReservation(reservation.id);
               
               if (success) {
-                Alert.alert('Éxito', 'Reserva marcada como completada');
+                // Show completion notification to business
+                notificationService.showReservationStatusNotification(
+                  reservation.id,
+                  reservation.businessName,
+                  'completed'
+                );
+                onStatusChange && onStatusChange('completed');
                 onClose();
               } else {
                 throw new Error('No se pudo completar la reserva');

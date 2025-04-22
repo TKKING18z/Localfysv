@@ -137,7 +137,7 @@ const BusinessOnboardingWelcomeScreen: React.FC = () => {
   const handleContinuePress = async () => {
     const recovered = await recoverProgress();
     if (recovered) {
-      navigation.navigate('BusinessOnboardingSteps');
+      navigation.navigate('BusinessOnboardingSteps', { businessId: undefined, editMode: false });
     } else {
       // If no progress found, start new
       navigation.navigate('BusinessOnboardingModeSelection');
@@ -179,12 +179,14 @@ const BusinessOnboardingWelcomeScreen: React.FC = () => {
       
       {/* Animated text content */}
       <Animated.View style={[styles.textContainer, { opacity: textOpacity }]}>
-        <Text style={styles.title}>Haz crecer tu negocio con Localfy</Text>
-        <Text style={styles.subtitle}>
-          Únete a la mayor comunidad de negocios locales de El Salvador.
-          Configuremos tu perfil para maximizar tu visibilidad y atraer más clientes.
-        </Text>
-      </Animated.View>
+  <Text style={styles.title}>¡Hazlo visible, hazlo real, hazlo crecer!</Text>
+  <Text style={styles.subtitle}>
+    <Text style={styles.subtitleHighlight}>Cada emprendimiento salvadoreño</Text> tiene 
+    una esencia única que merece ser descubierta. Conecta con clientes 
+    de todo el país,
+    <Text style={styles.subtitleHighlight}> sin invertir ni un centavo.</Text>
+  </Text>
+</Animated.View>
       
       {/* Animated buttons */}
       <Animated.View style={[styles.buttonContainer, { opacity: buttonsOpacity }]}>
@@ -264,14 +266,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 24,
   },
+  subtitleHighlight: {
+    fontWeight: 'bold',
+    color: '#007AFF',
+    fontSize: 18,
+  },
   buttonContainer: {
     width: '100%',
     marginBottom: 40,
+    alignItems: 'center',
   },
   primaryButton: {
     backgroundColor: '#007AFF',
     borderRadius: 14,
     paddingVertical: 16,
+    paddingHorizontal: 40,
     marginBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
@@ -281,6 +290,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 8,
     elevation: 4,
+    width: '70%',
   },
   primaryButtonText: {
     color: 'white',
@@ -292,10 +302,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 122, 255, 0.1)',
     borderRadius: 14,
     paddingVertical: 16,
+    paddingHorizontal: 24,
     marginBottom: 16,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(0, 122, 255, 0.2)',
+    width: '80%',
   },
   secondaryButtonText: {
     color: '#007AFF',

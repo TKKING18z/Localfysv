@@ -47,7 +47,7 @@ const SocialMediaScreen: React.FC = () => {
           <View style={styles.socialGrid}>
             <TouchableOpacity 
               style={styles.socialButton}
-              onPress={() => Linking.openURL('https://facebook.com/localfy')}
+              onPress={() => Linking.openURL('https://www.facebook.com/profile.php?id=61574776154325&mibextid=wwXIfr&mibextid=wwXIfr')}
             >
               <View style={[styles.socialIconCircle, { backgroundColor: '#1877F2' }]}>
                 <MaterialIcons name="facebook" size={26} color="white" />
@@ -58,37 +58,13 @@ const SocialMediaScreen: React.FC = () => {
             
             <TouchableOpacity 
               style={styles.socialButton}
-              onPress={() => Linking.openURL('https://instagram.com/localfy')}
+              onPress={() => Linking.openURL('https://instagram.com/localfysv')}
             >
               <View style={[styles.socialIconCircle, { backgroundColor: '#C13584' }]}>
                 <MaterialIcons name="camera-alt" size={26} color="white" />
               </View>
               <Text style={styles.socialButtonText}>Instagram</Text>
-              <Text style={styles.socialUsername}>@localfy</Text>
-            </TouchableOpacity>
-          </View>
-          
-          <View style={styles.socialGrid}>
-            <TouchableOpacity 
-              style={styles.socialButton}
-              onPress={() => Linking.openURL('https://twitter.com/localfy')}
-            >
-              <View style={[styles.socialIconCircle, { backgroundColor: '#1DA1F2' }]}>
-                <MaterialIcons name="alternate-email" size={26} color="white" />
-              </View>
-              <Text style={styles.socialButtonText}>X</Text>
-              <Text style={styles.socialUsername}>@localfy</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.socialButton}
-              onPress={() => Linking.openURL('https://youtube.com/c/localfy')}
-            >
-              <View style={[styles.socialIconCircle, { backgroundColor: '#FF0000' }]}>
-                <MaterialIcons name="smart-display" size={26} color="white" />
-              </View>
-              <Text style={styles.socialButtonText}>YouTube</Text>
-              <Text style={styles.socialUsername}>Localfy Oficial</Text>
+              <Text style={styles.socialUsername}>@localfysv</Text>
             </TouchableOpacity>
           </View>
           
@@ -112,34 +88,7 @@ const SocialMediaScreen: React.FC = () => {
                 <MaterialIcons name="public" size={26} color="white" />
               </View>
               <Text style={styles.socialButtonText}>Sitio Web</Text>
-              <Text style={styles.socialUsername}>localfy.app</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        
-        {/* Community Section */}
-        <View style={styles.sectionContainer}>
-          <Text style={styles.sectionTitle}>Comunidad Localfy</Text>
-          <Text style={styles.sectionDescription}>
-            Forma parte de nuestra comunidad y comparte tus experiencias con otros usuarios.
-          </Text>
-          
-          <View style={styles.communityCard}>
-            <View style={styles.communityImagePlaceholder}>
-              <MaterialIcons name="groups" size={48} color="#007AFF" />
-            </View>
-            <Text style={styles.communityCardTitle}>
-              Únete a nuestros grupos de la comunidad
-            </Text>
-            <Text style={styles.communityCardDescription}>
-              Conecta con otros usuarios, comparte recomendaciones y descubre negocios locales favoritos.
-            </Text>
-            <TouchableOpacity 
-              style={styles.communityButton}
-              onPress={() => Linking.openURL('https://facebook.com/groups/localfy')}
-            >
-              <Text style={styles.communityButtonText}>Unirse Ahora</Text>
-              <MaterialIcons name="arrow-forward" size={18} color="white" />
+              <Text style={styles.socialUsername}>getlocalfy.com</Text>
             </TouchableOpacity>
           </View>
         </View>

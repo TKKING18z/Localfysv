@@ -16,6 +16,7 @@ import {
 import { MaterialIcons } from '@expo/vector-icons';
 import { firebaseService } from '../../services/firebaseService';
 import { useNetwork } from '../../context/NetworkContext';
+import { usePoints } from '../../context/PointsContext';
 import { throttle } from '../../utils/performanceUtils';
 import * as ImagePicker from 'expo-image-picker';
 
@@ -94,9 +95,13 @@ const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastSavedDraft, setLastSavedDraft] = useState('');
   const [selectedImages, setSelectedImages] = useState<string[]>([]);
+  const [pointsAwarded, setPointsAwarded] = useState(false);
 
   // Network context para manejar conexiones lentas
   const { isConnected, isSlowConnection } = useNetwork();
+  
+  // Añadir el contexto de puntos
+  const { awardPointsForReview, totalPoints } = usePoints();
 
   // Pedir permisos para la cámara y galería al montar el componente
   useEffect(() => {
@@ -258,8 +263,31 @@ const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
           }
         }
         
-        onSuccess();
-        onClose();
+        // Otorgar puntos por la reseña
+        try {
+          await awardPointsForReview(reviewId, businessId, businessName);
+          setPointsAwarded(true);
+          
+          // Mostrar mensaje de puntos otorgados
+          Alert.alert(
+            "¡Puntos ganados!",
+            `¡Has ganado 3 puntos por tu reseña! Tus puntos se han añadido a tu cuenta. Puedes verlos en la sección de Puntos.`,
+            [
+              { 
+                text: "OK", 
+                onPress: () => {
+                  onSuccess();
+                  onClose();
+                }
+              }
+            ]
+          );
+        } catch (pointsError) {
+          console.error('Error al otorgar puntos:', pointsError);
+          // Si hay error al otorgar puntos, igual continuamos con el flujo normal
+          onSuccess();
+          onClose();
+        }
       } else {
         Alert.alert('Error', 'No se pudo guardar la reseña. Inténtalo de nuevo.');
       }
@@ -269,7 +297,7 @@ const ReviewFormModal: React.FC<ReviewFormModalProps> = ({
     } finally {
       setIsSubmitting(false);
     }
-  }, 1000), [businessId, rating, comment, selectedImages, userId, userName, userPhotoURL, onSuccess, onClose, isValid, isConnected, isSlowConnection]);
+  }, 1000), [businessId, rating, comment, selectedImages, userId, userName, userPhotoURL, onSuccess, onClose, isValid, isConnected, isSlowConnection, awardPointsForReview, totalPoints]);
 
   // Renderizado de cada imagen seleccionada
   const renderImageItem = useCallback(({ item, index }: { item: string, index: number }) => (

@@ -29,7 +29,6 @@ import { useLocation } from '../hooks/useLocation';
 import BasicAdInterstitial from '../components/ads/BasicAdInterstitial';
 import { useNetwork } from '../context/NetworkContext';
 import OfflineBanner from '../components/common/OfflineBanner';
-import { FlashList } from '@shopify/flash-list';
 
 // Define navigation type using RootStackParamList directly
 type NavigationProps = StackNavigationProp<RootStackParamList>;
@@ -96,10 +95,7 @@ const HomeScreen: React.FC = () => {
   
   // Memoize the maximum number of items to display based on connection speed
   const maxItemsToDisplay = useMemo(() => {
-    // En iOS limitar aún más para garantizar que las imágenes carguen correctamente
-    if (Platform.OS === 'ios') {
-      return isSlowConnection ? 6 : 12;
-    }
+    // Use same limits for both platforms for visual consistency
     return isSlowConnection ? MAX_ITEMS_SLOW_CONNECTION : MAX_ITEMS_NORMAL;
   }, [isSlowConnection]);
 
@@ -108,6 +104,19 @@ const HomeScreen: React.FC = () => {
   
   // Ref para tracking de llamadas de paginación
   const isLoadingMoreRef = useRef(false);
+
+  // Add a cache reference to track when data was last loaded
+  const lastDataLoadTimeRef = useRef<number>(Date.now());
+  const isInitialLoadRef = useRef<boolean>(true);
+  
+  // Define cache validity period (5 minutes)
+  const CACHE_VALIDITY_PERIOD = 5 * 60 * 1000;
+  
+  // Check if data needs refresh
+  const isDataStale = useCallback(() => {
+    const now = Date.now();
+    return now - lastDataLoadTimeRef.current > CACHE_VALIDITY_PERIOD;
+  }, []);
 
   // Calculate distance between user and business in km (optimized)
   const getDistanceToBusinessInKm = useCallback((business: Business): number | undefined => {
@@ -506,6 +515,9 @@ const HomeScreen: React.FC = () => {
       if (isConnected) {
         await refreshConversations();
       }
+      
+      // Update the last data load time
+      lastDataLoadTimeRef.current = Date.now();
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -632,27 +644,54 @@ const HomeScreen: React.FC = () => {
     </View>
   ), [showSearch, searchQuery, isConnected]);
 
-  // Update data when screen gains focus
+  // Update data when screen gains focus - optimized to avoid unnecessary loads
   useFocusEffect(
     useCallback(() => {
-      // Avoid multiple consecutive updates
+      // Skip if already refreshing
       if (isRefreshingRef.current) return;
       
-      console.log('HomeScreen gained focus - updating data');
+      console.log('HomeScreen gained focus - checking if update needed');
       
-      // Mark that we're refreshing
+      // Check if this is initial load or if data is stale
+      const shouldRefresh = isInitialLoadRef.current || isDataStale();
+      
+      if (!shouldRefresh) {
+        console.log('Data is still fresh, skipping reload');
+        return;
+      }
+      
+      // Mark that we're refreshing and no longer initial load
       isRefreshingRef.current = true;
+      isInitialLoadRef.current = false;
       
       // Use InteractionManager to defer non-UI work
       InteractionManager.runAfterInteractions(async () => {
         try {
-          if (isConnected) {
+          // Only refresh if we have connectivity and data is not loading
+          if (isConnected && !loading) {
+            console.log('Refreshing businesses data');
+            
+            // Don't show loading state if we already have data
+            const shouldUpdateLoadingState = businesses.length === 0;
+            
+            if (shouldUpdateLoadingState) {
+              // No podemos usar setLoading directamente aquí
+              // Necesitamos usar la función refreshBusinesses que ya maneja el estado de carga
+              // Sin intentar establecer el estado de carga manualmente
+            }
+            
             await refreshBusinesses();
+            
+            // Update the last data load time
+            lastDataLoadTimeRef.current = Date.now();
             
             // Only refresh conversations when connected and not on slow connection
             if (!isSlowConnection) {
               await refreshConversations();
             }
+            
+            // No necesitamos resetear el estado de carga manualmente
+            // refreshBusinesses ya se encarga de eso
           }
         } catch (error) {
           console.error('Error updating data:', error);
@@ -664,10 +703,9 @@ const HomeScreen: React.FC = () => {
         }
       });
       
-      return () => {
-        // No cleanup needed
-      };
-    }, [refreshBusinesses, refreshConversations, isConnected, isSlowConnection])
+      // No cleanup needed
+      return () => {};
+    }, [refreshBusinesses, refreshConversations, isConnected, isSlowConnection, loading, businesses.length, isDataStale])
   );
 
   // Memoize the FlatList key extractor for better performance
@@ -688,13 +726,12 @@ const HomeScreen: React.FC = () => {
     );
   }, [hasMoreBusinesses]);
   
-  // Crear optimized props para FlashList (reemplazando FlatList)
-  const flashListProps = useMemo(() => ({
+  // Replace FlashList specific props with standardized FlatList props
+  const flatListProps = useMemo(() => ({
     data: displayedBusinesses,
     renderItem: renderBusinessItem,
     keyExtractor: (item: Business) => item.id,
     numColumns: 2,
-    estimatedItemSize: 200, // Altura estimada de cada elemento para FlashList
     onEndReached: onEndReached,
     onEndReachedThreshold: 0.5,
     refreshControl: (
@@ -706,10 +743,13 @@ const HomeScreen: React.FC = () => {
       />
     ),
     ListFooterComponent: renderFooter,
-    viewabilityConfigCallbackPairs: Platform.OS === 'ios' ? [] : viewabilityConfigCallbackPairs.current || [], // Usar arreglo vacío para iOS
-    drawDistance: isSlowConnection ? 400 : 800, // Optimizar el área de búfer
+    columnWrapperStyle: styles.businessRow,
     contentContainerStyle: styles.listContent,
-    disableAutoLayout: Platform.OS === 'ios', // Desactivar AutoLayout en iOS para evitar errores
+    ListEmptyComponent: !loading ? renderEmptyState : null,
+    removeClippedSubviews: true,
+    maxToRenderPerBatch: 6,
+    windowSize: 5,
+    initialNumToRender: 6,
   }), [
     displayedBusinesses, 
     renderBusinessItem, 
@@ -717,7 +757,8 @@ const HomeScreen: React.FC = () => {
     refreshing,
     onRefresh,
     renderFooter,
-    isSlowConnection
+    loading,
+    renderEmptyState
   ]);
 
   return (
@@ -911,7 +952,7 @@ const HomeScreen: React.FC = () => {
               initialNumToRender={4}
               maxToRenderPerBatch={4}
               windowSize={3}
-              removeClippedSubviews={Platform.OS === 'android'}
+              removeClippedSubviews={true}
             />
           </View>
           
@@ -942,40 +983,11 @@ const HomeScreen: React.FC = () => {
             </View>
           </View>
           
-          {/* Only render FlashList when data is fully ready to prevent bubblingEventTypes errors */}
+          {/* Use standard FlatList for all platforms */}
           {dataReady && displayedBusinesses && displayedBusinesses.length > 0 ? (
-            Platform.OS === 'ios' ? (
-              // En iOS, usar FlatList con configuración muy básica y limitar el número de items
-              <FlatList
-                data={displayedBusinesses.slice(0, maxItemsToDisplay)}
-                renderItem={renderBusinessItem}
-                keyExtractor={(item) => item.id}
-                numColumns={2}
-                columnWrapperStyle={styles.businessRow}
-                onEndReached={onEndReached}
-                onEndReachedThreshold={0.5}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={refreshing}
-                    onRefresh={onRefresh}
-                    colors={['#007AFF']}
-                    tintColor="#007AFF"
-                  />
-                }
-                ListFooterComponent={renderFooter}
-                contentContainerStyle={styles.listContent}
-                removeClippedSubviews={false}
-                maxToRenderPerBatch={4}
-                windowSize={3}
-                initialNumToRender={4}
-              />
-            ) : (
-              // En Android, seguir usando FlashList
-              <FlashList
-                {...flashListProps}
-                ListEmptyComponent={!loading ? renderEmptyState : null}
-              />
-            )
+            <FlatList
+              {...flatListProps}
+            />
           ) : !loading ? (
             renderEmptyState()
           ) : null}
@@ -1140,7 +1152,7 @@ const HomeScreen: React.FC = () => {
   );
 };
 
-// Memoize styles to prevent recreation
+// Updated styles with improved Android support
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1155,9 +1167,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
-    shadowRadius: Platform.OS === 'ios' ? 4 : 2,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4, // Increased elevation for better Android shadow
     zIndex: 1,
   },
   logoContainer: {
@@ -1189,9 +1201,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
-    shadowRadius: Platform.OS === 'ios' ? 4 : 2,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4, // Increased for better shadow on Android
     zIndex: 0,
     marginBottom: 8,
   },
@@ -1213,7 +1225,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginLeft: 8,
     color: '#333333',
-    paddingVertical: Platform.OS === 'ios' ? 8 : 6,
+    paddingVertical: 8,
   },
   categoriesContainer: {
     paddingVertical: 16,
@@ -1237,9 +1249,9 @@ const styles = StyleSheet.create({
     marginRight: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: Platform.OS === 'ios' ? 0.05 : 0.03,
-    shadowRadius: Platform.OS === 'ios' ? 3 : 2,
-    elevation: 2,
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 3, // Better elevation for Android
   },
   categoryItemActive: {
     backgroundColor: '#007AFF',
@@ -1277,16 +1289,13 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   listContent: {
-    paddingBottom: Platform.OS === 'ios' ? 150 : 120,
+    paddingBottom: 120,
     paddingTop: 16,
   },
   gridItemContainer: {
     width: '48%',
-    marginBottom: 8,
-    // Add hardware acceleration hint for Android
-    ...(Platform.OS === 'android' && {
-      backfaceVisibility: 'hidden',
-    }),
+    marginBottom: 16, // Increased for better spacing
+    elevation: 2, // Added for Android
   },
   noResultsContainer: {
     alignItems: 'center',
@@ -1429,7 +1438,7 @@ const styles = StyleSheet.create({
     color: '#333333',
   },
   closeButton: {
-    padding: 4,
+    padding: 8, // Increased touch target
   },
   modalBody: {
     padding: 16,
@@ -1450,6 +1459,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#F0F0F5',
     borderRadius: 12,
     marginRight: 8,
+    elevation: 1, // Added for Android
   },
   resetButtonText: {
     fontSize: 16,
@@ -1464,6 +1474,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     borderRadius: 12,
     marginLeft: 8,
+    elevation: 1, // Added for Android
   },
   applyButtonText: {
     fontSize: 16,
@@ -1495,6 +1506,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginRight: 8,
     marginBottom: 8,
+    elevation: 1, // Added for Android
   },
   filterChipActive: {
     backgroundColor: '#007AFF',

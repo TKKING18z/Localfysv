@@ -25,12 +25,80 @@ export const CALLBACK_IDS = {
 
 // Predefined business categories
 export const BUSINESS_CATEGORIES = [
-  "Agencia de Viajes", "Bar", "Cafetería", "Carnicería", "Centro Médico",
-  "Electrónica", "Farmacia", "Ferretería", "Floristería", "Gimnasio",
-  "Hostal", "Hotel", "Joyería", "Lavandería", "Librería",
-  "Lugares Turísticos", "Mueblería", "Panadería", "Peluquería", "Restaurante",
-  "Ropa", "Salón de Belleza", "Supermercado", "Tienda", "Tour Operador",
-  "Veterinaria", "Zapatería"
+  // Servicios de Alimentación
+  "Restaurante", "Cafetería", "Bar", "Panadería", "Pastelería", "Heladería", "Pizzería", 
+  "Comida Rápida", "Taquería", "Cevichería", "Sushi Bar", "Comida Vegetariana", "Comida Vegana",
+  "Food Truck", "Cervecería Artesanal", "Marisquería", "Buffet", "Bistró", "Café de Especialidad",
+  "Chocolatería", "Pub", "Discoteca", "Karaoke", "Cocina Internacional", "Pupusería",
+  
+  // Comercios y Tiendas
+  "Supermercado", "Tienda", "Farmacia", "Ferretería", "Joyería", "Floristería", "Ropa", 
+  "Carnicería", "Lavandería", "Librería", "Mueblería", "Zapatería", "Electrónica",
+  "Papelería", "Tienda de Regalos", "Tienda Deportiva", "Tienda de Mascotas", "Minimarket",
+  "Licorería", "Óptica", "Tienda de Conveniencia", "Artesanías", "Productos Naturales",
+  "Tienda de Celulares", "Juguetería", "Tienda de Decoración", "Perfumería", "Informática",
+  
+  // Servicios Personales
+  "Peluquería", "Salón de Belleza", "Barbería", "Spa", "Gimnasio", "Centro de Yoga",
+  "Estudio de Pilates", "Estética", "Manicura y Pedicura", "Centro de Masajes", 
+  "Clínica de Belleza", "Tatuajes y Piercings", "Sauna", "Centro Deportivo", "Guardería",
+  "Club Social", "Centro de Meditación", "Academia de Baile", "Tintorería",
+  
+  // Servicios Profesionales
+  "Centro Médico", "Consultorio Dental", "Veterinaria", "Abogado", "Contador",
+  "Arquitecto", "Diseñador", "Fotógrafo", "Taller Mecánico", "Taller de Reparación",
+  "Imprenta", "Notaría", "Consultoría", "Agencia de Marketing", "Agencia de Publicidad",
+  "Desarrollador Web", "Estudio de Diseño", "Servicios Informáticos", "Coach Personal",
+  "Seguros", "Asesoría Financiera", "Taller de Carpintería", "Estudio de Grabación",
+  
+  // Hospedaje y Viajes
+  "Hotel", "Hostal", "Apartamento Turístico", "Posada", "Casa Rural", "Camping",
+  "Agencia de Viajes", "Tour Operador", "Alquiler de Coches", "Transporte Turístico",
+  "Resort", "Cabañas", "Hostal Backpacker", "Bed & Breakfast", "Lodge de Montaña",
+  
+  // Educación y Cultura
+  "Academia", "Escuela de Idiomas", "Centro de Estudios", "Museo", "Galería de Arte",
+  "Cine", "Teatro", "Biblioteca", "Centro Cultural", "Escuela de Música", "Escuela de Cocina",
+  "Centro de Capacitación", "Preescolar", "Librería Especializada", "Taller Creativo",
+  
+  // Lugares de Interés
+  "Parque", "Plaza", "Mirador", "Monumento", "Sitio Arqueológico", "Playa",
+  "Jardín Botánico", "Centro Comercial", "Lugares Turísticos", "Mercado Artesanal",
+  "Reserva Natural", "Iglesia", "Edificio Histórico", "Catedral", "Cascada",
+  "Lago", "Sendero de Montaña", "Volcán", "Balneario",
+  
+  // Tecnología y Comunicaciones
+  "Tienda de Tecnología", "Servicio Técnico", "Desarrollador de Software", "Diseño Web",
+  "Empresa de Telecomunicaciones", "Proveedor de Internet", "Ciber Café", "Centro de Coworking",
+  "Estudio de Desarrollo de Apps", "Consultor de TI", "Tienda de Videojuegos",
+  
+  // Servicios Financieros
+  "Banco", "Casa de Cambio", "Financiera", "Cooperativa", "Asesoría Financiera",
+  "Compañía de Seguros", "Préstamos", "Cajero Automático", "Inversiones",
+  
+  // Servicios de Salud
+  "Laboratorio Clínico", "Farmacia Natural", "Centro de Rehabilitación", "Nutricionista",
+  "Clínica de Especialidades", "Servicios Psicológicos", "Óptica",
+  
+  // Servicios para el Hogar
+  "Electricista", "Plomería", "Jardinería", "Seguridad Residencial", "Fumigación",
+  "Mantenimiento de Piscinas", "Mudanzas", "Limpieza del Hogar",
+  
+  // Servicios de Construcción
+  "Constructora", "Materiales de Construcción", "Servicios de Topografía", 
+  "Instalaciones Eléctricas", "Diseño de Interiores", "Arquitectura",
+  
+  // Servicios de Envío y Logística
+  "Servicio de Paquetería", "Mensajería Express", "Courier", "Bodega",
+  
+  // Producción Local
+  "Taller Artesanal", "Producción de Café", "Cacao y Chocolate Artesanal", 
+  "Artesanías Indígenas", "Productos Típicos", "Vivero", "Insumos Agrícolas",
+  
+  // Otros
+  "Estacionamiento", "Lavado de Autos", "Gasolinera", "Alquiler de Equipos",
+  "Organización de Eventos", "Sala de Fiestas", "Funeraria", "Estudio Fotográfico",
+  "Centro Religioso", "ONG", "Fundación", "Asociación", "Sastrería", "Community Manager"
 ];
 
 // Main form data interface

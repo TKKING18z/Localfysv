@@ -59,6 +59,7 @@ export type RootStackParamList = {
   Login: undefined;
   Register: undefined;
   ForgotPassword: undefined;
+  Welcome: undefined;
   Home: undefined;
   // Otras pantallas que añadirás después
 };

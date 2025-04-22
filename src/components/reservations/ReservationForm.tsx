@@ -17,6 +17,7 @@ import { firebaseService } from '../../services/firebaseService';
 import { ReservationAvailability } from '../../types/businessTypes';
 import firebase from 'firebase/compat/app';
 import 'firebase/compat/firestore';  // Asegúrate de tener esta línea
+import notificationService from '../../../services/NotificationService';
 
 interface ReservationFormProps {
   businessId: string;
@@ -238,6 +239,9 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
           console.log('[ReservationForm] Reservation created successfully with ID:', result.data.id);
           Alert.alert('¡Éxito!', 'Tu reserva ha sido creada correctamente');
           onSuccess(result.data.id);
+          
+          // After successful submission, show notification
+          notificationService.showReservationCreatedNotification(result.data.id, businessName);
         } else {
           console.log('[ReservationForm] First attempt failed, trying with minimal data');
           
@@ -261,6 +265,9 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
             console.log('[ReservationForm] Fallback creation successful with ID:', fallbackResult.data.id);
             Alert.alert('¡Éxito!', 'Tu reserva ha sido creada correctamente');
             onSuccess(fallbackResult.data.id);
+            
+            // After successful submission, show notification
+            notificationService.showReservationCreatedNotification(fallbackResult.data.id, businessName);
           } else {
             // Si ambos intentos fallan, usamos método directo a Firestore
             console.log('[ReservationForm] Both service attempts failed, trying direct Firestore method');
@@ -276,6 +283,9 @@ const ReservationForm: React.FC<ReservationFormProps> = ({
               console.log('[ReservationForm] Direct Firestore creation successful with ID:', docRef.id);
               Alert.alert('¡Éxito!', 'Tu reserva ha sido creada correctamente');
               onSuccess(docRef.id);
+              
+              // After successful submission, show notification
+              notificationService.showReservationCreatedNotification(docRef.id, businessName);
             } catch (firestoreError) {
               console.error('[ReservationForm] Direct Firestore call failed:', firestoreError);
               throw new Error('No se pudo crear la reserva después de múltiples intentos');

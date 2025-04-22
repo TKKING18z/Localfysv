@@ -415,40 +415,94 @@ const BasicInfoStep: React.FC = () => {
         {/* Business Category */}
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Categoría principal *</Text>
-          <TextInput
+          <TouchableOpacity
             style={[
               styles.textInput,
-              errors.category ? styles.inputError : {}
+              errors.category ? styles.inputError : {},
+              showSuggestions && styles.textInputActive
             ]}
-            value={localForm.category}
-            onChangeText={handleCategoryChange}
-            onBlur={() => handleFieldBlur('category', localForm.category)}
-            placeholder="Ej: Restaurante, Cafetería, Tienda..."
-            placeholderTextColor="#AEAEB2"
-            autoCapitalize="words"
-          />
+            activeOpacity={0.7}
+            onPress={() => {
+              if (!showSuggestions && localForm.category) {
+                updateField('category', '');
+              }
+              setShowSuggestions(!showSuggestions);
+            }}
+          >
+            <View style={styles.categoryInputContainer}>
+              <Text style={localForm.category ? styles.categorySelectedText : styles.categoryPlaceholderText}>
+                {localForm.category || "Ej: Restaurante, Cafetería, Tienda..."}
+              </Text>
+              <MaterialIcons 
+                name={showSuggestions ? "keyboard-arrow-up" : "keyboard-arrow-down"} 
+                size={24} 
+                color="#8E8E93" 
+              />
+            </View>
+          </TouchableOpacity>
           {touchedFields.category && errors.category && (
             <Text style={styles.errorText}>{errors.category}</Text>
           )}
-          
-          {/* Category suggestions */}
-          {showSuggestions && (
-            <View style={styles.suggestionsContainer}>
-              {suggestedCategories.map((item, index) => (
-                <TouchableOpacity
-                  key={item}
-                  style={[
-                    styles.suggestionItem,
-                    index === suggestedCategories.length - 1 ? styles.lastSuggestionItem : null
-                  ]}
-                  onPress={() => selectCategory(item)}
-                >
-                  <Text style={styles.suggestionText}>{item}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
         </View>
+        
+        {/* Category modal dropdown */}
+        {showSuggestions && (
+          <View style={styles.modalOverlay}>
+            <TouchableOpacity 
+              style={styles.modalBackdrop} 
+              activeOpacity={1}
+              onPress={() => setShowSuggestions(false)}
+            />
+            <View style={styles.modalContainer}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Selecciona una categoría</Text>
+                <TouchableOpacity 
+                  onPress={() => setShowSuggestions(false)}
+                  hitSlop={{top: 10, right: 10, bottom: 10, left: 10}}
+                >
+                  <MaterialIcons name="close" size={24} color="#8E8E93" />
+                </TouchableOpacity>
+              </View>
+              <TextInput
+                style={styles.searchInput}
+                value={localForm.category}
+                onChangeText={handleCategoryChange}
+                placeholder="Buscar categoría..."
+                placeholderTextColor="#AEAEB2"
+                autoCapitalize="none"
+              />
+              <ScrollView 
+                style={styles.categoriesList}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={true}
+                contentContainerStyle={styles.categoriesListContent}
+              >
+                {suggestedCategories.length > 0 ? (
+                  suggestedCategories.map((item, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.categoryItem}
+                      onPress={() => {
+                        selectCategory(item);
+                        setShowSuggestions(false);
+                      }}
+                    >
+                      <Text style={styles.categoryItemText}>{item}</Text>
+                      {localForm.category === item && (
+                        <MaterialIcons name="check" size={20} color="#007AFF" />
+                      )}
+                    </TouchableOpacity>
+                  ))
+                ) : (
+                  <View style={styles.emptyResultContainer}>
+                    <Text style={styles.emptyResultText}>No se encontraron categorías</Text>
+                    <Text style={styles.emptyResultSubText}>Puedes escribir tu propia categoría</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
         
         {/* Business Location */}
         <View style={styles.inputContainer}>
@@ -584,6 +638,7 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 20,
+    position: 'relative',
   },
   inputLabel: {
     fontSize: 16,
@@ -601,6 +656,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E1E8F0',
   },
+  textInputActive: {
+    borderColor: '#007AFF',
+    backgroundColor: 'rgba(0, 122, 255, 0.05)',
+  },
   inputError: {
     borderColor: '#FF3B30',
   },
@@ -614,35 +673,108 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 4,
   },
-  suggestionsContainer: {
+  categoryInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  categorySelectedText: {
+    fontSize: 16,
+    color: '#2C3E50',
+  },
+  categoryPlaceholderText: {
+    fontSize: 16,
+    color: '#AEAEB2',
+  },
+  modalOverlay: {
     position: 'absolute',
-    top: 80, // Below the input
+    top: 0,
     left: 0,
     right: 0,
-    zIndex: 1,
+    bottom: 0,
+    zIndex: 1000,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContainer: {
+    width: '90%',
+    maxHeight: '70%',
     backgroundColor: 'white',
-    borderRadius: 10,
+    borderRadius: 16,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-    maxHeight: 200,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#2C3E50',
+  },
+  searchInput: {
+    margin: 12,
+    backgroundColor: '#F6F8FC',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
     borderWidth: 1,
     borderColor: '#E1E8F0',
   },
-  suggestionItem: {
-    paddingVertical: 12,
+  categoriesList: {
+    maxHeight: 300,
+  },
+  categoriesListContent: {
+    paddingBottom: 16,
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E1E8F0',
+    borderBottomColor: '#F0F0F0',
   },
-  lastSuggestionItem: {
-    borderBottomWidth: 0,
-  },
-  suggestionText: {
+  categoryItemText: {
     fontSize: 16,
     color: '#2C3E50',
+  },
+  emptyResultContainer: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  emptyResultText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#2C3E50',
+    marginBottom: 8,
+  },
+  emptyResultSubText: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
   },
   locationButton: {
     flexDirection: 'row',

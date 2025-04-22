@@ -34,9 +34,24 @@ interface OfflineBannerProps {
   showRetryButton?: boolean;
   
   /**
-   * Auto hide banner after X seconds when back online (0 to disable)
+   * Auto hide banner after X seconds when back online
    */
   autoHideDelay?: number;
+  
+  /**
+   * Auto hide delay for poor connection (in seconds)
+   */
+  poorConnectionDelay?: number;
+  
+  /**
+   * Auto hide delay for offline state (in seconds, 0 to disable auto-hide)
+   */
+  offlineDelay?: number;
+
+  /**
+   * Cooldown period before showing unstable connection banner again (in seconds)
+   */
+  unstableCooldownPeriod?: number;
   
   /**
    * Whether to show connection quality info for debugging
@@ -50,6 +65,9 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
   poorQualityText = 'Conexión inestable',
   showRetryButton = true,
   autoHideDelay = 3,
+  poorConnectionDelay = 5,
+  offlineDelay = 0, // No auto-hide for offline by default
+  unstableCooldownPeriod = 60, // 60 seconds cooldown for unstable connections
   showDebugInfo = false
 }) => {
   const { 
@@ -64,20 +82,41 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
   
   const insets = useSafeAreaInsets();
   const [isVisible, setIsVisible] = useState(false);
+  const [lastConnectionState, setLastConnectionState] = useState<string | null>(null);
+  const [lastPoorConnectionTime, setLastPoorConnectionTime] = useState<number>(0);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
   // Animation values
   const translateY = useRef(new Animated.Value(-100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   
-  // Determinar si el banner debe mostrarse basado en el estado de la red
-  const shouldShowBanner = useMemo(() => {
+  // Determinar si el banner debe mostrarse basado en el estado de la red con debounce
+  const { shouldShowBanner, currentState } = useMemo(() => {
     const isOffline = !isConnected || isInternetReachable === false;
     const isPoorConnection = connectionQuality === 'poor';
     const isWarningConnection = connectionQuality === 'fair' && isLowPerformanceDevice;
     
-    return isOffline || isPoorConnection || isWarningConnection || isSlowConnection;
-  }, [isConnected, isInternetReachable, connectionQuality, isLowPerformanceDevice, isSlowConnection]);
+    let state = '';
+    if (isOffline) state = 'offline';
+    else if (isPoorConnection) state = 'poor';
+    else if (isWarningConnection || isSlowConnection) state = 'slow';
+    else state = 'good';
+    
+    // Check if we're in cooldown period for unstable connections
+    const inCooldownPeriod = (state === 'poor' || state === 'slow') && 
+                             isCoolingDown &&
+                             lastConnectionState === state;
+    
+    return {
+      shouldShowBanner: (isOffline || 
+                        (isPoorConnection && !inCooldownPeriod) || 
+                        (isWarningConnection && !inCooldownPeriod) || 
+                        (isSlowConnection && !inCooldownPeriod)),
+      currentState: state
+    };
+  }, [isConnected, isInternetReachable, connectionQuality, isLowPerformanceDevice, isSlowConnection, isCoolingDown, lastConnectionState]);
   
   // Determinar mensaje y color según estado de conexión
   const { message, iconName, bannerColor, bannerStyle } = useMemo(() => {
@@ -119,32 +158,96 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
     };
   }, [isConnected, isInternetReachable, connectionQuality, isSlowConnection, offlineText, slowConnectionText, poorQualityText]);
   
-  // Update banner visibility based on connection state
+  // Apply debounce for network state changes
   useEffect(() => {
-    // Limpiar cualquier timeout anterior
+    // Clear any existing debounce timeout
+    if (debounceTimeoutRef.current) {
+      clearTimeout(debounceTimeoutRef.current);
+      debounceTimeoutRef.current = null;
+    }
+    
+    // For unstable connections, debounce to avoid flashing banner for momentary issues
+    if (currentState === 'poor' || currentState === 'slow') {
+      // If it's the first time or a new type of poor connection, show it immediately
+      if (lastConnectionState !== currentState) {
+        processNetworkStateChange();
+      } else {
+        // Otherwise debounce
+        debounceTimeoutRef.current = setTimeout(() => {
+          processNetworkStateChange();
+        }, 2000); // 2 second debounce
+      }
+    } else {
+      // For offline or good states, process immediately
+      processNetworkStateChange();
+    }
+    
+    return () => {
+      if (debounceTimeoutRef.current) {
+        clearTimeout(debounceTimeoutRef.current);
+        debounceTimeoutRef.current = null;
+      }
+    };
+  }, [currentState]);
+  
+  // Process network state change after debounce
+  const processNetworkStateChange = () => {
+    // Detect state changes to reset timeout
+    const stateChanged = currentState !== lastConnectionState;
+    setLastConnectionState(currentState);
+    
+    // Clear any existing timeout
     if (hideTimeoutRef.current) {
       clearTimeout(hideTimeoutRef.current);
       hideTimeoutRef.current = null;
     }
     
-    if (shouldShowBanner) {
-      showBanner();
-    } else if (isVisible) {
-      // Auto hide when back online
-      if (autoHideDelay > 0) {
-        hideTimeoutRef.current = setTimeout(() => {
-          hideBanner();
-        }, autoHideDelay * 1000);
+    // Handle cooldown period for unstable connections
+    if ((currentState === 'poor' || currentState === 'slow')) {
+      const now = Date.now();
+      const timeSinceLastShow = now - lastPoorConnectionTime;
+      
+      // If we've shown this recently and are in cooldown, don't show again
+      if (lastPoorConnectionTime > 0 && timeSinceLastShow < unstableCooldownPeriod * 1000) {
+        // Skip showing banner during cooldown
+        if (!isVisible) return;
+      } else if (shouldShowBanner) {
+        // Past cooldown period, update the timestamp
+        setLastPoorConnectionTime(now);
+        setIsCoolingDown(false);
       }
     }
     
-    return () => {
-      if (hideTimeoutRef.current) {
-        clearTimeout(hideTimeoutRef.current);
-        hideTimeoutRef.current = null;
+    if (shouldShowBanner) {
+      showBanner();
+      
+      // Set auto-hide timeout based on connection state
+      let delay = autoHideDelay;
+      
+      if (currentState === 'offline') {
+        delay = offlineDelay;
+      } else if (currentState === 'poor' || currentState === 'slow') {
+        delay = poorConnectionDelay;
       }
-    };
-  }, [shouldShowBanner, autoHideDelay, isVisible]);
+      
+      // Only set auto-hide if delay > 0
+      if (delay > 0) {
+        hideTimeoutRef.current = setTimeout(() => {
+          hideBanner();
+          
+          // Set cooldown period for unstable connections
+          if (currentState === 'poor' || currentState === 'slow') {
+            setIsCoolingDown(true);
+          }
+        }, delay * 1000);
+      }
+    } else if (isVisible && currentState === 'good') {
+      // Auto hide when back online
+      hideTimeoutRef.current = setTimeout(() => {
+        hideBanner();
+      }, 1000); // Hide quickly when connection is restored
+    }
+  };
   
   // Show the banner with animation
   const showBanner = () => {
@@ -203,12 +306,12 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
           backgroundColor: bannerColor,
           transform: [{ translateY }],
           opacity,
-          paddingTop: insets.top > 0 ? insets.top : 8,
+          paddingTop: insets.top > 0 ? insets.top : 4,
         }
       ]}
     >
       <View style={styles.content}>
-        <MaterialIcons name={iconName} size={20} color="#FFFFFF" />
+        <MaterialIcons name={iconName} size={16} color="#FFFFFF" />
         <Text style={styles.text}>{message}</Text>
         
         {showRetryButton && (
@@ -217,7 +320,7 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
             onPress={handleRetry}
             activeOpacity={0.7}
           >
-            <MaterialIcons name="refresh" size={18} color="#FFFFFF" />
+            <MaterialIcons name="refresh" size={14} color="#FFFFFF" />
           </TouchableOpacity>
         )}
       </View>
@@ -226,7 +329,8 @@ const OfflineBanner: React.FC<OfflineBannerProps> = ({
         <View style={styles.debugContainer}>
           <Text style={styles.debugText}>
             Tipo: {connectionType} | Calidad: {connectionQuality} | 
-            Gama baja: {isLowPerformanceDevice ? 'Sí' : 'No'}
+            Gama baja: {isLowPerformanceDevice ? 'Sí' : 'No'} |
+            Cooldown: {isCoolingDown ? 'Sí' : 'No'}
           </Text>
         </View>
       )}
@@ -240,7 +344,7 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingBottom: 8,
+    paddingBottom: 4,
     zIndex: 1000,
     elevation: 5,
   },
@@ -272,33 +376,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
   },
   text: {
     color: '#FFFFFF',
-    fontWeight: 'bold',
-    fontSize: 14,
-    marginLeft: 8,
+    fontWeight: '600',
+    fontSize: 12,
+    marginLeft: 6,
     flex: 1,
     textAlign: 'center',
   },
   retryButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
+    marginLeft: 6,
   },
   debugContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
+    paddingHorizontal: 12,
+    paddingTop: 2,
+    paddingBottom: 2,
     alignItems: 'center',
   },
   debugText: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 10,
+    fontSize: 9,
   }
 });
 

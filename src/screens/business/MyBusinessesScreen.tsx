@@ -264,7 +264,10 @@ const MyBusinessesScreen: React.FC = () => {
   }, [navigation]);
   
   const handleEditBusiness = useCallback((business: Business) => {
-    navigation.navigate('EditBusiness', { businessId: business.id });
+    navigation.navigate('BusinessOnboardingSteps', { 
+      businessId: business.id,
+      editMode: true
+    });
   }, [navigation]);
   
   const handleViewBusiness = useCallback((business: Business) => {
