@@ -34,6 +34,30 @@ function calculateApplicationFee(amountInCents) {
   return applicationFeeInCents;
 }
 
+// Helper para verificar si un ID parece ser un ID de cuenta conectada de Stripe
+function isStripeConnectedAccount(id) {
+  // Los IDs de cuenta conectada de Stripe comienzan con 'acct_'
+  return typeof id === 'string' && id.startsWith('acct_');
+}
+
+// Helper para obtener el ID de cuenta conectada de Stripe para un negocio
+// En una implementación real, esto obtendría el dato de tu base de datos
+async function getStripeConnectAccountId(businessId) {
+  // Aquí harías una consulta a tu base de datos
+  // Por ejemplo, con Firebase:
+  // try {
+  //   const businessDoc = await db.collection('businesses').doc(businessId).get();
+  //   return businessDoc.exists ? businessDoc.data().stripeConnectAccountId : null;
+  // } catch (error) {
+  //   console.error('Error obteniendo cuenta de Stripe:', error);
+  //   return null;
+  // }
+  
+  // Por ahora, devolvemos null para indicar que no hay cuenta conectada
+  console.log(`Buscando cuenta Stripe para negocio ${businessId} - No implementado aún`);
+  return null;
+}
+
 // Middleware global
 app.use(cors());
 // IMPORTANTE: NO usar express.json() globalmente, ya que afecta al webhook
@@ -68,7 +92,7 @@ app.post('/create-payment-intent', async (req, res) => {
     
     console.log(`Creando PaymentIntent para: $${amount/100} ${currency || 'usd'}`);
     
-    // Determinar la comisión a aplicar
+    // Calcular la comisión (solo para referencia, no se aplica a nivel de Stripe)
     let finalApplicationFee = applicationFee;
     
     // Si no se especifica una comisión, calcularla automáticamente
@@ -77,8 +101,12 @@ app.post('/create-payment-intent', async (req, res) => {
     }
     
     if (finalApplicationFee > 0) {
-      console.log(`Con comisión de plataforma: $${finalApplicationFee/100}`);
+      console.log(`Comisión calculada (informativa): $${finalApplicationFee/100}`);
     }
+    
+    // Calcular el monto que recibirá el negocio (para referencia)
+    const businessAmount = amount - finalApplicationFee;
+    console.log(`Monto para el negocio: $${businessAmount/100}`);
     
     // Intentar crear un cliente si tenemos un email
     let customerId;
@@ -102,13 +130,17 @@ app.post('/create-payment-intent', async (req, res) => {
       }
     }
     
-    // Preparar los parámetros para el PaymentIntent
+    // Preparar los parámetros para el PaymentIntent - Todo va a tu cuenta principal
     const paymentIntentParams = {
       amount,
       currency: currency || 'usd',
       receipt_email: email,
       metadata: {
         businessId,
+        businessName: req.body.businessName || '',
+        businessAmount: businessAmount,
+        localfyFee: finalApplicationFee,
+        localfyFeeAmount: `$${(finalApplicationFee/100).toFixed(2)}`,
         cartItems: cartItems ? JSON.stringify(cartItems.map(item => ({
           id: item.id,
           name: item.name,
@@ -119,17 +151,6 @@ app.post('/create-payment-intent', async (req, res) => {
       ...(customerId && { customer: customerId })
     };
     
-    // Agregar la comisión de la aplicación si está presente
-    // Nota: Esto requiere que estés usando Stripe Connect con cuentas conectadas
-    if (finalApplicationFee && businessId) {
-      paymentIntentParams.application_fee_amount = finalApplicationFee;
-      
-      // Si estás usando Stripe Connect, debes especificar la cuenta de destino
-      paymentIntentParams.transfer_data = {
-        destination: businessId, // Este debería ser el ID de la cuenta conectada del negocio
-      };
-    }
-
     // Crear el PaymentIntent con los parámetros preparados
     const paymentIntent = await stripe.paymentIntents.create(paymentIntentParams);
 
@@ -280,6 +301,49 @@ app.get('/orders/:orderId', async (req, res) => {
   }
 });
 
+// Ruta para guardar/actualizar el ID de cuenta conectada de Stripe para un negocio
+// En una implementación real, esto se conectaría con tu base de datos
+app.post('/update-stripe-account', async (req, res) => {
+  try {
+    const { businessId, stripeAccountId } = req.body;
+    
+    // Validar parámetros
+    if (!businessId) {
+      return res.status(400).json({ error: 'Se requiere el ID del negocio' });
+    }
+    
+    if (!stripeAccountId) {
+      return res.status(400).json({ error: 'Se requiere el ID de la cuenta de Stripe' });
+    }
+    
+    // Validar que el ID de Stripe sea válido
+    if (!isStripeConnectedAccount(stripeAccountId)) {
+      return res.status(400).json({ 
+        error: 'ID de cuenta de Stripe inválido. Debe comenzar con "acct_"',
+        providedId: stripeAccountId
+      });
+    }
+    
+    // Aquí conectarías con tu base de datos para guardar esta información
+    // Por ejemplo, con Firebase:
+    // await db.collection('businesses').doc(businessId).update({
+    //   stripeConnectAccountId: stripeAccountId
+    // });
+    
+    console.log(`Asociación de cuenta Stripe guardada: Negocio ${businessId} -> Cuenta Stripe ${stripeAccountId}`);
+    
+    res.json({
+      success: true,
+      message: 'Cuenta de Stripe actualizada exitosamente',
+      businessId,
+      stripeAccountId
+    });
+  } catch (error) {
+    console.error('Error al actualizar cuenta de Stripe:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Ruta para calcular la comisión de la plataforma para un monto dado
 app.get('/calculate-fee', (req, res) => {
   try {
@@ -333,6 +397,107 @@ app.get('/fee-structure', (req, res) => {
   });
 });
 
+// Ruta para obtener un resumen de pagos pendientes a negocios
+app.get('/business-payments', async (req, res) => {
+  try {
+    // Verificar autenticación del admin (deberías implementar esto)
+    // if (!isAdmin(req)) {
+    //   return res.status(403).json({ error: 'No autorizado' });
+    // }
+    
+    // Parámetros opcionales
+    const { businessId, startDate, endDate, limit = 100 } = req.query;
+    
+    // Construir filtro para Stripe
+    let query = 'status:"succeeded"';
+    
+    // Si se especifica un negocio, filtrar por ese ID
+    if (businessId) {
+      query += ` AND metadata["businessId"]:"${businessId}"`;
+    }
+    
+    // Si se especifican fechas, añadir al filtro
+    if (startDate) {
+      const startTimestamp = new Date(startDate).getTime() / 1000;
+      query += ` AND created>=${startTimestamp}`;
+    }
+    
+    if (endDate) {
+      const endTimestamp = new Date(endDate).getTime() / 1000;
+      query += ` AND created<=${endTimestamp}`;
+    }
+    
+    console.log(`Buscando pagos con filtro: ${query}`);
+    
+    // Buscar pagos en Stripe
+    const paymentIntents = await stripe.paymentIntents.search({
+      query,
+      limit: parseInt(limit)
+    });
+    
+    // Agrupar por negocio
+    const businessSummary = {};
+    
+    // Procesar los resultados
+    for (const payment of paymentIntents.data) {
+      const businessId = payment.metadata.businessId;
+      const businessName = payment.metadata.businessName || 'Negocio sin nombre';
+      const totalAmount = payment.amount;
+      const localfyFee = parseInt(payment.metadata.localfyFee || 0);
+      const businessAmount = parseInt(payment.metadata.businessAmount || (totalAmount - localfyFee));
+      
+      // Inicializar el resumen para este negocio si no existe
+      if (!businessSummary[businessId]) {
+        businessSummary[businessId] = {
+          businessId,
+          businessName,
+          transactions: 0,
+          totalAmount: 0,
+          localfyFees: 0,
+          businessAmount: 0,
+          payments: []
+        };
+      }
+      
+      // Actualizar totales
+      businessSummary[businessId].transactions += 1;
+      businessSummary[businessId].totalAmount += totalAmount;
+      businessSummary[businessId].localfyFees += localfyFee;
+      businessSummary[businessId].businessAmount += businessAmount;
+      
+      // Añadir detalles del pago
+      businessSummary[businessId].payments.push({
+        paymentId: payment.id,
+        date: new Date(payment.created * 1000).toISOString(),
+        amount: totalAmount / 100,
+        fee: localfyFee / 100,
+        businessAmount: businessAmount / 100,
+        customer: payment.customer,
+        receipt: payment.receipt_url
+      });
+    }
+    
+    // Convertir el objeto en un array
+    const results = Object.values(businessSummary).map(summary => ({
+      ...summary,
+      totalAmount: summary.totalAmount / 100, // Convertir a dólares
+      localfyFees: summary.localfyFees / 100,
+      businessAmount: summary.businessAmount / 100
+    }));
+    
+    res.json({
+      success: true,
+      totalBusinesses: results.length,
+      totalTransactions: results.reduce((acc, business) => acc + business.transactions, 0),
+      results
+    });
+    
+  } catch (error) {
+    console.error('Error al obtener resumen de pagos:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Webhook para recibir eventos de Stripe
 // IMPORTANTE: Usar express.raw para webhooks de Stripe
 app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
@@ -365,25 +530,31 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
         
         // Extraer metadatos del pago
         const businessId = paymentIntent.metadata.businessId;
+        const businessName = paymentIntent.metadata.businessName;
+        const localfyFee = paymentIntent.metadata.localfyFee;
+        const businessAmount = paymentIntent.metadata.businessAmount;
         const cartItemsJson = paymentIntent.metadata.cartItems;
         
-        // Log de comisión si existe
-        if (paymentIntent.application_fee_amount) {
-          console.log(`💼 Comisión de la plataforma: $${paymentIntent.application_fee_amount/100}`);
+        // Log detallado del pago
+        console.log(`🏬 Negocio: ${businessName || businessId || 'Desconocido'}`);
+        console.log(`💵 Monto total: $${paymentIntent.amount/100}`);
+        
+        if (localfyFee) {
+          console.log(`💼 Comisión para Localfy: $${parseInt(localfyFee)/100}`);
+        }
+        
+        if (businessAmount) {
+          console.log(`💸 Monto para el negocio: $${parseInt(businessAmount)/100}`);
         }
         
         // Actualizar el estado de la orden a 'paid' si podemos identificarla
         // En una implementación real, aquí buscarías la orden asociada al pago 
         // y actualizarías su estado en la base de datos
         
-        if (businessId) {
-          console.log(`💼 Negocio: ${businessId}`);
-        }
-        
         if (cartItemsJson) {
           try {
             const cartItems = JSON.parse(cartItemsJson);
-            console.log(`🛒 Productos: ${cartItems.length}`);
+            console.log(`🛒 Productos en la orden: ${cartItems.length}`);
           } catch (e) {
             console.error('Error al parsear cartItems:', e);
           }
