@@ -10,6 +10,7 @@ import {
 import { Image } from 'expo-image';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useCart, CartItem } from '../../context/CartContext';
+import MenuItemDetail from './MenuItemDetail';
 
 type MenuItemProps = {
   id: string;
@@ -35,12 +36,21 @@ const MenuItem: React.FC<MenuItemProps> = ({
   hasOptions = false
 }) => {
   const [quantity, setQuantity] = useState(1);
+  const [showDetailModal, setShowDetailModal] = useState(false);
   const { cart, addToCart } = useCart();
+  
+  const handlePress = () => {
+    if (onPress) {
+      onPress();
+    } else {
+      setShowDetailModal(true);
+    }
+  };
   
   const handleAddToCart = async () => {
     // Si el item tiene opciones, ir a la pantalla de detalle
-    if (hasOptions && onPress) {
-      onPress();
+    if (hasOptions) {
+      handlePress();
       return;
     }
     
@@ -106,97 +116,118 @@ const MenuItem: React.FC<MenuItemProps> = ({
   };
   
   return (
-    <TouchableOpacity
-      style={styles.container}
-      onPress={onPress}
-      activeOpacity={0.9}
-    >
-      {image ? (
-        <Image
-          source={{ uri: image }}
-          style={styles.image}
-          contentFit="cover"
-          transition={200}
-        />
-      ) : (
-        <View style={styles.placeholderImage}>
-          <MaterialIcons name="restaurant" size={24} color="#BBBBBB" />
-        </View>
-      )}
-      
-      <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={1}>{name}</Text>
-        {description && (
-          <Text style={styles.description} numberOfLines={2}>{description}</Text>
-        )}
-        <Text style={styles.price}>${price.toFixed(2)}</Text>
-      </View>
-      
-      <View style={styles.actions}>
-        {hasOptions ? (
-          <TouchableOpacity 
-            style={styles.addButton}
-            onPress={handleAddToCart}
-            activeOpacity={0.7}
-          >
-            <MaterialIcons name="add-shopping-cart" size={20} color="#FFFFFF" />
-            <Text style={styles.addButtonText}>Ver</Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            <View style={styles.quantitySelector}>
-              <TouchableOpacity 
-                style={styles.quantityButton}
-                onPress={decrementQuantity}
-                disabled={quantity <= 1}
-              >
-                <MaterialIcons name="remove" size={18} color={quantity <= 1 ? "#CCCCCC" : "#007AFF"} />
-              </TouchableOpacity>
-              <Text style={styles.quantityText}>{quantity}</Text>
-              <TouchableOpacity 
-                style={styles.quantityButton}
-                onPress={incrementQuantity}
-              >
-                <MaterialIcons name="add" size={18} color="#007AFF" />
-              </TouchableOpacity>
+    <>
+      <TouchableOpacity
+        style={styles.container}
+        onPress={handlePress}
+        activeOpacity={0.9}
+      >
+        <View style={styles.contentRow}>
+          {image ? (
+            <Image
+              source={{ uri: image }}
+              style={styles.image}
+              contentFit="cover"
+              transition={200}
+            />
+          ) : (
+            <View style={styles.placeholderImage}>
+              <MaterialIcons name="restaurant" size={28} color="#BBBBBB" />
             </View>
-            
+          )}
+          
+          <View style={styles.content}>
+            <Text style={styles.title} numberOfLines={2}>{name}</Text>
+            {description && (
+              <Text style={styles.description} numberOfLines={2}>{description}</Text>
+            )}
+            <Text style={styles.price}>${price.toFixed(2)}</Text>
+          </View>
+        </View>
+        
+        <View style={styles.actions}>
+          {hasOptions ? (
             <TouchableOpacity 
               style={styles.addButton}
               onPress={handleAddToCart}
               activeOpacity={0.7}
             >
-              <MaterialIcons name="add-shopping-cart" size={20} color="#FFFFFF" />
-              <Text style={styles.addButtonText}>Agregar</Text>
+              <MaterialIcons name="add-shopping-cart" size={22} color="#FFFFFF" />
+              <Text style={styles.addButtonText}>Ver</Text>
             </TouchableOpacity>
-          </>
-        )}
-      </View>
-    </TouchableOpacity>
+          ) : (
+            <View style={styles.quantityContainer}>
+              <View style={styles.quantitySelector}>
+                <TouchableOpacity 
+                  style={styles.quantityButton}
+                  onPress={decrementQuantity}
+                  disabled={quantity <= 1}
+                >
+                  <MaterialIcons name="remove" size={20} color={quantity <= 1 ? "#CCCCCC" : "#007AFF"} />
+                </TouchableOpacity>
+                <Text style={styles.quantityText}>{quantity}</Text>
+                <TouchableOpacity 
+                  style={styles.quantityButton}
+                  onPress={incrementQuantity}
+                >
+                  <MaterialIcons name="add" size={20} color="#007AFF" />
+                </TouchableOpacity>
+              </View>
+              
+              <TouchableOpacity 
+                style={styles.addButton}
+                onPress={handleAddToCart}
+                activeOpacity={0.7}
+              >
+                <MaterialIcons name="add-shopping-cart" size={22} color="#FFFFFF" />
+                <Text style={styles.addButtonText}>Agregar</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      </TouchableOpacity>
+      
+      {/* Modal de detalle */}
+      <MenuItemDetail 
+        visible={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        id={id}
+        name={name}
+        description={description}
+        price={price}
+        image={image}
+        businessId={businessId}
+        businessName={businessName}
+      />
+    </>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
-    flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    marginVertical: 8,
+    borderRadius: 10,
+    marginVertical: 6,
+    marginHorizontal: 2,
     padding: 12,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 4,
-    elevation: 3,
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  contentRow: {
+    flexDirection: 'row',
+    marginBottom: 8,
   },
   image: {
-    width: 80,
-    height: 80,
+    width: 85,
+    height: 85,
     borderRadius: 8,
   },
   placeholderImage: {
-    width: 80,
-    height: 80,
+    width: 85,
+    height: 85,
     borderRadius: 8,
     backgroundColor: '#F5F5F5',
     justifyContent: 'center',
@@ -205,17 +236,19 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     marginLeft: 12,
+    justifyContent: 'space-between',
   },
   title: {
     fontSize: 16,
     fontWeight: '600',
     color: '#333333',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   description: {
     fontSize: 14,
     color: '#777777',
     marginBottom: 8,
+    lineHeight: 18,
   },
   price: {
     fontSize: 16,
@@ -223,9 +256,14 @@ const styles = StyleSheet.create({
     color: '#007AFF',
   },
   actions: {
-    justifyContent: 'center',
+    marginTop: 4,
     alignItems: 'flex-end',
-    paddingLeft: 8,
+  },
+  quantityContainer: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   quantitySelector: {
     flexDirection: 'row',
@@ -233,18 +271,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#DDDDDD',
     borderRadius: 8,
-    marginBottom: 8,
-    width: 90,
+    width: 100,
+    height: 36,
+    justifyContent: 'space-between',
   },
   quantityButton: {
     padding: 6,
-    width: 30,
+    width: 32,
     alignItems: 'center',
   },
   quantityText: {
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
-    width: 30,
+    width: 32,
     textAlign: 'center',
   },
   addButton: {
@@ -252,7 +291,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     borderRadius: 8,
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
@@ -260,12 +299,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 1.5,
     elevation: 2,
+    height: 36,
   },
   addButtonText: {
     color: '#FFFFFF',
     fontWeight: '600',
-    fontSize: 14,
-    marginLeft: 4,
+    fontSize: 15,
+    marginLeft: 6,
   },
 });
 

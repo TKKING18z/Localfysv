@@ -1088,6 +1088,7 @@ const styles = StyleSheet.create({
   },
   menuTabContainer: {
     flex: 1,
+    height: '100%',
   },
 });
 

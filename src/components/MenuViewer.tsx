@@ -21,70 +21,50 @@ import MenuItem from './menu/MenuItem';
 interface MenuViewerProps {
   menu?: MenuItemType[];
   menuUrl?: string;
-  isNested?: boolean;  // Add this property
-  viewType?: 'restaurant' | 'tourism';  // Add this property
-  businessId?: string; // Add this property
-  businessName?: string; // Add this property
-}
-
-// Interface para las secciones
-interface MenuSection {
-  title: string;
-  data: MenuItemType[];
+  isNested?: boolean;  
+  viewType?: 'restaurant' | 'tourism';  
+  businessId?: string; 
+  businessName?: string; 
 }
 
 const MenuViewer: React.FC<MenuViewerProps> = ({ 
   menu, 
   menuUrl,
-  isNested = false,  // Default value
-  viewType = 'restaurant',  // Default value
+  isNested = false,
+  viewType = 'restaurant',
   businessId,
   businessName
 }) => {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Extraer categorías únicas
-  const categories = React.useMemo(() => {
+  // Generar IDs únicos para los elementos que no tengan
+  const menuWithIds = React.useMemo(() => {
     if (!menu || menu.length === 0) return [];
-    const uniqueCategories = [...new Set(menu.map(item => item.category || 'Sin categoría'))];
-    return uniqueCategories;
+    
+    return menu.map((item, index) => ({
+      ...item,
+      id: item.id || `menu-item-${index}-${item.name.replace(/\s+/g, '-').toLowerCase()}`
+    }));
   }, [menu]);
   
-  // Preparar secciones para SectionList
-  const menuSections = React.useMemo(() => {
-    if (!menu || menu.length === 0) return [];
+  // Extraer categorías únicas
+  const categories = React.useMemo(() => {
+    if (!menuWithIds || menuWithIds.length === 0) return [];
+    const uniqueCategories = [...new Set(menuWithIds.map(item => item.category || 'Sin categoría'))];
+    return uniqueCategories;
+  }, [menuWithIds]);
+  
+  // Filtrar elementos para FlatList basados en categoría activa
+  const filteredItems = React.useMemo(() => {
+    if (!menuWithIds || menuWithIds.length === 0) return [];
     
-    // Si hay una categoría activa, solo mostrar esa
     if (activeCategory) {
-      const filteredItems = menu.filter(item => 
-        (item.category || 'Sin categoría') === activeCategory
-      );
-      
-      return [{
-        title: activeCategory,
-        data: filteredItems
-      }];
+      return menuWithIds.filter(item => (item.category || 'Sin categoría') === activeCategory);
     }
     
-    // Si no hay categoría activa, agrupar por categorías
-    const sections: MenuSection[] = [];
-    
-    categories.forEach(category => {
-      const itemsInCategory = menu.filter(item => 
-        (item.category || 'Sin categoría') === category
-      );
-      
-      if (itemsInCategory.length > 0) {
-        sections.push({
-          title: category,
-          data: itemsInCategory
-        });
-      }
-    });
-    
-    return sections;
-  }, [menu, categories, activeCategory]);
+    return menuWithIds;
+  }, [menuWithIds, activeCategory]);
   
   // Abrir URL del menú externo
   const handleOpenMenuUrl = async () => {
@@ -113,60 +93,70 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
     }
   };
   
-  // Generar color a partir de un string (para fondos de placeholder)
-  const getColorFromString = (str: string): string => {
-    const colors = [
-      '#FF9500', '#FF2D55', '#5856D6', '#007AFF', '#34C759',
-      '#AF52DE', '#FF3B30', '#5AC8FA', '#FFCC00', '#4CD964'
-    ];
-    
-    const hash = Array.from(str).reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    return colors[hash % colors.length];
-  };
-  
-  // Renderizar imagen con fallback
-  const renderMenuItemImage = (imageUrl?: string, name?: string) => {
-    if (!imageUrl) {
-      return (
-        <View style={styles.menuItemImagePlaceholder}>
-          <MaterialIcons name="restaurant" size={24} color="#8E8E93" />
-        </View>
-      );
-    }
-    
-    // Manejar diferentes formatos de imagen (URL, base64)
+  // Componente personalizado para cada elemento del menú con mayor tamaño
+  const EnhancedMenuItem = React.memo(({ item }: { item: MenuItemType }) => {
     return (
-      <Image
-        source={{ uri: imageUrl }}
-        style={styles.menuItemImage}
-        contentFit="cover"
-        transition={200}
-        placeholder={{ color: getColorFromString(name || 'item') }}
-        recyclingKey={imageUrl} // Para evitar problemas de caché
-      />
+      <View style={styles.enhancedMenuItem}>
+        <View style={styles.menuItemContent}>
+          <View style={styles.menuItemImageContainer}>
+            {item.imageUrl ? (
+              <Image
+                source={{ uri: item.imageUrl }}
+                style={styles.enhancedMenuItemImage}
+                contentFit="cover"
+                transition={200}
+              />
+            ) : (
+              <View style={styles.enhancedMenuItemPlaceholder}>
+                <MaterialIcons name="restaurant" size={38} color="#BBBBBB" />
+              </View>
+            )}
+          </View>
+          
+          <View style={styles.menuItemDetails}>
+            <Text style={styles.enhancedMenuItemName}>{item.name}</Text>
+            
+            {item.description && (
+              <Text style={styles.enhancedMenuItemDescription}>{item.description}</Text>
+            )}
+            
+            <Text style={styles.enhancedMenuItemPrice}>
+              ${parseFloat(item.price?.toString() || "0").toFixed(2)}
+            </Text>
+            
+            {item.category && (
+              <View style={styles.categoryTag}>
+                <Text style={styles.categoryTagText}>{item.category}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+        
+        <TouchableOpacity 
+          style={styles.addToCartButton}
+          onPress={() => {
+            // Esta funcionalidad se maneja dentro del componente MenuItem
+          }}
+        >
+          <MaterialIcons name="add-shopping-cart" size={22} color="#FFFFFF" />
+          <Text style={styles.addToCartText}>Agregar</Text>
+        </TouchableOpacity>
+      </View>
     );
-  };
+  });
   
   // Renderizar cada item del menú usando el componente MenuItem
-  const renderMenuItem = ({ item }: { item: MenuItemType }) => (
+  const renderFlatMenuItem = ({ item }: { item: MenuItemType }) => (
     <MenuItem
-      id={`${businessId || ''}-${item.category || 'sin-categoria'}-${item.name}-${item.id}`}
+      id={`${businessId || ''}-${item.category || 'sin-categoria'}-${item.name}-${item.id || 'no-id'}`}
       name={item.name}
       description={item.description}
-      price={parseFloat(item.price.toString()) || 0}
+      price={parseFloat(item.price?.toString() || "0") || 0}
       image={item.imageUrl}
       businessId={businessId || ''}
       businessName={businessName || 'Localfy'}
-      onPress={() => {
-        // Aquí puedes navegar a una pantalla de detalle del ítem si es necesario
-      }}
       hasOptions={false}
     />
-  );
-  
-  // Renderizar el header de cada sección
-  const renderSectionHeader = ({ section: { title } }: { section: MenuSection }) => (
-    <Text style={styles.categoryTitle}>{title}</Text>
   );
   
   // Renderizar el header con las categorías
@@ -203,6 +193,11 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
       </View>
     );
   };
+
+  // Debug - log para verificar si hay elementos en el menú
+  console.log('MenuViewer: Elementos en el menú:', menu?.length || 0);
+  console.log('MenuViewer: Categorías:', categories);
+  console.log('MenuViewer: filteredItems:', filteredItems.length);
   
   // Si no hay datos de menú, mostrar mensaje apropiado
   if ((!menu || menu.length === 0) && !menuUrl) {
@@ -240,24 +235,30 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
         </TouchableOpacity>
       )}
       
-      {/* Lista de items del menú usando SectionList */}
-      {menu && menu.length > 0 ? (
-        <SectionList
-          sections={menuSections}
-          renderItem={renderMenuItem}
-          renderSectionHeader={renderSectionHeader}
-          keyExtractor={(item) => item.id}
-          stickySectionHeadersEnabled={false}
-          ListHeaderComponent={renderCategoriesHeader}
-          contentContainerStyle={styles.menuList}
-          ItemSeparatorComponent={() => <View style={styles.separator} />}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={true}
-          initialNumToRender={5}
-          maxToRenderPerBatch={5}
-          windowSize={5}
-        />
-      ) : menuUrl ? (
+      {/* Lista de menú */}
+      {menu && menu.length > 0 && (
+        <>
+          {renderCategoriesHeader()}
+          <FlatList
+            data={filteredItems}
+            renderItem={renderFlatMenuItem}
+            keyExtractor={(item, index) => `${item.id || `item-${index}`}-${item.name}`}
+            contentContainerStyle={styles.menuList}
+            ItemSeparatorComponent={() => <View style={styles.separator} />}
+            showsVerticalScrollIndicator={true}
+            removeClippedSubviews={true}
+            initialNumToRender={8}
+            maxToRenderPerBatch={5}
+            windowSize={5}
+            ListEmptyComponent={
+              <Text style={styles.emptyText}>No hay elementos disponibles</Text>
+            }
+          />
+        </>
+      )}
+      
+      {/* Mensaje cuando solo hay URL de menú */}
+      {(!menu || menu.length === 0) && menuUrl && (
         <View style={styles.onlyUrlContainer}>
           <Text style={styles.onlyUrlText}>
             {viewType === 'tourism' 
@@ -265,7 +266,7 @@ const MenuViewer: React.FC<MenuViewerProps> = ({
               : 'Este negocio tiene un menú externo disponible. Haga clic en el botón de arriba para verlo.'}
           </Text>
         </View>
-      ) : null}
+      )}
     </View>
   );
 };
@@ -327,7 +328,61 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   menuList: {
-    paddingBottom: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 2,
+  },
+  enhancedMenuItem: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginBottom: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  menuItemContent: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  menuItemImageContainer: {
+    marginRight: 16,
+  },
+  enhancedMenuItemImage: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+  },
+  enhancedMenuItemPlaceholder: {
+    width: 100,
+    height: 100,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  menuItemDetails: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  enhancedMenuItemName: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  enhancedMenuItemDescription: {
+    fontSize: 15,
+    color: '#666666',
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  enhancedMenuItemPrice: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#007AFF',
+    marginBottom: 8,
   },
   menuItem: {
     flexDirection: 'row',
@@ -390,7 +445,7 @@ const styles = StyleSheet.create({
   separator: {
     height: 1,
     backgroundColor: '#E5E5EA',
-    marginVertical: 4,
+    marginVertical: 8,
   },
   onlyUrlContainer: {
     padding: 16,
@@ -415,6 +470,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     color: '#007AFF',
+  },
+  addToCartButton: {
+    flexDirection: 'row',
+    backgroundColor: '#007AFF',
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    alignSelf: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addToCartText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
+    marginLeft: 6,
   },
 });
 

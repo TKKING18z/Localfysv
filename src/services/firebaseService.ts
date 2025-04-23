@@ -156,7 +156,26 @@ export const firebaseService = {
       } catch (error) {
         return { success: false, error: handleFirebaseError(error, 'auth/updateProfile') };
       }
-    }
+    },
+    
+    // Delete user account
+    deleteAccount: async (): Promise<FirebaseResponse<null>> => {
+      try {
+        const user = firebase.auth().currentUser;
+        if (!user) {
+          return { success: false, error: { message: 'Usuario no autenticado' } };
+        }
+        
+        // Delete user data from Firestore first
+        await firebase.firestore().collection('users').doc(user.uid).delete();
+        
+        // Delete user authentication
+        await user.delete();
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: handleFirebaseError(error, 'auth/deleteAccount') };
+      }
+    },
   },
   
   // Business methods

@@ -4,6 +4,7 @@ import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Alert } from 'react-native';
+import { firebaseService } from '../services/firebaseService';
 
 // Definición de tipo para el servicio de notificaciones
 interface NotificationService {
@@ -53,6 +54,7 @@ interface AuthContextType {
   restoreSession: () => Promise<SessionData | null>;
   isNewUser: boolean;
   setIsNewUser: (value: boolean) => void;
+  deleteAccount: () => Promise<boolean>;
 }
 
 // Crear el contexto
@@ -475,6 +477,43 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
+  // Función para eliminar la cuenta
+  const deleteAccount = async (): Promise<boolean> => {
+    try {
+      setLoading(true);
+      
+      // Eliminar la cuenta
+      const result = await firebaseService.auth.deleteAccount();
+      
+      if (result.success) {
+        // Limpiar datos locales de sesión
+        try {
+          await AsyncStorage.multiRemove([
+            STORAGE_KEYS.USER_DATA,
+            STORAGE_KEYS.AUTH_PERSISTENCE,
+            STORAGE_KEYS.SESSION_DATA
+          ]);
+          console.log('Session data cleared after account deletion');
+        } catch (error) {
+          console.error('Error clearing session data:', error);
+        }
+        
+        // Actualizar estado
+        setUser(null);
+        return true;
+      } else {
+        Alert.alert('Error', result.error?.message || 'No se pudo eliminar la cuenta');
+        return false;
+      }
+    } catch (error: any) {
+      console.error('Eliminar cuenta error:', error.message);
+      Alert.alert('Error al eliminar cuenta', error.message);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Valores del contexto
   const value = {
     user,
@@ -489,7 +528,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     saveSessionData,
     restoreSession,
     isNewUser,
-    setIsNewUser
+    setIsNewUser,
+    deleteAccount
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

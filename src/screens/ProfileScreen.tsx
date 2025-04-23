@@ -47,8 +47,8 @@ interface UserProfile {
 
 const ProfileScreen: React.FC = () => {
   const navigation = useNavigation<NavigationProps>();
-  const { getFavoriteBusinesses } = useBusinesses();
-  const { logout } = useAuth();
+  const { getFavoriteBusinesses, clearBusinessContextState } = useBusinesses();
+  const { logout, deleteAccount } = useAuth();
   const isMountedRef = useRef(true);
   
   const [loading, setLoading] = useState(true);
@@ -56,6 +56,7 @@ const ProfileScreen: React.FC = () => {
   const [editMode, setEditMode] = useState(false);
   const [tempProfile, setTempProfile] = useState<Partial<UserProfile>>({});
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
+  const [deleteAccountModalVisible, setDeleteAccountModalVisible] = useState(false);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [notifications, setNotifications] = useState(true);
 
@@ -202,76 +203,157 @@ const ProfileScreen: React.FC = () => {
       // Desactivar la bandera de montado para evitar actualizaciones de estado después de desmontar
       isMountedRef.current = false;
       
-      // 1. Esperar a que cualquier operación pendiente termine
-      await new Promise(resolve => setTimeout(resolve, 100));
+      console.log("[ProfileScreen] Starting logout process");
       
-      // 2. Limpiar AsyncStorage de manera controlada (solo las claves necesarias)
-      // En lugar de limpiar todo, lo que podría afectar a otros componentes
-      const keysToRemove = [
-        'user_data',
-        'session_data',
-        'auth_persistence',
-        'favorites', 
-        'recent_searches'
-      ];
-      
+      // 1. Primero desconectar todos los listeners de Firebase
       try {
+        const firebaseListeners = firebase.apps.length > 0 ? firebase.auth().onAuthStateChanged(() => {}) : null;
+        if (firebaseListeners) firebaseListeners();
+        console.log("[ProfileScreen] Firebase listeners cleared");
+      } catch (err) {
+        console.error("[ProfileScreen] Error clearing Firebase listeners:", err);
+      }
+      
+      // 2. Limpiar AsyncStorage de manera más exhaustiva
+      try {
+        // Lista extendida de claves a eliminar
+        const keysToRemove = [
+          'user_data',
+          'session_data',
+          'auth_persistence',
+          'favorites', 
+          'recent_searches',
+          'businessCache',
+          'authUser',
+          'userCredentials',
+          '@user',
+          'user_session'
+        ];
+        
         await AsyncStorage.multiRemove(keysToRemove);
-        console.log("[ProfileScreen] AsyncStorage keys removed successfully");
+        
+        // Para mayor seguridad, también limpiar todas las claves relacionadas con autenticación
+        const allKeys = await AsyncStorage.getAllKeys();
+        const authKeys = allKeys.filter(key => 
+          key.includes('auth') || 
+          key.includes('user') || 
+          key.includes('token') || 
+          key.includes('credential')
+        );
+        
+        if (authKeys.length > 0) {
+          await AsyncStorage.multiRemove(authKeys);
+        }
+        
+        console.log("[ProfileScreen] AsyncStorage cleared successfully");
       } catch (storageError) {
-        console.error("[ProfileScreen] Error removing AsyncStorage keys:", storageError);
-        // Continue logout process despite storage error
+        console.error("[ProfileScreen] Error clearing AsyncStorage:", storageError);
+      }
+      
+      // 2.5 Limpiar el estado del contexto BusinessContext
+      try {
+        clearBusinessContextState();
+        console.log("[ProfileScreen] Business context state cleared");
+      } catch (contextError) {
+        console.error("[ProfileScreen] Error clearing business context:", contextError);
       }
       
       // 3. Llamar al método logout del contexto de autenticación
-      // Este método ahora se encarga de limpiar listeners
       try {
         await logout();
-        console.log("[ProfileScreen] Logout successful from auth context");
+        console.log("[ProfileScreen] Auth context logout completed");
+        
+        // Esperar un poco para que los estados se actualicen completamente
+        await new Promise(resolve => setTimeout(resolve, 500));
       } catch (logoutError) {
         console.error("[ProfileScreen] Error during logout from auth context:", logoutError);
-        // Continue navigation despite logout error
       }
       
-      // 4. Navegar después de un corto retraso para asegurar que todas las operaciones se completaron
-      setTimeout(() => {
-        try {
-          // Usar NavigationContainer.resetRoot es más confiable que CommonActions.reset
-          // Y asegura que estamos navegando a una pantalla que definitivamente existe
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }]
-          });
-          console.log("[ProfileScreen] Navigation reset to Login screen");
-        } catch (navError) {
-          console.error("[ProfileScreen] Navigation error during logout:", navError);
-          // Attempt alternate navigation as fallback
-          try {
-            navigation.navigate('Login');
-          } catch (altNavError) {
-            console.error("[ProfileScreen] Alternate navigation failed:", altNavError);
-          }
+      // 4. Forzar cierre de sesión de Firebase explícitamente como respaldo
+      try {
+        if (firebase.apps.length > 0) {
+          await firebase.auth().signOut();
         }
-      }, 300); // Aumentar retraso para asegurar que todo se ha completado
+        console.log("[ProfileScreen] Firebase signOut completed");
+      } catch (firebaseError) {
+        console.error("[ProfileScreen] Firebase signOut error:", firebaseError);
+      }
+      
+      // 5. Esperar más tiempo para asegurar que todo se ha completado
+      console.log("[ProfileScreen] Preparing for navigation after logout");
+      
+      // Usar el método más directo y definitivo para navegar de vuelta a Login
+      try {
+        // Restablecer el estado de la navegación completamente
+        const resetAction = CommonActions.reset({
+          index: 0,
+          routes: [{ name: 'Login' }]
+        });
+        
+        // Despachar después de un pequeño retraso para asegurar que todos los estados se han actualizado
+        setTimeout(() => {
+          navigation.dispatch(resetAction);
+          console.log("[ProfileScreen] Navigation reset to Login completed");
+        }, 200);
+      } catch (navError) {
+        console.error("[ProfileScreen] Navigation reset error:", navError);
+        
+        // Plan B: Intentar cerrando la sesión de nuevo y navegar con un retraso mayor
+        setTimeout(async () => {
+          try {
+            // Último intento de logout
+            if (firebase.apps.length > 0) {
+              await firebase.auth().signOut();
+            }
+            
+            // Intento alternativo de navegación simple pero efectivo
+            navigation.navigate('Login');
+            console.log("[ProfileScreen] Alternative navigation to Login executed");
+          } catch (altNavError) {
+            console.error("[ProfileScreen] All navigation attempts failed:", altNavError);
+          }
+        }, 500);
+      }
       
     } catch (error) {
-      console.error("[ProfileScreen] Error in main logout process:", error);
+      console.error("[ProfileScreen] Critical error in logout process:", error);
       
-      // Solo mostrar alerta si todavía estamos montados
-      if (isMountedRef.current) {
-        Alert.alert('Error', 'No se pudo cerrar sesión. Intente de nuevo.');
-        setLoading(false);
-      } else {
-        // Si no estamos montados, intentar navegar de todas formas
-        try {
-          navigation.reset({
+      // Último intento de navegación en caso de error general
+      try {
+        navigation.dispatch(
+          CommonActions.reset({
             index: 0,
             routes: [{ name: 'Login' }]
-          });
-        } catch (finalNavError) {
-          console.error("[ProfileScreen] Final navigation attempt failed:", finalNavError);
-        }
+          })
+        );
+      } catch (finalNavError) {
+        console.error("[ProfileScreen] Final navigation attempt failed:", finalNavError);
       }
+    }
+  };
+
+  // Handle account deletion
+  const handleDeleteAccount = async () => {
+    setDeleteAccountModalVisible(false);
+    setLoading(true);
+    try {
+      // Desactivar la bandera de montado para evitar actualizaciones de estado después de desmontar
+      isMountedRef.current = false;
+      
+      const success = await deleteAccount();
+      
+      if (success) {
+        // Navegación a la pantalla de login
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Login' }]
+        });
+      }
+    } catch (error) {
+      console.error('Error al eliminar cuenta:', error);
+      Alert.alert('Error', 'No se pudo eliminar tu cuenta. Inténtalo de nuevo más tarde.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -717,6 +799,20 @@ const ProfileScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
         
+        {/* Danger Zone */}
+        <View style={styles.sectionContainer}>
+          <Text style={[styles.sectionTitle, { color: '#FF3B30' }]}>Gestión de Cuenta</Text>
+          
+          <TouchableOpacity
+            style={[styles.menuItem, { borderColor: '#FFDDDD' }]}
+            onPress={() => setDeleteAccountModalVisible(true)}
+          >
+            <MaterialIcons name="delete-forever" size={24} color="#FF3B30" />
+            <Text style={[styles.menuItemText, { color: '#FF3B30' }]}>Eliminar Cuenta</Text>
+            <MaterialIcons name="chevron-right" size={24} color="#C7C7CC" />
+          </TouchableOpacity>
+        </View>
+        
         {/* Logout Button */}
         <TouchableOpacity
           style={styles.logoutButton}
@@ -796,6 +892,38 @@ const ProfileScreen: React.FC = () => {
                 onPress={handleLogout}
               >
                 <Text style={styles.modalConfirmText}>Cerrar Sesión</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      
+      {/* Delete Account Confirmation Modal */}
+      <Modal
+        visible={deleteAccountModalVisible}
+        transparent
+        animationType="fade"
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={[styles.modalTitle, { color: '#FF3B30' }]}>Eliminar Cuenta</Text>
+            <Text style={styles.modalText}>
+              ¿Estás seguro que deseas eliminar tu cuenta? Esta acción no se puede deshacer y perderás todos tus datos.
+            </Text>
+            
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setDeleteAccountModalVisible(false)}
+              >
+                <Text style={styles.modalCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={[styles.modalConfirmButton, { backgroundColor: '#FF3B30' }]}
+                onPress={handleDeleteAccount}
+              >
+                <Text style={styles.modalConfirmText}>Eliminar</Text>
               </TouchableOpacity>
             </View>
           </View>

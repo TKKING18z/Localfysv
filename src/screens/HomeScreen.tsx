@@ -486,14 +486,27 @@ const HomeScreen: React.FC = () => {
 
   // Optimize the refresh handler to respect network conditions
   const onRefresh = useCallback(async () => {
-    if (isRefreshingRef.current) return;
+    console.log('Pull-to-refresh iniciado');
     
+    // Si ya estamos refrescando, no hacer nada
+    if (isRefreshingRef.current) {
+      console.log('Ya está refrescando, ignorando nueva solicitud');
+      return;
+    }
+    
+    // Actualizar estado UI inmediatamente
     setRefreshing(true);
     isRefreshingRef.current = true;
     
+    console.log('Comenzando refresco de datos');
+    
     try {
+      // Forzar una pequeña espera para que el usuario vea la animación
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       // Reset pagination first
       resetPagination();
+      console.log('Paginación reseteada');
       
       // Only refresh location if enough time has passed or we have none
       const now = Date.now();
@@ -501,29 +514,40 @@ const HomeScreen: React.FC = () => {
         !userLocation || 
         (now - lastLocationRefreshRef.current > LOCATION_REFRESH_INTERVAL);
       
-      const tasks = [refreshBusinesses()];
-      
+      // Primero refrescar ubicación si es necesario (puede afectar a cómo se muestran los negocios)
       if (shouldRefreshLocation) {
-        tasks.push(refreshLocation());
+        console.log('Refrescando ubicación primero');
+        await refreshLocation();
         lastLocationRefreshRef.current = now;
       }
       
-      // Use Promise.all for parallel execution
-      await Promise.all(tasks);
+      console.log('Refrescando negocios');
+      // Ejecutar refreshBusinesses para obtener datos actualizados
+      await refreshBusinesses();
       
-      // Only refresh conversations when connected
+      // Refrescar conversaciones solo si estamos conectados
       if (isConnected) {
+        console.log('Refrescando conversaciones');
         await refreshConversations();
       }
       
       // Update the last data load time
       lastDataLoadTimeRef.current = Date.now();
+      console.log('Refresco completado con éxito');
     } catch (error) {
-      console.error('Error refreshing data:', error);
+      console.error('Error durante el refresco:', error);
+      // Mostrar mensaje de error al usuario
+      Alert.alert(
+        'Error al actualizar',
+        'No se pudieron cargar los datos más recientes. Por favor, intenta de nuevo.',
+        [{ text: 'OK' }]
+      );
     } finally {
+      // Importante: asegurar que el estado se actualice correctamente
       setRefreshing(false);
       
-      // Allow future refreshes after a delay
+      // Pequeña espera antes de permitir otro refresco 
+      // para evitar múltiples tirones accidentales
       setTimeout(() => {
         isRefreshingRef.current = false;
       }, 500);
@@ -740,6 +764,8 @@ const HomeScreen: React.FC = () => {
         onRefresh={onRefresh}
         colors={['#007AFF']}
         tintColor="#007AFF"
+        progressViewOffset={10}
+        progressBackgroundColor="#ffffff"
       />
     ),
     ListFooterComponent: renderFooter,
@@ -750,6 +776,7 @@ const HomeScreen: React.FC = () => {
     maxToRenderPerBatch: 6,
     windowSize: 5,
     initialNumToRender: 6,
+    viewabilityConfigCallbackPairs: viewabilityConfigCallbackPairs.current
   }), [
     displayedBusinesses, 
     renderBusinessItem, 
@@ -986,7 +1013,31 @@ const HomeScreen: React.FC = () => {
           {/* Use standard FlatList for all platforms */}
           {dataReady && displayedBusinesses && displayedBusinesses.length > 0 ? (
             <FlatList
-              {...flatListProps}
+              data={displayedBusinesses}
+              renderItem={renderBusinessItem}
+              keyExtractor={keyExtractor}
+              numColumns={2}
+              onEndReached={onEndReached}
+              onEndReachedThreshold={0.5}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={onRefresh}
+                  colors={['#007AFF']}
+                  tintColor="#007AFF"
+                  progressViewOffset={10}
+                  progressBackgroundColor="#ffffff"
+                />
+              }
+              ListFooterComponent={renderFooter}
+              columnWrapperStyle={columnWrapperStyle}
+              contentContainerStyle={styles.listContent}
+              ListEmptyComponent={!loading ? renderEmptyState : null}
+              removeClippedSubviews={true}
+              maxToRenderPerBatch={6}
+              windowSize={5}
+              initialNumToRender={6}
+              viewabilityConfigCallbackPairs={viewabilityConfigCallbackPairs.current}
             />
           ) : !loading ? (
             renderEmptyState()

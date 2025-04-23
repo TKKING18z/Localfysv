@@ -96,6 +96,7 @@ interface BusinessContextType {
   dataReady: boolean;
   isCacheValid: () => boolean;
   lastCacheUpdate: number;
+  clearBusinessContextState: () => void;
 }
 
 // Create context
@@ -352,9 +353,9 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
   
   // Modify fetchBusinesses to use cache when available
-  const fetchBusinesses = async () => {
+  const fetchBusinesses = async (forceRefresh: boolean = false): Promise<void> => {
     // First check if we have valid cached data and use that first
-    if (businesses.length > 0 && isCacheValid()) {
+    if (businesses.length > 0 && isCacheValid() && !forceRefresh) {
       console.log('Using in-memory business data (already loaded)');
       // Just make sure data is marked as ready
       if (!dataReady) {
@@ -708,7 +709,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
         const initialLoadDelay = Platform.OS === 'ios' ? 500 : 0;
         
         const timer = setTimeout(() => {
-          fetchBusinesses();
+          // No forzar refresh en inicialización
+          fetchBusinesses(false);
         }, initialLoadDelay);
         
         return () => clearTimeout(timer);
@@ -750,6 +752,43 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     return businesses.filter(business => favorites.includes(business.id));
   };
   
+  // Add cleanup method for logout
+  const clearBusinessContextState = useCallback(() => {
+    console.log('Clearing BusinessContext state during logout');
+    
+    // Clear all active listeners
+    Object.values(activeListeners).forEach(unsubscribe => {
+      try {
+        unsubscribe();
+      } catch (error) {
+        console.error('Error unsubscribing from business listener:', error);
+      }
+    });
+    
+    // Reset all state variables
+    setBusinesses([]);
+    setFilteredBusinesses([]);
+    setCategories([]);
+    setSelectedCategory(null);
+    setLoading(false);
+    setError(null);
+    setFavorites([]);
+    setDataReady(false);
+    setLastVisible(null);
+    setHasMoreBusinesses(true);
+    setIsLoadingMore(false);
+    setActiveListeners({});
+    setLastCacheUpdate(0);
+    
+    // Clear the cache
+    try {
+      AsyncStorage.removeItem('businessCache');
+      console.log('Business cache cleared from storage');
+    } catch (error) {
+      console.error('Error clearing business cache:', error);
+    }
+  }, [activeListeners]);
+  
   // Context value
   const value: BusinessContextType = {
     businesses,
@@ -759,7 +798,7 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     setSelectedCategory,
     loading,
     error,
-    refreshBusinesses: fetchBusinesses,
+    refreshBusinesses: () => fetchBusinesses(true),
     toggleFavorite,
     isFavorite,
     favorites,
@@ -772,7 +811,8 @@ export const BusinessProvider: React.FC<{ children: ReactNode }> = ({ children }
     observeBusinesses,
     dataReady,
     isCacheValid,
-    lastCacheUpdate
+    lastCacheUpdate,
+    clearBusinessContextState
   };
   
   return (

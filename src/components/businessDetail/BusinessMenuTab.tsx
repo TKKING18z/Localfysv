@@ -19,15 +19,21 @@ const BusinessMenuTab: React.FC<BusinessMenuTabProps> = ({
   businessName,
 }) => {
   const dimensions = useWindowDimensions();
+  
+  // Debug para verificar si hay elementos en el menú
+  console.log('BusinessMenuTab - menu:', menu?.length || 0, 'menuUrl:', !!menuUrl);
+  if (menu) {
+    console.log('BusinessMenuTab - menu primer elemento:', JSON.stringify(menu[0]));
+  }
 
   return (
     <>
       {(menu || menuUrl) ? (
-        <View style={[styles.card, { paddingBottom: 0 }]}>
+        <View style={styles.card}>
           <Text style={styles.cardSectionTitle}>
             {isTouristAttraction ? 'Planes y Actividades' : 'Menú'}
           </Text>
-          <View style={{ height: dimensions.height * 0.6 }}>
+          <View style={[styles.menuContainer, { height: dimensions.height * 0.8 }]}>
             <MenuViewer 
               menu={menu} 
               menuUrl={menuUrl} 
@@ -66,15 +72,20 @@ const styles = StyleSheet.create({
     elevation: 2,
     borderLeftWidth: 3,
     borderLeftColor: '#007aff',
+    height: '98%', // Aumentar para que ocupe casi toda la pantalla disponible
   },
   cardSectionTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: '#007aff',
     marginBottom: 16,
     paddingBottom: 8,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(0,122,255,0.1)',
+  },
+  menuContainer: {
+    marginBottom: 16,
+    flex: 1,
   },
   emptyCard: {
     backgroundColor: 'white',
