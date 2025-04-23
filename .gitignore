@@ -75,7 +75,6 @@ tmp/
 
 # EAS
 ios/build-*
-eas.json
 
 # Editor directories
 .idea/
