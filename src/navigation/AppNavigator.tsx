@@ -51,9 +51,8 @@ import NotificationsScreen from '../screens/NotificationsScreen';
 import FAQsScreen from '../screens/FAQsScreen';
 import SupportScreen from '../screens/SupportScreen';
 import TermsConditionsScreen from '../screens/TermsConditionsScreen';
-
 // Importar pantalla de Payment
-import PaymentScreen from '../screens/tmp/PaymentScreen';
+import PaymentScreen from '../screens/PaymentScreen';
 
 // Importar pantalla de Cart
 import { CartScreen } from '../screens/CartScreen';
