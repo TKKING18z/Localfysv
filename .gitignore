@@ -62,9 +62,6 @@ android/local.properties
 android/app/debug/
 android/app/release/
 android/captures/
-android/gradlew
-android/gradlew.bat
-android/gradle/
 android/*.iml
 
 # Testing
