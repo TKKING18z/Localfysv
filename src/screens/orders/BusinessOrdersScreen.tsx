@@ -213,6 +213,32 @@ const BusinessOrdersScreen: React.FC = () => {
           onPress: async () => {
             setRefreshing(true);
             const success = await updateOrderStatus(orderId, nextStatus);
+            
+            // If order was successfully updated, update analytics data if it's now paid
+            if (success && nextStatus === 'paid') {
+              try {
+                const db = firebase.firestore();
+                // Get the order document to access its total
+                const orderDoc = await db.collection('orders').doc(orderId).get();
+                if (orderDoc.exists) {
+                  const orderData = orderDoc.data();
+                  const orderTotal = orderData?.total || 0;
+                  const businessId = orderData?.businessId;
+                  
+                  if (businessId && orderTotal > 0) {
+                    // Import analyticsService
+                    const { analyticsService } = require('../../services/analyticsService');
+                    
+                    // Register the order revenue in analytics using the new function
+                    await analyticsService.trackOrderRevenue(businessId, orderTotal);
+                    console.log(`Ingresos actualizados para el pedido ${orderId}: $${orderTotal}`);
+                  }
+                }
+              } catch (error) {
+                console.error('Error actualizando datos analíticos:', error);
+              }
+            }
+            
             setRefreshing(false);
             
             if (!success) {

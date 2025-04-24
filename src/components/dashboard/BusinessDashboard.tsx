@@ -407,7 +407,7 @@ const BusinessDashboard: React.FC<BusinessDashboardProps> = React.memo(({
             />
             <StatisticCard 
               icon="attach-money" 
-              title="Ingresos Est." 
+              title="Ingresos Reales" 
               value={`$${estimatedRevenue}`} 
               trend={analytics.revenueTrend || 0} 
               isCurrency

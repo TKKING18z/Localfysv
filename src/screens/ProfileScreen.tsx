@@ -845,7 +845,17 @@ const ProfileScreen: React.FC = () => {
         
         <TouchableOpacity 
           style={styles.navItemCenter}
-          onPress={() => navigation.navigate('AddBusiness')}
+          onPress={() => {
+            if (profile?.userType === 'Propietario') {
+              navigation.navigate('AddBusiness');
+            } else {
+              Alert.alert(
+                'Acceso restringido',
+                'Esta función solo está disponible para propietarios de negocio. Hazte propietario de negocio en la sección de perfil.',
+                [{ text: 'Entendido', style: 'default' }]
+              );
+            }
+          }}
         >
           <View style={styles.navItemCenterButton}>
             <MaterialIcons name="add" size={28} color="white" />

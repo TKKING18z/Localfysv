@@ -190,6 +190,32 @@ export const trackReview = async (businessId: string, rating: number): Promise<b
   }
 };
 
+// Nueva función para registrar los ingresos de pedidos
+export const trackOrderRevenue = async (businessId: string, total: number): Promise<boolean> => {
+  try {
+    console.log(`Registrando ingresos para negocio ${businessId}, valor: ${total}`);
+    const analyticsRef = firebase.firestore().collection('analytics').doc(businessId);
+    const doc = await analyticsRef.get();
+    
+    // Si no existe, inicializar
+    if (!doc.exists) {
+      await initializeTestAnalytics(businessId);
+    }
+    
+    // Actualizar contadores de ingresos
+    await analyticsRef.update({
+      'revenue.total': firebase.firestore.FieldValue.increment(total),
+      'reservations.value': firebase.firestore.FieldValue.increment(total),
+      'lastUpdated': firebase.firestore.FieldValue.serverTimestamp()
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error tracking order revenue:', error);
+    return false;
+  }
+};
+
 // Función para obtener datos analíticos de negocios
 export const getBusinessesAnalytics = async (businessIds: string[]): Promise<BusinessAnalytics> => {
   try {
@@ -542,5 +568,6 @@ export const analyticsService = {
   initializeTestAnalytics,
   trackBusinessVisit,
   trackReservation,
-  trackReview
+  trackReview,
+  trackOrderRevenue
 };
