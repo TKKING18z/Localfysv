@@ -37,6 +37,10 @@
         "appleId": "tkking66@icloud.com",
         "ascAppId": "6744722165",
         "appleTeamId": "98J3T66N26"
+      },
+      "android": {
+        "track": "production",
+        "releaseStatus": "completed"
       }
     }
   }

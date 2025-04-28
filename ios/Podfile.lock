@@ -41,12 +41,12 @@ PODS:
     - ExpoModulesCore
   - ExpoHaptics (14.0.1):
     - ExpoModulesCore
-  - ExpoImage (1.10.6):
+  - ExpoImage (2.0.7):
     - ExpoModulesCore
-    - SDWebImage (~> 5.17.0)
-    - SDWebImageAVIFCoder (~> 0.10.1)
+    - libavif/libdav1d
+    - SDWebImage (~> 5.19.1)
+    - SDWebImageAVIFCoder (~> 0.11.0)
     - SDWebImageSVGCoder (~> 1.7.0)
-    - SDWebImageWebPCoder (~> 0.13.0)
   - ExpoImageManipulator (13.0.6):
     - EXImageLoader
     - ExpoModulesCore
@@ -107,15 +107,11 @@ PODS:
   - hermes-engine (0.76.9):
     - hermes-engine/Pre-built (= 0.76.9)
   - hermes-engine/Pre-built (0.76.9)
-  - libaom (3.0.0):
-    - libvmaf (>= 2.2.0)
-  - libavif (0.11.1):
-    - libavif/libaom (= 0.11.1)
   - libavif/core (0.11.1)
-  - libavif/libaom (0.11.1):
-    - libaom (>= 2.0.0)
+  - libavif/libdav1d (0.11.1):
     - libavif/core
-  - libvmaf (2.3.1)
+    - libdav1d (>= 0.6.0)
+  - libdav1d (1.2.0)
   - libwebp (1.5.0):
     - libwebp/demux (= 1.5.0)
     - libwebp/mux (= 1.5.0)
@@ -1728,15 +1724,15 @@ PODS:
     - React-logger
     - React-perflogger
     - React-utils (= 0.76.9)
-  - RNCAsyncStorage (1.24.0):
+  - RNCAsyncStorage (1.23.1):
     - React-Core
-  - RNCPicker (2.11.0):
+  - RNCPicker (2.9.0):
     - React-Core
   - RNDateTimePicker (8.2.0):
     - React-Core
   - RNDeviceInfo (14.0.4):
     - React-Core
-  - RNFlashList (1.8.0):
+  - RNFlashList (1.7.3):
     - DoubleConversion
     - glog
     - hermes-engine
@@ -1897,15 +1893,15 @@ PODS:
     - Yoga
   - RNSVG (15.8.0):
     - React-Core
-  - SDWebImage (5.17.0):
-    - SDWebImage/Core (= 5.17.0)
-  - SDWebImage/Core (5.17.0)
-  - SDWebImageAVIFCoder (0.10.1):
-    - libavif (>= 0.11.0)
+  - SDWebImage (5.19.7):
+    - SDWebImage/Core (= 5.19.7)
+  - SDWebImage/Core (5.19.7)
+  - SDWebImageAVIFCoder (0.11.0):
+    - libavif/core (>= 0.11.0)
     - SDWebImage (~> 5.10)
   - SDWebImageSVGCoder (1.7.0):
     - SDWebImage/Core (~> 5.6)
-  - SDWebImageWebPCoder (0.13.0):
+  - SDWebImageWebPCoder (0.14.6):
     - libwebp (~> 1.0)
     - SDWebImage/Core (~> 5.17)
   - SocketRocket (0.7.1)
@@ -2069,9 +2065,8 @@ SPEC REPOS:
     - GoogleSignIn
     - GTMAppAuth
     - GTMSessionFetcher
-    - libaom
     - libavif
-    - libvmaf
+    - libdav1d
     - libwebp
     - lottie-ios
     - SDWebImage
@@ -2324,7 +2319,7 @@ SPEC CHECKSUMS:
   ExpoFileSystem: c8c19bf80d914c83dda3beb8569d7fb603be0970
   ExpoFont: 773955186469acc5108ff569712a2d243857475f
   ExpoHaptics: e01cce0741d68c281853118eb0267f88d42c6b7a
-  ExpoImage: 8cf2d51de3d03b7e984e9b0ba8f19c0c22057001
+  ExpoImage: c37f79e5e97e0a662ed1c4b17363464007da3148
   ExpoImageManipulator: 43c7bb3ecccbe993054d2e9131c8dcbe54f1385b
   ExpoImagePicker: 482b2a6198b365dd18b5a0cb6d4caeec880cb8e1
   ExpoKeepAwake: 2a5f15dd4964cba8002c9a36676319a3394c85c7
@@ -2344,9 +2339,8 @@ SPEC CHECKSUMS:
   GTMAppAuth: f69bd07d68cd3b766125f7e072c45d7340dea0de
   GTMSessionFetcher: 5aea5ba6bd522a239e236100971f10cb71b96ab6
   hermes-engine: 9e868dc7be781364296d6ee2f56d0c1a9ef0bb11
-  libaom: 144606b1da4b5915a1054383c3a4459ccdb3c661
   libavif: 84bbb62fb232c3018d6f1bab79beea87e35de7b7
-  libvmaf: 27f523f1e63c694d14d534cd0fddd2fab0ae8711
+  libdav1d: 23581a4d8ec811ff171ed5e2e05cd27bad64c39f
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
   lottie-ios: a881093fab623c467d3bce374367755c272bdd59
   lottie-react-native: d99d99c0363a27052827d5e2ad9b7b9cfeb801ba
@@ -2410,21 +2404,21 @@ SPEC CHECKSUMS:
   React-utils: 52cb73e127a39fc2d9f02f503b2a7b3b0abd23dd
   ReactCodegen: 31fcff227d0035956575be0c013a2edcc687a53c
   ReactCommon: 78c49c7cf7df16983ebc3c646b4f47398437f2ec
-  RNCAsyncStorage: ec53e44dc3e75b44aa2a9f37618a49c3bc080a7a
-  RNCPicker: 4f6d5e8d107064be32dfc8f1bcb5a3741135db0b
+  RNCAsyncStorage: 826b603ae9c0f88b5ac4e956801f755109fa4d5c
+  RNCPicker: f963e01f78e546a93b98aa201501713dbda14e94
   RNDateTimePicker: 40ffda97d071a98a10fdca4fa97e3977102ccd14
   RNDeviceInfo: feea80a690d2bde1fe51461cf548039258bd03f2
-  RNFlashList: 6803b075d8c3134c1ea3a413bedbf7e3d1736db8
+  RNFlashList: 0a880a902e9cd90316d82576cbb6338c1eb1fae0
   RNGestureHandler: 82c5ab302616348584b7563e06753b288a03fa7e
   RNGoogleSignin: ee2938633d996756819e3212c8e0f7f696b380d0
   RNNotifee: 4a6ee5c7deaf00e005050052d73ee6315dff7ec9
   RNReanimated: 0ef4195cae61084be15ba5f3f888962311bc115f
   RNScreens: 39d31613db654b41925342a10f50252780b839be
   RNSVG: 8b1a777d54096b8c2a0fd38fc9d5a454332bbb4d
-  SDWebImage: 750adf017a315a280c60fde706ab1e552a3ae4e9
-  SDWebImageAVIFCoder: 8348fef6d0ec69e129c66c9fe4d74fbfbf366112
+  SDWebImage: 8a6b7b160b4d710e2a22b6900e25301075c34cb3
+  SDWebImageAVIFCoder: 00310d246aab3232ce77f1d8f0076f8c4b021d90
   SDWebImageSVGCoder: 15a300a97ec1c8ac958f009c02220ac0402e936c
-  SDWebImageWebPCoder: af09429398d99d524cae2fe00f6f0f6e491ed102
+  SDWebImageWebPCoder: e38c0a70396191361d60c092933e22c20d5b1380
   SocketRocket: d4aabe649be1e368d1318fdf28a022d714d65748
   Stripe: cdf416cf2efe286f532a6306de0fcaa0ecc8c71a
   stripe-react-native: 55fbdae947bc2698d55193947fd17872d0eab786

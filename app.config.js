@@ -6,7 +6,7 @@ const config = {
   owner: "marvinzavala",
   version: "1.0.1",
   orientation: "portrait",
-  icon: "./assets/icon.png",
+  icon: "./assets/appicon.png",
   userInterfaceStyle: "light",
   splash: {
     image: "./assets/icon.png",
@@ -25,7 +25,10 @@ const config = {
     }
   },
   android: {
+    // Los valores de package y versionCode serán ignorados porque existe el directorio android/
+    // pero son requeridos por Expo
     package: "com.zalabsdigital.localfy",
+    versionCode: 20,
     adaptiveIcon: {
       foregroundImage: "./assets/adaptive-icon.png",
       backgroundColor: "#ffffff"
@@ -66,6 +69,13 @@ const config = {
       {
         "ios": {
           "useFrameworks": "static"
+        },
+        "android": {
+          // Actualizamos estos valores para que coincidan con build.gradle
+          "compileSdkVersion": 35,
+          "targetSdkVersion": 34,
+          "minSdkVersion": 24,
+          "buildToolsVersion": "35.0.0"
         }
       }
     ]
