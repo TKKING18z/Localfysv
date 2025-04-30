@@ -28,6 +28,7 @@ import { useGoogleAuth, googleAuthService } from '../services/googleAuthService'
 import * as Google from 'expo-auth-session/providers/google';
 import { CommonActions } from '@react-navigation/native';
 import firebase from 'firebase/compat/app';
+import * as AppleAuthentication from 'expo-apple-authentication';
 
 type LoginScreenNavigationProp = NativeStackNavigationProp<RootStackParamList, 'Login'>;
 
@@ -36,7 +37,7 @@ const { width } = Dimensions.get('window');
 const LoginScreen: React.FC = () => {
     const navigation = useNavigation<LoginScreenNavigationProp>();
     // Usar el hook de autenticación actualizado
-    const { login, isGoogleLoading, loading: authLoading, saveSessionData, isNewUser } = useAuth();
+    const { login, isGoogleLoading, loading: authLoading, saveSessionData, isNewUser, isAppleAuthAvailable, signInWithApple } = useAuth();
     
     // Usar el hook de autenticación de Google
     const { request, response, promptAsync } = useGoogleAuth();
@@ -53,6 +54,9 @@ const LoginScreen: React.FC = () => {
     const slideAnim = useRef(new Animated.Value(30)).current;
     const scaleAnim = useRef(new Animated.Value(0.9)).current;
     const buttonAnim = useRef(new Animated.Value(1)).current;
+    
+    // Handle Sign in with Apple
+    const [isAppleLoading, setIsAppleLoading] = useState(false);
     
     // Verificar si hay una sesión guardada al iniciar
     useEffect(() => {
@@ -219,6 +223,25 @@ const LoginScreen: React.FC = () => {
         navigation.navigate('TermsConditions' as any);
     };
 
+    // Handle Sign in with Apple
+    const handleAppleLogin = async () => {
+        try {
+            setIsAppleLoading(true);
+            console.log("Iniciando proceso de login con Apple");
+            
+            const result = await signInWithApple();
+            
+            if (!result.success && result.error && result.error !== "Sign in with Apple was canceled") {
+                Alert.alert("Error", result.error);
+            }
+        } catch (error: any) {
+            console.error("Error al intentar login con Apple:", error);
+            Alert.alert("Error", "No se pudo iniciar sesión con Apple");
+        } finally {
+            setIsAppleLoading(false);
+        }
+    };
+
     return (
         <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -365,7 +388,7 @@ const LoginScreen: React.FC = () => {
                         <TouchableOpacity 
                             style={styles.googleButton}
                             onPress={handleGoogleLogin}
-                            disabled={isGoogleLoading}
+                            disabled={isGoogleLoading || isAppleLoading}
                         >
                             {isGoogleLoading ? (
                                 <ActivityIndicator color="#007AFF" size="small" />
@@ -374,13 +397,24 @@ const LoginScreen: React.FC = () => {
                                     <View style={styles.googleIconContainer}>
                                         <Image 
                                             source={googleLogo}
-                                            style={{ width: 32, height: 32, resizeMode: 'contain' }} // Increased size
+                                            style={{ width: 32, height: 32, resizeMode: 'contain' }}
                                         />
                                     </View>
                                     <Text style={styles.socialButtonText}>Continuar con Google</Text>
                                 </>
                             )}
                         </TouchableOpacity>
+                        
+                        {/* Botón de Apple (solo disponible en iOS) */}
+                        {Platform.OS === 'ios' && isAppleAuthAvailable && (
+                            <AppleAuthentication.AppleAuthenticationButton
+                                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                                buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
+                                cornerRadius={12}
+                                style={styles.appleButton}
+                                onPress={handleAppleLogin}
+                            />
+                        )}
                     </Animated.View>
                     
                     <Animated.View
@@ -631,6 +665,17 @@ const styles = StyleSheet.create({
         color: '#007AFF',
         fontWeight: '600',
         textDecorationLine: 'underline',
+    },
+    // Botón de Apple
+    appleButton: {
+        width: '100%',
+        height: 56,
+        marginTop: 10,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 1,
     },
 });
 

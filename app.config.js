@@ -22,7 +22,8 @@ const config = {
     infoPlist: {
       NSLocationWhenInUseUsageDescription: "Localfy uses your location to find nearby businesses.",
       NSUserTrackingUsageDescription: "This allows us to provide personalized ads tailored to your interests."
-    }
+    },
+    usesAppleSignIn: true
   },
   android: {
     // Los valores de package y versionCode serán ignorados porque existe el directorio android/

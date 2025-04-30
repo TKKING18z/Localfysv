@@ -3,8 +3,9 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { firebaseService } from '../services/firebaseService';
+import { appleAuthService } from '../services/appleAuthService';
 
 // Definición de tipo para el servicio de notificaciones
 interface NotificationService {
@@ -29,7 +30,7 @@ interface SessionData {
   displayName: string | null;
   photoURL: string | null;
   lastLogin: string;
-  authMethod: 'email' | 'google';
+  authMethod: 'email' | 'google' | 'apple';
 }
 
 // Interfaz para el resultado del registro
@@ -45,16 +46,19 @@ interface AuthContextType {
   isLoading: boolean;
   loading: boolean;
   isGoogleLoading: boolean;
+  isAppleAuthAvailable: boolean;
+  isAppleLoading: boolean;
   login: (email: string, password: string) => Promise<boolean>;
   signUp: (email: string, password: string, name: string, role: string) => Promise<SignUpResult>;
   logout: () => Promise<void>;
   resetPassword: (email: string) => Promise<boolean>;
   updateProfile: (data: any) => Promise<boolean>;
-  saveSessionData: (firebaseUser: firebase.User, authMethod: 'email' | 'google') => Promise<SessionData | null>;
+  saveSessionData: (firebaseUser: firebase.User, authMethod: 'email' | 'google' | 'apple') => Promise<SessionData | null>;
   restoreSession: () => Promise<SessionData | null>;
   isNewUser: boolean;
   setIsNewUser: (value: boolean) => void;
   deleteAccount: () => Promise<boolean>;
+  signInWithApple: () => Promise<{success: boolean, user?: firebase.User, error?: string}>;
 }
 
 // Crear el contexto
@@ -75,10 +79,24 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [loading, setLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isAppleLoading, setIsAppleLoading] = useState(false);
+  const [isAppleAuthAvailable, setIsAppleAuthAvailable] = useState(false);
   const [isNewUser, setIsNewUser] = useState(false);
   
+  // Check if Apple Authentication is available
+  useEffect(() => {
+    const checkAppleAuthAvailability = async () => {
+      if (Platform.OS === 'ios') {
+        const available = await appleAuthService.isAvailable();
+        setIsAppleAuthAvailable(available);
+      }
+    };
+
+    checkAppleAuthAvailability();
+  }, []);
+  
   // Función para guardar los datos de sesión
-  const saveSessionData = async (firebaseUser: firebase.User, authMethod: 'email' | 'google') => {
+  const saveSessionData = async (firebaseUser: firebase.User, authMethod: 'email' | 'google' | 'apple') => {
     try {
       // Check if user is new before saving session
       await checkIfUserIsNew(firebaseUser.uid);
@@ -514,12 +532,49 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     }
   };
 
+  // Function to sign in with Apple
+  const signInWithApple = async () => {
+    if (!isAppleAuthAvailable) {
+      return { success: false, error: "Apple authentication is not available on this device" };
+    }
+    
+    try {
+      setIsAppleLoading(true);
+      const result = await appleAuthService.signInWithApple();
+      
+      if (result.success && result.user) {
+        // Mark user as new if needed
+        await checkIfUserIsNew(result.user.uid);
+        
+        // Update user state
+        const userToSet = result.user;
+        setTimeout(() => {
+          setUser(userToSet);
+        }, 0);
+        
+        // Save session data
+        await saveSessionData(userToSet, 'apple');
+        
+        return { success: true, user: result.user };
+      }
+      
+      return { success: false, error: result.error || "Apple authentication failed" };
+    } catch (error: any) {
+      console.error("Error in Apple sign in:", error);
+      return { success: false, error: error.message };
+    } finally {
+      setIsAppleLoading(false);
+    }
+  };
+
   // Valores del contexto
   const value = {
     user,
     isLoading,
     loading: isLoading,
     isGoogleLoading,
+    isAppleAuthAvailable,
+    isAppleLoading,
     login,
     signUp,
     logout,
@@ -529,7 +584,8 @@ export const AuthProvider: React.FC<{children: ReactNode}> = ({ children }) => {
     restoreSession,
     isNewUser,
     setIsNewUser,
-    deleteAccount
+    deleteAccount,
+    signInWithApple
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

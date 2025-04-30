@@ -30,27 +30,14 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
   const totalImages = existingImages.length + selectedImages.length;
   const canAddMore = totalImages < maxImages;
   
-  const requestPermissions = useCallback(async () => {
-    try {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Permisos necesarios',
-          'Necesitamos acceso a tu galería para seleccionar imágenes.'
-        );
-        return false;
-      }
-      return true;
-    } catch (error) {
-      console.error('Error requesting permissions:', error);
-      Alert.alert('Error', 'No se pudieron solicitar los permisos');
-      return false;
-    }
-  }, []);
-  
   const pickImages = useCallback(async () => {
-    const hasPermission = await requestPermissions();
-    if (!hasPermission) return;
+    if (!canAddMore) {
+      Alert.alert(
+        'Límite alcanzado',
+        `Solo puedes subir un máximo de ${maxImages} imágenes.`
+      );
+      return;
+    }
     
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -70,22 +57,13 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({
       console.error('Error picking images:', error);
       Alert.alert('Error', 'No se pudieron cargar las imágenes');
     }
-  }, [maxImages, onImagesSelected, requestPermissions, totalImages]);
+  }, [maxImages, onImagesSelected, canAddMore, totalImages]);
   
   const takePhoto = useCallback(async () => {
     if (!canAddMore) {
       Alert.alert(
         'Límite alcanzado',
         `Solo puedes subir un máximo de ${maxImages} imágenes.`
-      );
-      return;
-    }
-    
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert(
-        'Permisos necesarios',
-        'Necesitamos acceso a tu cámara para tomar fotos.'
       );
       return;
     }

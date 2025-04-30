@@ -10,10 +10,10 @@
 		13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB01A68108700A75B9A /* AppDelegate.mm */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		13B07FC11A68108700A75B9A /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB71A68108700A75B9A /* main.m */; };
-		2E5E706412604021265F0E78 /* Pods_Localfy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9385B06DF8A9269CDD10593B /* Pods_Localfy.framework */; };
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		B18059E884C0ABDD17F3DC3D /* ExpoModulesProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC715A2D49A985799AEE119 /* ExpoModulesProvider.swift */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
+		BED35B90626D8EECFA6AD9F5 /* Pods_Localfy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = B49E883417780427D828DEA4 /* Pods_Localfy.framework */; };
 		D1518D1CB108494989673EB0 /* noop-file.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E98F047152F4BD2914D79D9 /* noop-file.swift */; };
 		DC36ECA53F81860C4B0A6712 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 576ED0F29EB67A336E07C0CC /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
@@ -25,12 +25,12 @@
 		13B07FB51A68108700A75B9A /* Images.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Images.xcassets; path = Localfy/Images.xcassets; sourceTree = "<group>"; };
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = Localfy/Info.plist; sourceTree = "<group>"; };
 		13B07FB71A68108700A75B9A /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = main.m; path = Localfy/main.m; sourceTree = "<group>"; };
+		347561A1C79293E0AF9A221D /* Pods-Localfy.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Localfy.release.xcconfig"; path = "Target Support Files/Pods-Localfy/Pods-Localfy.release.xcconfig"; sourceTree = "<group>"; };
+		3BC45897A1CF60FA21035C73 /* Pods-Localfy.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Localfy.debug.xcconfig"; path = "Target Support Files/Pods-Localfy/Pods-Localfy.debug.xcconfig"; sourceTree = "<group>"; };
 		576ED0F29EB67A336E07C0CC /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; name = PrivacyInfo.xcprivacy; path = Localfy/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-		6C2E3173556A471DD304B334 /* Pods-Localfy.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Localfy.debug.xcconfig"; path = "Target Support Files/Pods-Localfy/Pods-Localfy.debug.xcconfig"; sourceTree = "<group>"; };
-		7A4D352CD337FB3A3BF06240 /* Pods-Localfy.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Localfy.release.xcconfig"; path = "Target Support Files/Pods-Localfy/Pods-Localfy.release.xcconfig"; sourceTree = "<group>"; };
 		7E98F047152F4BD2914D79D9 /* noop-file.swift */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.swift; name = "noop-file.swift"; path = "Localfy/noop-file.swift"; sourceTree = "<group>"; };
-		9385B06DF8A9269CDD10593B /* Pods_Localfy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Localfy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = SplashScreen.storyboard; path = Localfy/SplashScreen.storyboard; sourceTree = "<group>"; };
+		B49E883417780427D828DEA4 /* Pods_Localfy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Localfy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		BB2F792C24A3F905000567C9 /* Expo.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; path = Expo.plist; sourceTree = "<group>"; };
 		EC06965FB9A0442CAD12066C /* Localfy-Bridging-Header.h */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 4; includeInIndex = 0; lastKnownFileType = sourcecode.c.h; name = "Localfy-Bridging-Header.h"; path = "Localfy/Localfy-Bridging-Header.h"; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
@@ -42,7 +42,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				2E5E706412604021265F0E78 /* Pods_Localfy.framework in Frameworks */,
+				BED35B90626D8EECFA6AD9F5 /* Pods_Localfy.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,7 +70,7 @@
 			isa = PBXGroup;
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
-				9385B06DF8A9269CDD10593B /* Pods_Localfy.framework */,
+				B49E883417780427D828DEA4 /* Pods_Localfy.framework */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -125,8 +125,8 @@
 		D65327D7A22EEC0BE12398D9 /* Pods */ = {
 			isa = PBXGroup;
 			children = (
-				6C2E3173556A471DD304B334 /* Pods-Localfy.debug.xcconfig */,
-				7A4D352CD337FB3A3BF06240 /* Pods-Localfy.release.xcconfig */,
+				3BC45897A1CF60FA21035C73 /* Pods-Localfy.debug.xcconfig */,
+				347561A1C79293E0AF9A221D /* Pods-Localfy.release.xcconfig */,
 			);
 			path = Pods;
 			sourceTree = "<group>";
@@ -146,14 +146,14 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 13B07F931A680F5B00A75B9A /* Build configuration list for PBXNativeTarget "Localfy" */;
 			buildPhases = (
-				08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */,
+				581ED3194CD568FCE74FCF9F /* [CP] Check Pods Manifest.lock */,
 				D5AAEED8BE82FCFFD86F284C /* [Expo] Configure project */,
 				13B07F871A680F5B00A75B9A /* Sources */,
 				13B07F8C1A680F5B00A75B9A /* Frameworks */,
 				13B07F8E1A680F5B00A75B9A /* Resources */,
 				00DD1BFF1BD5951E006B06BC /* Bundle React Native code and images */,
-				800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */,
-				A46464086A2B3A4A4A971164 /* [CP] Embed Pods Frameworks */,
+				8D3314623F8373A9CA8CD71A /* [CP] Embed Pods Frameworks */,
+				5E471D8E8D40DADF689D509D /* [CP] Copy Pods Resources */,
 			);
 			buildRules = (
 			);
@@ -225,7 +225,7 @@
 			shellPath = /bin/sh;
 			shellScript = "if [[ -f \"$PODS_ROOT/../.xcode.env\" ]]; then\n  source \"$PODS_ROOT/../.xcode.env\"\nfi\nif [[ -f \"$PODS_ROOT/../.xcode.env.local\" ]]; then\n  source \"$PODS_ROOT/../.xcode.env.local\"\nfi\n\n# The project root by default is one level up from the ios directory\nexport PROJECT_ROOT=\"$PROJECT_DIR\"/..\n\nif [[ \"$CONFIGURATION\" = *Debug* ]]; then\n  export SKIP_BUNDLING=1\nfi\nif [[ -z \"$ENTRY_FILE\" ]]; then\n  # Set the entry JS file using the bundler's entry resolution.\n  export ENTRY_FILE=\"$(\"$NODE_BINARY\" -e \"require('expo/scripts/resolveAppEntry')\" \"$PROJECT_ROOT\" ios absolute | tail -n 1)\"\nfi\n\nif [[ -z \"$CLI_PATH\" ]]; then\n  # Use Expo CLI\n  export CLI_PATH=\"$(\"$NODE_BINARY\" --print \"require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })\")\"\nfi\nif [[ -z \"$BUNDLE_COMMAND\" ]]; then\n  # Default Expo CLI command for bundling\n  export BUNDLE_COMMAND=\"export:embed\"\nfi\n\n# Source .xcode.env.updates if it exists to allow\n# SKIP_BUNDLING to be unset if needed\nif [[ -f \"$PODS_ROOT/../.xcode.env.updates\" ]]; then\n  source \"$PODS_ROOT/../.xcode.env.updates\"\nfi\n# Source local changes to allow overrides\n# if needed\nif [[ -f \"$PODS_ROOT/../.xcode.env.local\" ]]; then\n  source \"$PODS_ROOT/../.xcode.env.local\"\nfi\n\n`\"$NODE_BINARY\" --print \"require('path').dirname(require.resolve('react-native/package.json')) + '/scripts/react-native-xcode.sh'\"`\n\n";
 		};
-		08A4A3CD28434E44B6B9DE2E /* [CP] Check Pods Manifest.lock */ = {
+		581ED3194CD568FCE74FCF9F /* [CP] Check Pods Manifest.lock */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -247,7 +247,7 @@
 			shellScript = "diff \"${PODS_PODFILE_DIR_PATH}/Podfile.lock\" \"${PODS_ROOT}/Manifest.lock\" > /dev/null\nif [ $? != 0 ] ; then\n    # print error to STDERR\n    echo \"error: The sandbox is not in sync with the Podfile.lock. Run 'pod install' or update your CocoaPods installation.\" >&2\n    exit 1\nfi\n# This output is used by Xcode 'outputs' to avoid re-running this script phase.\necho \"SUCCESS\" > \"${SCRIPT_OUTPUT_FILE_0}\"\n";
 			showEnvVarsInLog = 0;
 		};
-		800E24972A6A228C8D4807E9 /* [CP] Copy Pods Resources */ = {
+		5E471D8E8D40DADF689D509D /* [CP] Copy Pods Resources */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -270,7 +270,6 @@
 				"${PODS_CONFIGURATION_BUILD_DIR}/RNDeviceInfo/RNDeviceInfoPrivacyInfo.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-Core/React-Core_privacy.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/React-cxxreact/React-cxxreact_privacy.bundle",
-				"${PODS_CONFIGURATION_BUILD_DIR}/SDWebImage/SDWebImage.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/Stripe/StripeBundle.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/StripeCore/StripeCoreBundle.bundle",
 				"${PODS_CONFIGURATION_BUILD_DIR}/StripeFinancialConnections/StripeFinancialConnectionsBundle.bundle",
@@ -303,7 +302,6 @@
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/RNDeviceInfoPrivacyInfo.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-Core_privacy.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/React-cxxreact_privacy.bundle",
-				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/SDWebImage.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeBundle.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeCoreBundle.bundle",
 				"${TARGET_BUILD_DIR}/${UNLOCALIZED_RESOURCES_FOLDER_PATH}/StripeFinancialConnectionsBundle.bundle",
@@ -323,7 +321,7 @@
 			shellScript = "\"${PODS_ROOT}/Target Support Files/Pods-Localfy/Pods-Localfy-resources.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		A46464086A2B3A4A4A971164 /* [CP] Embed Pods Frameworks */ = {
+		8D3314623F8373A9CA8CD71A /* [CP] Embed Pods Frameworks */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -379,7 +377,7 @@
 /* Begin XCBuildConfiguration section */
 		13B07F941A680F5B00A75B9A /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 6C2E3173556A471DD304B334 /* Pods-Localfy.debug.xcconfig */;
+			baseConfigurationReference = 3BC45897A1CF60FA21035C73 /* Pods-Localfy.debug.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;
@@ -412,7 +410,7 @@
 		};
 		13B07F951A680F5B00A75B9A /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = 7A4D352CD337FB3A3BF06240 /* Pods-Localfy.release.xcconfig */;
+			baseConfigurationReference = 347561A1C79293E0AF9A221D /* Pods-Localfy.release.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CLANG_ENABLE_MODULES = YES;

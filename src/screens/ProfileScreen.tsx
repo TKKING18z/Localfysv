@@ -360,15 +360,7 @@ const ProfileScreen: React.FC = () => {
   // Función para seleccionar y subir foto de perfil
   const handleChangePhoto = async () => {
     try {
-      // Solicitar permisos de galería
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert('Permiso requerido', 'Necesitamos acceso a tu galería para seleccionar una foto.');
-        return;
-      }
-      
-      // Abrir selector de imágenes
+      // Abrir selector de imágenes directamente sin solicitar permisos anticipadamente
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,

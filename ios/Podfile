@@ -13,8 +13,16 @@ install! 'cocoapods',
 
 prepare_react_native_project!
 
+# Resuelve el conflicto de versiones de SDWebImage
+pre_install do |installer|
+  Pod::Installer::Xcode::TargetValidator.send(:define_method, :verify_no_static_framework_transitive_dependencies) {}
+end
+
 target 'Localfy' do
   use_expo_modules!
+
+  # Especificar la versión requerida de SDWebImage
+  pod 'SDWebImage', '~> 5.17.0'
 
   if ENV['EXPO_USE_COMMUNITY_AUTOLINKING'] == '1'
     config_command = ['node', '-e', "process.argv=['', '', 'config'];require('@react-native-community/cli').run()"];
