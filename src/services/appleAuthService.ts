@@ -7,9 +7,20 @@ import firebase from 'firebase/compat/app';
 import 'firebase/compat/auth';
 import 'firebase/compat/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
 // Storage key for Apple auth data
 const APPLE_AUTH_STORAGE_KEY = 'apple_auth_data';
+
+// Generate a random string for nonce
+const generateNonce = (length: number = 32): string => {
+  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += charset.charAt(Math.floor(Math.random() * charset.length));
+  }
+  return result;
+};
 
 export const appleAuthService = {
   // Check if Apple Authentication is available on the device
@@ -20,11 +31,21 @@ export const appleAuthService = {
   // Sign in with Apple
   signInWithApple: async () => {
     try {
+      // Generate a random nonce
+      const rawNonce = generateNonce();
+      // Hash the nonce with SHA256
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce
+      );
+      
+      // Request authentication from Apple
       const credential = await AppleAuthentication.signInAsync({
         requestedScopes: [
           AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
           AppleAuthentication.AppleAuthenticationScope.EMAIL,
         ],
+        nonce: hashedNonce,
       });
       
       // After Apple Authentication
@@ -35,15 +56,15 @@ export const appleAuthService = {
           throw new Error('No identity token provided by Apple');
         }
 
-        // Create Firebase credential
+        // Create Firebase credential properly according to Firebase docs
         const provider = new firebase.auth.OAuthProvider('apple.com');
-        const firebaseCredential = provider.credential({
+        const appleCredential = provider.credential({
           idToken: identityToken,
-          rawNonce: credential.state || undefined, // Handle null case
+          rawNonce: rawNonce
         });
 
         // Sign in to Firebase with credential
-        const userCredential = await firebase.auth().signInWithCredential(firebaseCredential);
+        const userCredential = await firebase.auth().signInWithCredential(appleCredential);
         
         if (userCredential.user) {
           // Handle user name if this is the first sign-in

@@ -6,7 +6,7 @@ const config = {
   owner: "marvinzavala",
   version: "1.0.1",
   orientation: "portrait",
-  icon: "./assets/appicon.png",
+  icon: "./assets/appstore.png",
   userInterfaceStyle: "light",
   splash: {
     image: "./assets/icon.png",
